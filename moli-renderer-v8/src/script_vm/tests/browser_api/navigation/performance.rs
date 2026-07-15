@@ -624,6 +624,13 @@ fn performance_root_slots_ignore_reflection_and_spoofing() {
                   && descriptor.configurable === true
                   && !Object.prototype.hasOwnProperty.call(receiver, name);
               };
+              const capture = callback => {
+                try {
+                  return String(callback());
+                } catch (error) {
+                  return error.name;
+                }
+              };
               const timing = performance.timing;
               const navigation = performance.navigation;
               const eventCounts = performance.eventCounts;
