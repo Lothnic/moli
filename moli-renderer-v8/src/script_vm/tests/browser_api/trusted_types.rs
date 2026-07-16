@@ -202,6 +202,86 @@ fn trusted_type_factory_interface_exposes_stable_branded_empty_values() {
 }
 
 #[test]
+fn trusted_type_factory_get_attribute_type_reuses_attribute_sink_classification() {
+    let mut vm = new_storage_test_vm("https://trusted-type-attribute-types.test/");
+
+    let result = vm
+        .eval(
+            r#"
+(() => {
+  const HTML = "http://www.w3.org/1999/xhtml";
+  const SVG = "http://www.w3.org/2000/svg";
+  const MATHML = "http://www.w3.org/1998/Math/MathML";
+  const XLINK = "http://www.w3.org/1999/xlink";
+  const OTHER = "https://example.test/namespace";
+  const type = (...args) => trustedTypes.getAttributeType(...args);
+  const errorName = callback => {
+    try {
+      callback();
+      return "none";
+    } catch (error) {
+      return error.constructor.name;
+    }
+  };
+  const descriptor = Object.getOwnPropertyDescriptor(
+    TrustedTypePolicyFactory.prototype,
+    "getAttributeType"
+  );
+
+  return JSON.stringify({
+    interface: [
+      typeof descriptor.value,
+      descriptor.value.name,
+      descriptor.value.length,
+      descriptor.enumerable,
+      descriptor.configurable,
+      Object.hasOwn(trustedTypes, "getAttributeType")
+    ],
+    htmlDefaults: [
+      type("script", "src"),
+      type("SCRIPT", "SRC", undefined, undefined),
+      type("script", "src", null, null),
+      type("script", "src", "", ""),
+      type("script", "src", HTML, ""),
+      type("ſcript", "src"),
+      type("script", "ſrc")
+    ],
+    urls: [
+      type("embed", "src"),
+      type("object", "data"),
+      type("object", "codebase"),
+      type("script", "href"),
+      type("script", "href", SVG),
+      type("SCRIPT", "HREF", SVG, XLINK),
+      type("script", "href", SVG, OTHER),
+      type("script", "href", SVG.toUpperCase())
+    ],
+    handlers: [
+      type("div", "onclick"),
+      type("g", "ondblclick", SVG),
+      type("mrow", "onmousedown", MATHML),
+      type("div", "onclick", HTML, OTHER),
+      type("foo", "onmouseup", OTHER),
+      type("div", "ondoesnotexist")
+    ],
+    errors: [
+      errorName(() => type()),
+      errorName(() => type("script")),
+      errorName(() => descriptor.value.call({}, "script", "src"))
+    ]
+  });
+})()
+"#,
+        )
+        .expect("TrustedTypePolicyFactory getAttributeType probe should evaluate");
+
+    assert_eq!(
+        result,
+        r#"{"interface":["function","getAttributeType",2,true,true,false],"htmlDefaults":["TrustedScriptURL","TrustedScriptURL","TrustedScriptURL","TrustedScriptURL","TrustedScriptURL",null,null],"urls":["TrustedScriptURL","TrustedScriptURL","TrustedScriptURL",null,"TrustedScriptURL","TrustedScriptURL",null,null],"handlers":["TrustedScript","TrustedScript","TrustedScript",null,null,null],"errors":["TypeError","TypeError","TypeError"]}"#
+    );
+}
+
+#[test]
 fn trusted_type_factory_default_policy_getter_tracks_the_branded_policy() {
     let mut vm = new_storage_test_vm("https://trusted-type-factory-default-policy.test/");
 
@@ -504,6 +584,166 @@ fn document_parse_html_unsafe_gates_converted_union_source() {
 }
 
 #[test]
+fn dom_parser_gates_converted_union_source_after_webidl_argument_conversion() {
+    let mut vm = new_storage_test_vm("https://dom-parser-trusted-types.test/");
+    vm.set_response_content_security_policies(&["require-trusted-types-for 'script'".to_owned()]);
+
+    let result = vm
+        .eval(
+            r#"
+(() => {
+  const errorName = callback => {
+    try {
+      callback();
+      return "none";
+    } catch (error) {
+      return error && error.name;
+    }
+  };
+  const parser = new DOMParser();
+  const custom = trustedTypes.createPolicy("dom-parser-custom", {
+    createHTML: value => value
+  });
+  const blocked = [
+    errorName(() => parser.parseFromString("<p>blocked</p>", "text/html")),
+    errorName(() => parser.parseFromString(null, "text/html")),
+    errorName(() => parser.parseFromString("<root/>", "application/xml"))
+  ];
+  const accepted = [
+    parser.parseFromString(
+      custom.createHTML("<main>trusted</main>"),
+      "text/html"
+    ).body.innerText,
+    parser.parseFromString(
+      custom.createHTML("<root/>"),
+      "application/xml"
+    ).documentElement.tagName
+  ];
+
+  let sourceConversions = 0;
+  const defaultCalls = [];
+  trustedTypes.createPolicy("default", {
+    createHTML: (value, type, sink) => {
+      defaultCalls.push([value, type, sink]);
+      return value === "source" ? "<p>default</p>" : value;
+    }
+  });
+  const source = {
+    toString() {
+      sourceConversions += 1;
+      return "source";
+    }
+  };
+  const defaultValues = [
+    parser.parseFromString(source, "text/html").body.innerText,
+    parser.parseFromString(null, "text/html").body.innerText,
+    parser.parseFromString("<root/>", "application/xml").documentElement.tagName
+  ];
+  const callsBeforeInvalidType = defaultCalls.length;
+  const invalidType = errorName(() => parser.parseFromString(source, "TEXT/html"));
+  const invalidTypeSkippedPolicy = defaultCalls.length === callsBeforeInvalidType;
+
+  return JSON.stringify({
+    blocked,
+    accepted,
+    defaultValues,
+    sourceConversions,
+    invalidType,
+    invalidTypeSkippedPolicy,
+    symbolSource: errorName(() => parser.parseFromString(Symbol(), "text/html")),
+    defaultCalls
+  });
+})()
+"#,
+        )
+        .expect("DOMParser TrustedHTML union probe should evaluate");
+
+    assert_eq!(
+        result,
+        r#"{"blocked":["TypeError","TypeError","TypeError"],"accepted":["trusted","root"],"defaultValues":["default","null","root"],"sourceConversions":2,"invalidType":"TypeError","invalidTypeSkippedPolicy":true,"symbolSource":"TypeError","defaultCalls":[["source","TrustedHTML","DOMParser parseFromString"],["null","TrustedHTML","DOMParser parseFromString"],["<root/>","TrustedHTML","DOMParser parseFromString"]]}"#
+    );
+}
+
+#[test]
+fn document_exec_command_gates_only_insert_html_values() {
+    let mut vm = new_storage_test_vm("https://exec-command-trusted-types.test/");
+    vm.set_response_content_security_policies(&["require-trusted-types-for 'script'".to_owned()]);
+
+    let result = vm
+        .eval(
+            r#"
+(() => {
+  const errorName = callback => {
+    try {
+      callback();
+      return "none";
+    } catch (error) {
+      return error && error.name;
+    }
+  };
+  const root = document.documentElement || document.appendChild(document.createElement("html"));
+  const body = document.body || root.appendChild(document.createElement("body"));
+  const input = document.createElement("input");
+  body.append(input);
+  input.focus();
+
+  const blocked = [
+    errorName(() => document.execCommand("insertHTML", false, "<b>blocked</b>")),
+    errorName(() => document.execCommand("InSeRtHtMl", false, null))
+  ];
+  const unprotected = [
+    errorName(() => document.execCommand("insertHTML")),
+    errorName(() => document.execCommand("insertHTML", false, undefined)),
+    errorName(() => document.execCommand("paste", false, "<b>plain</b>")),
+    errorName(() => document.execCommand("insertText", false, "plain"))
+  ];
+
+  input.value = "";
+  const custom = trustedTypes.createPolicy("exec-command-custom", {
+    createHTML: value => value
+  });
+  const trustedReturned = document.execCommand(
+    "insertHTML",
+    false,
+    custom.createHTML("<b>trusted</b>")
+  );
+  const trustedValue = input.value;
+
+  let sourceConversions = 0;
+  const defaultCalls = [];
+  trustedTypes.createPolicy("default", {
+    createHTML: (value, type, sink) => {
+      defaultCalls.push([value, type, sink]);
+      return "<b>default</b>";
+    }
+  });
+  input.value = "";
+  const defaultReturned = document.execCommand("insertHTML", false, {
+    toString() {
+      sourceConversions += 1;
+      return "<i>original</i>";
+    }
+  });
+
+  return JSON.stringify({
+    blocked,
+    unprotected,
+    trusted: [trustedReturned, trustedValue],
+    defaulted: [defaultReturned, input.value, sourceConversions],
+    defaultCalls
+  });
+})()
+"#,
+        )
+        .expect("Document.execCommand TrustedHTML sink probe should evaluate");
+
+    assert_eq!(
+        result,
+        r#"{"blocked":["TypeError","TypeError"],"unprotected":["none","none","none","none"],"trusted":[true,"trusted"],"defaulted":[true,"default",1],"defaultCalls":[["<i>original</i>","TrustedHTML","Document execCommand"]]}"#
+    );
+}
+
+#[test]
 fn document_write_gates_concatenated_union_values_before_writeln_newline() {
     let mut vm = new_storage_test_vm("https://document-write-trusted-types.test/");
     vm.set_response_content_security_policies(&["require-trusted-types-for 'script'".to_owned()]);
@@ -523,7 +763,7 @@ fn document_write_gates_concatenated_union_values_before_writeln_newline() {
   const custom = trustedTypes.createPolicy("document-write-custom", {
     createHTML: value => `(${value})`
   });
-  const doc = new DOMParser().parseFromString("<body></body>", "text/html");
+  const doc = new DOMParser().parseFromString(trustedTypes.emptyHTML, "text/html");
   const replacementDoc = new DOMParser().parseFromString(
     custom.createHTML("seed"),
     "text/html"
@@ -1397,6 +1637,117 @@ fn url_attribute_writes_enforce_the_non_iframe_trusted_script_url_sink_table() {
     assert_eq!(
         result,
         r#"{"trustedValues":["script.js","script-ns.js","svg.js","svg-xlink.js","embed.js","object-data.js","object-codebase.js"],"rejected":[true,true,true,true,true,true,true],"ordinary":["namespaced","uppercase","plain-div"],"defaultValues":["safe-default-html","safe-default-svg","safe-default-object"],"defaultCalls":[["default-html","TrustedScriptURL","HTMLScriptElement src"],["default-svg","TrustedScriptURL","SVGScriptElement href"],["default-object","TrustedScriptURL","HTMLObjectElement codebase"]]}"#
+    );
+}
+
+#[test]
+fn svg_script_href_base_val_uses_the_owner_reflected_trusted_script_url_sink() {
+    let mut vm = new_storage_test_vm("https://svg-script-href-trusted-types.test/");
+    vm.set_response_content_security_policies(&["require-trusted-types-for 'script'".to_owned()]);
+
+    let result = vm
+        .eval(
+            r#"
+(() => {
+  const violations = [];
+  document.addEventListener("securitypolicyviolation", event => {
+    violations.push({
+      blockedURI: event.blockedURI,
+      effectiveDirective: event.effectiveDirective,
+      sample: event.sample
+    });
+  });
+  globalThis.__svgScriptHrefViolations = violations;
+
+  const svgScript = document.createElementNS("http://www.w3.org/2000/svg", "script");
+  const href = svgScript.href;
+  let illegalConstructor = false;
+  try {
+    new SVGAnimatedString();
+  } catch (error) {
+    illegalConstructor = error instanceof TypeError;
+  }
+  let plainRejected = false;
+  try {
+    href.baseVal = "plain.js";
+  } catch (error) {
+    plainRejected = error instanceof TypeError;
+  }
+  const rejectedAttribute = svgScript.getAttribute("href");
+
+  const explicit = trustedTypes.createPolicy("svg-script-href", {
+    createScriptURL: value => value
+  });
+  href.baseVal = explicit.createScriptURL("trusted.js");
+  const trustedValues = [
+    svgScript.getAttribute("href"),
+    href.baseVal,
+    href.animVal
+  ];
+  svgScript.setAttribute("href", explicit.createScriptURL("attribute.js"));
+  const externallySynced = [href.baseVal, href.animVal];
+  const className = svgScript.className;
+  className.baseVal = explicit.createScriptURL("trusted-class");
+  const use = document.createElementNS("http://www.w3.org/2000/svg", "use");
+  const useHref = use.href;
+  useHref.baseVal = explicit.createScriptURL("trusted-use");
+
+  const defaultCalls = [];
+  trustedTypes.createPolicy("default", {
+    createScriptURL: (value, type, sink) => {
+      defaultCalls.push([value, type, sink]);
+      return `safe-${value}`;
+    }
+  });
+  href.baseVal = "default-input";
+  className.baseVal = "plain-class";
+  useHref.baseVal = "plain-use";
+
+  return JSON.stringify({
+    shape: [
+      href instanceof SVGAnimatedString,
+      Object.prototype.toString.call(href),
+      svgScript.href === href,
+      illegalConstructor
+    ],
+    plainRejected,
+    rejectedAttribute,
+    trustedValues,
+    externallySynced,
+    ordinaryAnimatedStrings: [
+      className instanceof SVGAnimatedString,
+      svgScript.className === className,
+      className.baseVal,
+      className.animVal,
+      svgScript.getAttribute("class"),
+      useHref instanceof SVGAnimatedString,
+      use.href === useHref,
+      useHref.baseVal,
+      useHref.animVal,
+      use.getAttribute("href")
+    ],
+    defaulted: [svgScript.getAttribute("href"), href.baseVal, href.animVal],
+    defaultCalls,
+    violations
+  });
+})()
+"#,
+        )
+        .expect("SVGScriptElement href Trusted Types sink probe should evaluate");
+
+    assert_eq!(
+        result,
+        r#"{"shape":[true,"[object SVGAnimatedString]",true,true],"plainRejected":true,"rejectedAttribute":null,"trustedValues":["trusted.js","trusted.js","trusted.js"],"externallySynced":["attribute.js","attribute.js"],"ordinaryAnimatedStrings":[true,true,"plain-class","plain-class","plain-class",true,true,"plain-use","plain-use","plain-use"],"defaulted":["safe-default-input","safe-default-input","safe-default-input"],"defaultCalls":[["default-input","TrustedScriptURL","SVGScriptElement href"]],"violations":[]}"#
+    );
+
+    assert_eq!(
+        drain_pre_domcontentloaded_non_script_page_tasks_for_test(&mut vm),
+        1
+    );
+    assert_eq!(
+        vm.eval("JSON.stringify(globalThis.__svgScriptHrefViolations)")
+            .expect("queued SVGScriptElement href violation should be observable"),
+        r#"[{"blockedURI":"trusted-types-sink","effectiveDirective":"require-trusted-types-for","sample":"SVGScriptElement href|plain.js"}]"#
     );
 }
 
