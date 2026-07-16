@@ -8670,6 +8670,7 @@ trusted-types/Element-setAttribute-respects-Elements-node-documents-globals-CSP-
 trusted-types/Element-setAttribute.html
 trusted-types/Element-setAttributeNS.html
 trusted-types/Element-toggleAttribute.html
+trusted-types/GlobalEventHandlers-onclick.html
 trusted-types/HTMLScriptElement-internal-slot.html
 trusted-types/Node-multiple-arguments-tt-enforced.html
 trusted-types/Node-multiple-arguments.html
@@ -8686,6 +8687,7 @@ trusted-types/SharedWorker-setTimeout-setInterval.html
 trusted-types/TrustedTypePolicy-CSP-no-name.html
 trusted-types/TrustedTypePolicy-CSP-wildcard.html
 trusted-types/TrustedTypePolicy-createXXX.html
+trusted-types/TrustedTypePolicyFactory-constants.html
 trusted-types/TrustedTypePolicyFactory-createPolicy-createXYZTests.html
 trusted-types/TrustedTypePolicyFactory-createPolicy-cspTests-case.html
 trusted-types/TrustedTypePolicyFactory-createPolicy-cspTests-case2.html
@@ -8696,6 +8698,7 @@ trusted-types/TrustedTypePolicyFactory-createPolicy-cspTests-none-skip.html
 trusted-types/TrustedTypePolicyFactory-createPolicy-cspTests-wildcard.html
 trusted-types/TrustedTypePolicyFactory-createPolicy-non-tt-policy-name.html
 trusted-types/TrustedTypePolicyFactory-createPolicy-unenforced.html
+trusted-types/TrustedTypePolicyFactory-defaultPolicy.html
 trusted-types/TrustedTypePolicyFactory-isXXX.html
 trusted-types/Window-block-eval-function-constructor.html
 trusted-types/Window-setTimeout-setInterval.html
