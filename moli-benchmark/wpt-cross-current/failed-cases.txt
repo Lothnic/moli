@@ -3612,6 +3612,7 @@ trusted-types/TrustedTypePolicyFactory-getAttributeType-namespace.html
 trusted-types/TrustedTypePolicyFactory-getAttributeType-svg.html
 trusted-types/TrustedTypePolicyFactory-getAttributeType.html
 trusted-types/Window-TrustedTypes.html
+trusted-types/block-Document-execCommand.html
 trusted-types/block-string-assignment-to-Document-write.html
 trusted-types/block-string-assignment-to-Element-outerHTML.html
 trusted-types/block-string-assignment-to-Element-setAttribute.html
@@ -3623,11 +3624,8 @@ trusted-types/block-string-assignment-to-attribute-via-attribute-node.html
 trusted-types/eval-function-constructor-untrusted-arguments-and-applying-default-policy.html
 trusted-types/eval-function-constructor.html
 trusted-types/inheriting-csp-for-local-schemes.html
-trusted-types/legacy-trusted-script-urls.html
 trusted-types/modify-attributes-in-callback.html
 trusted-types/require-trusted-types-for-TypeError-belongs-to-the-global-object-realm.html
-trusted-types/script-enforcement-010.html
-trusted-types/script-enforcement-011.html
 trusted-types/set-attributes-require-trusted-types-default-policy.html
 trusted-types/set-attributes-require-trusted-types-no-default-policy-error-cases.html
 trusted-types/set-attributes-require-trusted-types-no-default-policy.html
@@ -3647,6 +3645,7 @@ trusted-types/trusted-types-reporting-check-report-DedicatedWorker-create-policy
 trusted-types/trusted-types-reporting-check-report-DedicatedWorker-sink-mismatch.html
 trusted-types/trusted-types-reporting-clipping-of-sample.html
 trusted-types/trusted-types-reporting-for-DedicatedWorker-ServiceWorkerContainer-register.https.html
+trusted-types/trusted-types-reporting-for-Document-execCommand.html
 trusted-types/trusted-types-reporting-for-Document-write.html
 trusted-types/trusted-types-reporting-for-Element-setAttribute.html
 trusted-types/trusted-types-reporting-for-HTMLIFrameElement-srcdoc.html

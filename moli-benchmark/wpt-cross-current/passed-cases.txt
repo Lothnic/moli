@@ -8698,7 +8698,6 @@ trusted-types/TrustedTypePolicyFactory-createPolicy-unenforced.html
 trusted-types/TrustedTypePolicyFactory-isXXX.html
 trusted-types/Window-block-eval-function-constructor.html
 trusted-types/Window-setTimeout-setInterval.html
-trusted-types/block-Document-execCommand.html
 trusted-types/block-string-assignment-to-DOMParser-parseFromString.html
 trusted-types/block-string-assignment-to-DedicatedWorker-setTimeout-setInterval.html
 trusted-types/block-string-assignment-to-Document-parseHTMLUnsafe.html
@@ -8727,6 +8726,7 @@ trusted-types/eval-no-csp-no-tt.html
 trusted-types/eval-with-non-trusted-script-object.html
 trusted-types/eval-with-permissive-csp.html
 trusted-types/get-trusted-types-compliant-attribute-value.html
+trusted-types/legacy-trusted-script-urls.html
 trusted-types/legacy-trusted-scripts.html
 trusted-types/navigate-to-javascript-url-001.html
 trusted-types/navigate-to-javascript-url-002.html
@@ -8747,6 +8747,8 @@ trusted-types/script-enforcement-004.html
 trusted-types/script-enforcement-005.html
 trusted-types/script-enforcement-006.html
 trusted-types/script-enforcement-007.html
+trusted-types/script-enforcement-010.html
+trusted-types/script-enforcement-011.html
 trusted-types/script-enforcement-012.html
 trusted-types/script-enforcement-013.html
 trusted-types/script-enforcement-014.html
@@ -8765,7 +8767,6 @@ trusted-types/trusted-types-reporting-for-DedicatedWorker-eval.html
 trusted-types/trusted-types-reporting-for-DedicatedWorker-function-constructor.html
 trusted-types/trusted-types-reporting-for-DedicatedWorker-importScripts.html
 trusted-types/trusted-types-reporting-for-DedicatedWorker-setTimeout-setInterval.html
-trusted-types/trusted-types-reporting-for-Document-execCommand.html
 trusted-types/trusted-types-reporting-for-Document-parseHTMLUnsafe.html
 trusted-types/trusted-types-reporting-for-Element-innerHTML.html
 trusted-types/trusted-types-reporting-for-Element-insertAdjacentHTML.html
