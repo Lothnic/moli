@@ -250,7 +250,7 @@ pub(super) use dataset::{build_dom_string_map_wrapper_template, node_dataset_get
 use details_dialog::{
     close_dialog_element, closed_details_ancestors_to_reveal, details_open_getter_function,
     details_open_setter_function, dialog_close_callback, dialog_open_getter_function,
-    dialog_open_setter_function, dialog_return_value_getter_function,
+    dialog_open_setter_function, dialog_request_close_callback, dialog_return_value_getter_function,
     dialog_return_value_setter_function, dialog_show_callback, dialog_show_modal_callback,
     perform_summary_click_default_action,
 };
@@ -575,7 +575,10 @@ use pointer_capture::{
     node_has_pointer_capture_callback, node_release_pointer_capture_callback,
     node_set_pointer_capture_callback,
 };
-pub(crate) use popover::{dispatch_popover_removal_events, perform_popover_invoker_default_action};
+pub(crate) use popover::{
+    dispatch_popover_removal_events, handle_popover_attribute_change,
+    perform_popover_invoker_default_action,
+};
 pub(super) use popover::{dispatch_popover_show_events, dispatch_popover_toggle_events};
 pub(super) use popover::{
     node_hide_popover_callback, node_popover_getter_function, node_popover_setter_function,
