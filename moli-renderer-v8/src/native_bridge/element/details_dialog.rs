@@ -13,10 +13,12 @@ use moli_selector::stylo_flat_tree_heading_descendants;
 use super::super::{
     JsContextHost, node::node_runtime_and_handle_from_object_or_detached, throw_dom_exception,
 };
+use super::popover::popover_is_open;
 use super::toggle_event::queue_element_toggle_event;
 use super::{
-    element_has_attribute, html_element_getter_receiver, html_element_setter_receiver,
-    property_dom_string_value, set_reflected_boolean_attribute,
+    construct_simple_event, dispatch_public_event, element_has_attribute,
+    html_element_getter_receiver, html_element_setter_receiver, property_dom_string_value,
+    set_reflected_boolean_attribute,
 };
 
 pub(crate) fn queue_details_toggle_event_for_attribute_change(
@@ -96,6 +98,12 @@ pub(crate) fn queue_parser_details_toggle_events_in_subtree(
 #[derive(webidl::WebIdlArgs)]
 #[webidl(prefix = "HTMLDialogElement.close")]
 struct DialogCloseArgs {
+    return_value: Option<String>,
+}
+
+#[derive(webidl::WebIdlArgs)]
+#[webidl(prefix = "HTMLDialogElement.requestClose")]
+struct DialogRequestCloseArgs {
     return_value: Option<String>,
 }
 
@@ -269,6 +277,58 @@ fn dialog_set_open_state_for_handle(
     let _ = set_dialog_modal_state(runtime_ptr, handle, open && modal);
 }
 
+fn dispatch_dialog_toggle_events(
+    scope: &mut v8::PinScope<'_, '_>,
+    runtime_ptr: *mut JsContextHost,
+    handle: DomHandle,
+    opening: bool,
+    as_modal: bool,
+) -> bool {
+    let (old_state, new_state) = if opening {
+        (
+            RendererPageElementToggleEventState::Closed,
+            RendererPageElementToggleEventState::Open,
+        )
+    } else {
+        (
+            RendererPageElementToggleEventState::Open,
+            RendererPageElementToggleEventState::Closed,
+        )
+    };
+    if let Some(event) = super::events::construct_toggle_event(
+        scope,
+        "beforetoggle",
+        old_state.as_str(),
+        new_state.as_str(),
+        opening,
+        v8::null(scope).into(),
+    ) {
+        let outcome = dispatch_public_event(scope, runtime_ptr, handle, event);
+        if opening && !outcome.allows_default() {
+            return false;
+        }
+    }
+    if opening {
+        let runtime = unsafe { &*runtime_ptr };
+        if element_has_attribute(runtime, handle, "open")
+            || (as_modal
+                && (!runtime.dom_host().is_connected(handle) || popover_is_open(runtime, handle)))
+        {
+            return false;
+        }
+    }
+    queue_element_toggle_event(
+        scope,
+        runtime_ptr,
+        RendererPageElementToggleEventKind::Dialog,
+        handle,
+        old_state,
+        new_state,
+        None,
+    );
+    true
+}
+
 fn set_dialog_modal_state(runtime_ptr: *mut JsContextHost, handle: DomHandle, modal: bool) -> bool {
     let old_heading_states = {
         let runtime = unsafe { &*runtime_ptr };
@@ -420,6 +480,9 @@ pub(super) fn dialog_show_callback<'s>(
         }
         return;
     }
+    if !dispatch_dialog_toggle_events(scope, runtime_ptr, handle, true, false) {
+        return;
+    }
     dialog_set_open_state_for_handle(scope, runtime_ptr, handle, true, false);
 }
 
@@ -453,6 +516,18 @@ pub(super) fn dialog_show_modal_callback<'s>(
         );
         return;
     }
+    if popover_is_open(runtime, handle) {
+        throw_dom_exception(
+            scope,
+            "InvalidStateError",
+            11,
+            "The dialog is already open as a popover.",
+        );
+        return;
+    }
+    if !dispatch_dialog_toggle_events(scope, runtime_ptr, handle, true, true) {
+        return;
+    }
     dialog_set_open_state_for_handle(scope, runtime_ptr, handle, true, true);
 }
 
@@ -471,6 +546,38 @@ pub(super) fn dialog_close_callback<'s>(
     close_dialog_element(scope, runtime_ptr, handle, parsed.return_value.as_deref());
 }
 
+pub(super) fn dialog_request_close_callback<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    args: v8::FunctionCallbackArguments<'s>,
+    _rv: v8::ReturnValue<'_, v8::Value>,
+) {
+    let object = args.this();
+    let Some(parsed) = webidl::parse_args::<DialogRequestCloseArgs>(scope, &args) else {
+        return;
+    };
+    let Ok((runtime_ptr, handle)) = dialog_runtime_and_handle_from_object(scope, object) else {
+        return;
+    };
+    let runtime = unsafe { &*runtime_ptr };
+    if !runtime.dom_host().is_html_element_named(handle, "dialog")
+        || !runtime.dom_host().is_connected(handle)
+        || !element_has_attribute(runtime, handle, "open")
+    {
+        return;
+    }
+    let Some(event) = construct_simple_event(scope, "cancel", false, true, false) else {
+        return;
+    };
+    if !unsafe { &mut *runtime_ptr }.begin_dialog_request_close(handle) {
+        return;
+    }
+    let allows_close = dispatch_public_event(scope, runtime_ptr, handle, event).allows_default();
+    if allows_close {
+        close_dialog_element(scope, runtime_ptr, handle, parsed.return_value.as_deref());
+    }
+    unsafe { &mut *runtime_ptr }.end_dialog_request_close(handle);
+}
+
 pub(in crate::native_bridge::element) fn close_dialog_element(
     scope: &mut v8::PinScope<'_, '_>,
     runtime_ptr: *mut JsContextHost,
@@ -484,6 +591,9 @@ pub(in crate::native_bridge::element) fn close_dialog_element(
         return false;
     }
 
+    if !dispatch_dialog_toggle_events(scope, runtime_ptr, handle, false, false) {
+        return false;
+    }
     set_reflected_boolean_attribute(scope, runtime_ptr, handle, "open", false);
     let _ = set_dialog_modal_state(runtime_ptr, handle, false);
     let runtime = unsafe { &mut *runtime_ptr };
