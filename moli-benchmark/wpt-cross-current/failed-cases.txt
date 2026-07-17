@@ -2515,6 +2515,7 @@ domparsing/DOMParser-parseFromString-url-pushstate.html
 domparsing/DOMParser-parseFromString-url.html
 domparsing/DOMParser-parseFromString-xml-doctype.html
 domparsing/DOMParser-parseFromString-xml-internal-subset.html
+domparsing/DOMParser-parseFromString-xml.html
 domparsing/XMLSerializer-serializeToString.html
 domparsing/insert_adjacent_html.html
 domparsing/tentative/all-stream-methods-with-trusted-types-no-policy.html
@@ -2709,7 +2710,10 @@ focus/iframe-focus-with-same-as-top-intermediate-frame.html
 font-access/permissions-policy/local-fonts-supported-by-permissions-policy.html
 fullscreen/api/document-exit-fullscreen-active-document.html
 fullscreen/api/document-fullscreen-enabled.html
+fullscreen/api/document-onfullscreenerror.html
 fullscreen/api/element-request-fullscreen-active-document.html
+fullscreen/api/element-request-fullscreen-not-allowed.html
+fullscreen/api/promises-reject.html
 gyroscope/Gyroscope-supported-by-permissions-policy.html
 hr-time/test_cross_frame_start.html
 html/browsers/browsing-the-web/back-forward-cache/eligibility/broadcast-channel.html
@@ -2796,6 +2800,7 @@ html/browsers/history/the-history-interface/traverse_the_history_3.html
 html/browsers/history/the-history-interface/traverse_the_history_4.html
 html/browsers/history/the-history-interface/traverse_the_history_5.html
 html/browsers/history/the-location-interface/assign_before_load.html
+html/browsers/history/the-location-interface/document_location.html
 html/browsers/history/the-location-interface/location-ancestor-origins-new-object.html
 html/browsers/history/the-location-interface/location-ancestor-origins-referrerpolicy-snapshot.html
 html/browsers/history/the-location-interface/location_hash.html
@@ -3288,6 +3293,7 @@ old-tests/submission/Microsoft/selection/insertNodeIntoSelection.htm
 old-tests/submission/Microsoft/selection/select.htm
 old-tests/submission/Microsoft/selection/selectionStartEnd.htm
 old-tests/submission/Microsoft/selection/setSelectionRange.htm
+page-lifecycle/idlharness.html
 page-visibility/iframe-session-history.html
 performance-timeline/get-invalid-entries.html
 performance-timeline/navigation-id-worker-created-entries.html
