@@ -98,6 +98,14 @@ fn detached_body_legacy_accessors_use_owner_prototype() {
     if (!condition) throw new Error(message);
   };
   const own = (object, name) => Object.prototype.hasOwnProperty.call(object, name);
+  const throwsTypeError = callback => {
+    try {
+      callback();
+      return false;
+    } catch (error) {
+      return error instanceof TypeError;
+    }
+  };
   const accessor = (prototype, name) => {
     const descriptor = Object.getOwnPropertyDescriptor(prototype, name);
     assert(!!descriptor, `${prototype.constructor.name}.${name} descriptor missing`);
@@ -136,13 +144,26 @@ fn detached_body_legacy_accessors_use_owner_prototype() {
     assert(body.vLink === `${label}-vlink` && body.getAttribute("vlink") === `${label}-vlink`, `${label}.vLink`);
     assert(body.aLink === `${label}-alink` && body.getAttribute("alink") === `${label}-alink`, `${label}.aLink`);
     assert(body.background === `${label}-background` && body.getAttribute("background") === `${label}-background`, `${label}.background`);
+    for (const name of ["text", "link", "vLink", "aLink"]) {
+      body[name] = null;
+      const attribute = name.toLowerCase();
+      assert(body[name] === "", `${label}.${name} null getter`);
+      assert(body.getAttribute(attribute) === "", `${label}.${name} null attribute`);
+    }
     for (const name of names) {
       assert(!own(body, name), `${label}.${name} should not be own after set`);
       assert(delete body[name], `${label}.${name} delete`);
       assert(!own(body, name), `${label}.${name} should stay inherited`);
     }
     assert(body.onload === handler, `${label}.onload after delete`);
-    assert(body.text === `${label}-text`, `${label}.text after delete`);
+    assert(body.text === "", `${label}.text after delete`);
+  }
+  for (const name of ["text", "link", "vLink", "aLink"]) {
+    const descriptor = Object.getOwnPropertyDescriptor(HTMLBodyElement.prototype, name);
+    for (const receiver of [document.createElement("div"), {}]) {
+      assert(throwsTypeError(() => descriptor.get.call(receiver)), `${name} getter receiver`);
+      assert(throwsTypeError(() => descriptor.set.call(receiver, "wrong")), `${name} setter receiver`);
+    }
   }
   window.onload = null;
   return "ok";
@@ -918,6 +939,9 @@ fn detached_resource_template_accessors_use_owner_prototypes() {
   }
   accessor(HTMLLinkElement.prototype, "disabled");
   accessor(HTMLIFrameElement.prototype, "csp");
+  for (const name of ["integrity", "rev", "type"]) {
+    accessor(HTMLLinkElement.prototype, name);
+  }
   accessor(HTMLIFrameElement.prototype, "sandbox");
   accessor(HTMLIFrameElement.prototype, "allowFullscreen");
   for (const name of ["default", "kind", "src", "srclang", "label"]) {
@@ -966,17 +990,31 @@ fn detached_resource_template_accessors_use_owner_prototypes() {
   }
 
   for (const link of linkElements) {
-    assert(!own(link, "disabled"), "link.disabled should not be own before set");
+    for (const name of ["disabled", "integrity", "rev", "type"]) {
+      assert(!own(link, name), `link.${name} should not be own before set`);
+    }
+    assert(link.integrity === "" && link.rev === "" && link.type === "", "link string defaults");
+    link.integrity = "sha256-test";
+    link.rev = "made";
+    link.type = "text/css";
+    assert(link.integrity === "sha256-test" && link.getAttribute("integrity") === "sha256-test", "link integrity");
+    assert(link.rev === "made" && link.getAttribute("rev") === "made", "link rev");
+    assert(link.type === "text/css" && link.getAttribute("type") === "text/css", "link type");
     link.disabled = true;
     assert(link.disabled === true, "link disabled true");
     assert(link.getAttribute("disabled") === "", "link disabled attr");
-    assert(!own(link, "disabled"), "link.disabled should stay inherited after true");
+    for (const name of ["disabled", "integrity", "rev", "type"]) {
+      assert(!own(link, name), `link.${name} should stay inherited after set`);
+    }
     link.disabled = false;
     assert(link.disabled === false, "link disabled false");
     assert(link.getAttribute("disabled") === null, "link disabled attr removed");
     assert(!own(link, "disabled"), "link.disabled should stay inherited after false");
-    assert(delete link.disabled, "link.disabled delete");
-    assert(!own(link, "disabled"), "link.disabled should stay inherited after delete");
+    for (const name of ["disabled", "integrity", "rev", "type"]) {
+      assert(delete link[name], `link.${name} delete`);
+      assert(!own(link, name), `link.${name} should stay inherited after delete`);
+    }
+    assert(link.integrity === "sha256-test" && link.rev === "made" && link.type === "text/css", "link strings after delete");
   }
 
   for (const iframe of iframeElements) {
