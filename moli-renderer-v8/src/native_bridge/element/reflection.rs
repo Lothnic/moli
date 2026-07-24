@@ -173,8 +173,10 @@ pub(super) enum DomStringReflection {
     AreaAlt,
     AreaCoords,
     AreaDownload,
+    AreaHreflang,
     AreaReferrerPolicy,
     AreaShape,
+    AreaType,
     BrClear,
     DataValue,
     EmbedHeight,
@@ -242,6 +244,9 @@ pub(super) enum DomStringReflection {
     StyleMedia,
     StyleType,
     TableBorder,
+    TableFrame,
+    TableRules,
+    TableSummary,
     TableCellAbbr,
     TableCellAxis,
     TableCellCh,
@@ -352,6 +357,10 @@ const DOM_STRING_REFLECTION_DESCRIPTORS: &[(DomStringReflection, DomStringReflec
             DomStringReflectionDescriptor::new("HTMLAreaElement", "download", "download"),
         ),
         (
+            DomStringReflection::AreaHreflang,
+            DomStringReflectionDescriptor::new("HTMLAreaElement", "hreflang", "hreflang"),
+        ),
+        (
             DomStringReflection::AreaReferrerPolicy,
             DomStringReflectionDescriptor::new(
                 "HTMLAreaElement",
@@ -362,6 +371,10 @@ const DOM_STRING_REFLECTION_DESCRIPTORS: &[(DomStringReflection, DomStringReflec
         (
             DomStringReflection::AreaShape,
             DomStringReflectionDescriptor::new("HTMLAreaElement", "shape", "shape"),
+        ),
+        (
+            DomStringReflection::AreaType,
+            DomStringReflectionDescriptor::new("HTMLAreaElement", "type", "type"),
         ),
         (
             DomStringReflection::BrClear,
@@ -713,6 +726,33 @@ const DOM_STRING_REFLECTION_DESCRIPTORS: &[(DomStringReflection, DomStringReflec
             DomStringReflectionDescriptor::new("HTMLTableElement", "border", "border"),
         ),
         (
+            DomStringReflection::TableFrame,
+            DomStringReflectionDescriptor::new_html_element(
+                "HTMLTableElement",
+                "table",
+                "frame",
+                "frame",
+            ),
+        ),
+        (
+            DomStringReflection::TableRules,
+            DomStringReflectionDescriptor::new_html_element(
+                "HTMLTableElement",
+                "table",
+                "rules",
+                "rules",
+            ),
+        ),
+        (
+            DomStringReflection::TableSummary,
+            DomStringReflectionDescriptor::new_html_element(
+                "HTMLTableElement",
+                "table",
+                "summary",
+                "summary",
+            ),
+        ),
+        (
             DomStringReflection::TableCellAbbr,
             DomStringReflectionDescriptor::new("HTMLTableCellElement", "abbr", "abbr"),
         ),
@@ -898,7 +938,11 @@ impl_reflection_callback_data!(UsvStringReflection);
 #[derive(Clone, Copy)]
 #[repr(u32)]
 pub(super) enum NullToEmptyDomStringReflection {
+    BodyALink,
     BodyBgColor,
+    BodyLink,
+    BodyText,
+    BodyVLink,
     FontColor,
     FrameMarginHeight,
     FrameMarginWidth,
@@ -907,6 +951,8 @@ pub(super) enum NullToEmptyDomStringReflection {
     ImageBorder,
     ObjectBorder,
     TableBgColor,
+    TableCellPadding,
+    TableCellSpacing,
     TableCellBgColor,
     TableRowBgColor,
     Count,
@@ -917,8 +963,24 @@ const NULL_TO_EMPTY_DOM_STRING_REFLECTION_DESCRIPTORS: &[(
     ReflectedAttributeDescriptor,
 )] = &[
     (
+        NullToEmptyDomStringReflection::BodyALink,
+        ReflectedAttributeDescriptor::new_html_element("HTMLBodyElement", "body", "alink", "aLink"),
+    ),
+    (
         NullToEmptyDomStringReflection::BodyBgColor,
         ReflectedAttributeDescriptor::new("HTMLBodyElement", "bgcolor", "bgColor"),
+    ),
+    (
+        NullToEmptyDomStringReflection::BodyLink,
+        ReflectedAttributeDescriptor::new_html_element("HTMLBodyElement", "body", "link", "link"),
+    ),
+    (
+        NullToEmptyDomStringReflection::BodyText,
+        ReflectedAttributeDescriptor::new_html_element("HTMLBodyElement", "body", "text", "text"),
+    ),
+    (
+        NullToEmptyDomStringReflection::BodyVLink,
+        ReflectedAttributeDescriptor::new_html_element("HTMLBodyElement", "body", "vlink", "vLink"),
     ),
     (
         NullToEmptyDomStringReflection::FontColor,
@@ -951,6 +1013,24 @@ const NULL_TO_EMPTY_DOM_STRING_REFLECTION_DESCRIPTORS: &[(
     (
         NullToEmptyDomStringReflection::TableBgColor,
         ReflectedAttributeDescriptor::new("HTMLTableElement", "bgcolor", "bgColor"),
+    ),
+    (
+        NullToEmptyDomStringReflection::TableCellPadding,
+        ReflectedAttributeDescriptor::new_html_element(
+            "HTMLTableElement",
+            "table",
+            "cellpadding",
+            "cellPadding",
+        ),
+    ),
+    (
+        NullToEmptyDomStringReflection::TableCellSpacing,
+        ReflectedAttributeDescriptor::new_html_element(
+            "HTMLTableElement",
+            "table",
+            "cellspacing",
+            "cellSpacing",
+        ),
     ),
     (
         NullToEmptyDomStringReflection::TableCellBgColor,
@@ -1110,7 +1190,7 @@ impl CrossOriginReflection {
 
 impl_reflection_callback_data!(CrossOriginReflection);
 
-pub(super) fn set_reflected_attribute(
+pub(in crate::native_bridge) fn set_reflected_attribute(
     scope: &mut v8::PinScope<'_, '_>,
     runtime_ptr: *mut super::super::JsContextHost,
     handle: DomHandle,

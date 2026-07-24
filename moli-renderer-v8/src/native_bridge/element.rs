@@ -437,8 +437,8 @@ use global_attributes::canonical_fetch_priority_value;
 pub(super) use global_attributes::{
     anchor_target_getter_function, anchor_target_setter_function, area_no_href_setter_function,
     area_target_getter_function, area_target_setter_function, base_target_getter_function,
-    base_target_setter_function, canonical_cross_origin_value, canonical_loading_value,
-    canonical_preload_value, canonical_referrer_policy_value,
+    base_target_setter_function, canonical_cross_origin_value, canonical_dir_value,
+    canonical_loading_value, canonical_preload_value, canonical_referrer_policy_value,
     dom_string_reflection_getter_function, dom_string_reflection_setter_function,
     html_align_getter_function, html_align_setter_function, html_alt_getter_function,
     html_as_getter_function, html_bg_color_getter_function, html_border_getter_function,
@@ -479,6 +479,7 @@ pub(super) use global_attributes::{
     node_tab_index_setter_function, node_title_getter_function, node_title_setter_function,
     node_translate_getter_function, node_translate_setter_function,
     node_writing_suggestions_getter_function, node_writing_suggestions_setter_function,
+    null_to_empty_dom_string_reflection_getter_function,
     null_to_empty_dom_string_reflection_setter_function, object_archive_getter_function,
     object_code_base_getter_function, object_code_getter_function,
     object_code_type_getter_function, object_data_getter_function, object_declare_getter_function,
@@ -488,22 +489,20 @@ pub(super) use global_attributes::{
     table_cell_axis_getter_function, table_cell_headers_getter_function,
     table_cell_no_wrap_getter_function, table_cell_no_wrap_setter_function,
     table_cell_scope_getter_function, table_ch_getter_function, table_ch_off_getter_function,
-    table_col_span_getter_function, table_col_span_setter_function, table_v_align_getter_function,
-    unsigned_long_reflection_setter_function, usv_string_reflection_setter_function,
+    table_v_align_getter_function, unsigned_long_reflection_setter_function,
+    usv_string_reflection_setter_function,
 };
 use html_elements::{
-    body_a_link_getter_function, body_a_link_setter_function, body_background_getter_function,
-    body_background_setter_function, body_link_getter_function, body_link_setter_function,
-    body_text_getter_function, body_text_setter_function, body_v_link_getter_function,
-    body_v_link_setter_function, li_value_getter_function, li_value_setter_function,
-    meta_content_getter_function, meta_content_setter_function, meta_http_equiv_getter_function,
-    meta_http_equiv_setter_function, ol_reversed_getter_function, ol_reversed_setter_function,
-    ol_start_getter_function, ol_start_setter_function, ol_type_getter_function,
-    ol_type_setter_function, optgroup_disabled_getter_function, optgroup_disabled_setter_function,
-    table_caption_getter_function, table_caption_setter_function,
-    table_cell_col_span_getter_function, table_cell_col_span_setter_function,
-    table_cell_index_getter_function, table_cell_row_span_getter_function,
-    table_cell_row_span_setter_function, table_create_caption_callback,
+    body_background_getter_function, body_background_setter_function, li_value_getter_function,
+    li_value_setter_function, meta_content_getter_function, meta_content_setter_function,
+    meta_http_equiv_getter_function, meta_http_equiv_setter_function, ol_reversed_getter_function,
+    ol_reversed_setter_function, ol_start_getter_function, ol_start_setter_function,
+    ol_type_getter_function, ol_type_setter_function, optgroup_disabled_getter_function,
+    optgroup_disabled_setter_function, table_caption_getter_function,
+    table_caption_setter_function, table_cell_col_span_getter_function,
+    table_cell_col_span_setter_function, table_cell_index_getter_function,
+    table_cell_row_span_getter_function, table_cell_row_span_setter_function,
+    table_col_span_getter_function, table_col_span_setter_function, table_create_caption_callback,
     table_create_t_body_callback, table_create_t_foot_callback, table_create_t_head_callback,
     table_delete_caption_callback, table_delete_row_callback, table_delete_t_foot_callback,
     table_delete_t_head_callback, table_insert_row_callback, table_row_cells_getter_function,
@@ -586,6 +585,7 @@ pub(super) use query::{
     node_get_elements_by_tag_name_ns_callback, node_matches_callback,
     node_query_selector_all_callback, node_query_selector_callback,
 };
+pub(super) use reflection::set_reflected_attribute;
 use reflection::{
     CrossOriginReflection, DomStringReflection, ElementReflectionInterface,
     NullToEmptyDomStringReflection, UnsignedLongReflection, UsvStringReflection,
@@ -596,8 +596,8 @@ use reflection::{
     remove_reflected_attribute, set_attribute_property_on_object_or_detached,
     set_boolean_attribute_property_on_object_or_detached,
     set_dom_string_attribute_property_on_object,
-    set_nullable_dom_string_attribute_property_on_object, set_reflected_attribute,
-    set_reflected_boolean_attribute, set_reflected_style_attribute_with_inline_base_url,
+    set_nullable_dom_string_attribute_property_on_object, set_reflected_boolean_attribute,
+    set_reflected_style_attribute_with_inline_base_url,
     set_usv_string_attribute_property_on_object,
 };
 pub(crate) use shadow_dom::install_element_internals_template_bindings;
@@ -628,7 +628,8 @@ use shadow_dom::{
     template_shadow_root_slot_assignment_getter_function,
     template_shadow_root_slot_assignment_setter_function,
 };
-use shared::{element_attribute, element_attribute_names, element_has_attribute, style_string};
+pub(super) use shared::element_attribute;
+use shared::{element_attribute_names, element_has_attribute, style_string};
 pub(super) use state_callbacks::{
     bridge_set_checked_state_callback, bridge_set_indeterminate_state_callback,
     bridge_set_input_value_callback, bridge_set_selected_state_callback,

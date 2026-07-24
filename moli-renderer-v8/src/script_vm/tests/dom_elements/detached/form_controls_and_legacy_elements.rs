@@ -1162,7 +1162,7 @@ fn detached_simple_structural_accessors_use_owner_prototypes() {
     [HTMLOptGroupElement.prototype, ["disabled"]],
     [HTMLDetailsElement.prototype, ["open"]],
     [HTMLDialogElement.prototype, ["open", "returnValue"]],
-    [HTMLMetaElement.prototype, ["content", "httpEquiv"]],
+    [HTMLMetaElement.prototype, ["content", "httpEquiv", "scheme"]],
     [HTMLTitleElement.prototype, ["text"]]
   ];
   for (const [prototype, names] of prototypeCases) {
@@ -1195,6 +1195,7 @@ fn detached_simple_structural_accessors_use_owner_prototypes() {
       [dialog, "open", true, "", "open"],
       [meta, "content", "width=device-width", "width=device-width", "content"],
       [meta, "httpEquiv", "refresh", "refresh", "http-equiv"],
+      [meta, "scheme", "utf-8", "utf-8", "scheme"],
       [title, "text", "Page Title", "Page Title", null]
     ];
 
@@ -1274,11 +1275,13 @@ fn detached_simple_specialized_accessors_reject_incompatible_receivers() {
   const ol = doc.createElement("ol");
   const optgroup = doc.createElement("optgroup");
   const details = doc.createElement("details");
+  const link = doc.createElement("link");
   const meta = doc.createElement("meta");
+  const style = doc.createElement("style");
   const title = doc.createElement("title");
   const div = doc.createElement("div");
   const text = doc.createTextNode("x");
-  const elements = [li, ol, optgroup, details, meta, title, div];
+  const elements = [li, ol, optgroup, details, link, meta, style, title, div];
 
   const cases = [
     [HTMLLIElement.prototype, "value", li, 7],
@@ -1287,8 +1290,13 @@ fn detached_simple_specialized_accessors_reject_incompatible_receivers() {
     [HTMLOListElement.prototype, "type", ol, "A"],
     [HTMLOptGroupElement.prototype, "disabled", optgroup, true],
     [HTMLDetailsElement.prototype, "open", details, true],
+    [HTMLLinkElement.prototype, "integrity", link, "sha256-test"],
+    [HTMLLinkElement.prototype, "rev", link, "made"],
+    [HTMLLinkElement.prototype, "type", link, "text/css"],
     [HTMLMetaElement.prototype, "content", meta, "width=device-width"],
     [HTMLMetaElement.prototype, "httpEquiv", meta, "refresh"],
+    [HTMLMetaElement.prototype, "scheme", meta, "utf-8"],
+    [HTMLStyleElement.prototype, "type", style, "text/less"],
     [HTMLTitleElement.prototype, "text", title, "Page Title"]
   ];
 
@@ -1698,6 +1706,88 @@ fn detached_legacy_dimension_and_color_accessors_use_owner_prototypes() {
 "##,
         )
         .expect("detached legacy dimension and color owner prototype accessors should evaluate");
+
+    assert_eq!(result, "ok");
+}
+
+#[test]
+fn detached_obsolete_element_reflectors_use_owner_prototypes() {
+    let mut vm = new_storage_test_vm("https://detached-obsolete-reflectors.test/");
+
+    let result = vm
+        .eval(
+            r#"
+(() => {
+  const doc = document.implementation.createHTMLDocument("");
+  const frameset = doc.createElement("frameset");
+  const frame = doc.createElement("frame");
+  const font = doc.createElement("font");
+  const marquee = doc.createElement("marquee");
+  const div = doc.createElement("div");
+
+  const assert = (condition, message) => {
+    if (!condition) throw new Error(message);
+  };
+  const own = (object, name) => Object.prototype.hasOwnProperty.call(object, name);
+  const throwsTypeError = callback => {
+    try {
+      callback();
+      return false;
+    } catch (error) {
+      return error.name === "TypeError";
+    }
+  };
+  const cases = [
+    [HTMLFrameSetElement.prototype, frameset, "cols", "40%,60%", "cols"],
+    [HTMLFrameSetElement.prototype, frameset, "rows", "100,*", "rows"],
+    [HTMLFontElement.prototype, font, "face", "serif, sans-serif", "face"],
+  ];
+
+  for (const [prototype, element, name, value, attribute] of cases) {
+    const descriptor = Object.getOwnPropertyDescriptor(prototype, name);
+    assert(!!descriptor, `${name} descriptor`);
+    assert(typeof descriptor.get === "function", `${name} getter`);
+    assert(typeof descriptor.set === "function", `${name} setter`);
+    assert(descriptor.enumerable && descriptor.configurable, `${name} descriptor flags`);
+    assert(!own(HTMLElement.prototype, name), `${name} owner`);
+    assert(!(name in div), `${name} should not be on div`);
+    assert(throwsTypeError(() => descriptor.get.call(div)), `${name} getter brand`);
+    assert(throwsTypeError(() => descriptor.set.call(div, value)), `${name} setter brand`);
+    assert(element[name] === "", `${name} default`);
+    element[name] = value;
+    assert(element[name] === value, `${name} value`);
+    assert(element.getAttribute(attribute) === value, `${name} attribute`);
+    assert(!own(element, name), `${name} should stay inherited`);
+  }
+
+  for (const [prototype, element, name, attribute] of [
+    [HTMLFrameElement.prototype, frame, "noResize", "noresize"],
+    [HTMLMarqueeElement.prototype, marquee, "trueSpeed", "truespeed"],
+  ]) {
+    const descriptor = Object.getOwnPropertyDescriptor(prototype, name);
+    assert(!!descriptor, `${name} descriptor`);
+    assert(typeof descriptor.get === "function", `${name} getter`);
+    assert(typeof descriptor.set === "function", `${name} setter`);
+    assert(descriptor.enumerable && descriptor.configurable, `${name} descriptor flags`);
+    assert(!own(HTMLElement.prototype, name), `${name} owner`);
+    assert(!(name in div), `${name} should not be on div`);
+    assert(throwsTypeError(() => descriptor.get.call(div)), `${name} getter brand`);
+    assert(throwsTypeError(() => descriptor.set.call(div, true)), `${name} setter brand`);
+    assert(element[name] === false, `${name} default`);
+    element.setAttribute(attribute, "false");
+    assert(element[name] === true, `${name} attribute presence`);
+    element[name] = false;
+    assert(!element.hasAttribute(attribute), `${name} false removes attribute`);
+    element[name] = true;
+    assert(element.getAttribute(attribute) === "", `${name} true adds attribute`);
+    assert(!own(element, name), `${name} should stay inherited`);
+  }
+
+  return "ok";
+})()
+"#,
+        )
+        .expect("detached obsolete element reflectors should evaluate");
 
     assert_eq!(result, "ok");
 }
