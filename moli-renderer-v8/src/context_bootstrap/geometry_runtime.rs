@@ -47,6 +47,22 @@ struct DomPointObjectDeclaration {
     w: f64,
 }
 
+#[derive(WebApiObject)]
+#[webapi(
+    interface = web_api_interfaces::DOMPointReadOnly,
+    fallback_to_string_tag = "DOMPointReadOnly"
+)]
+struct DomPointReadOnlyObjectDeclaration {
+    #[webapi(slot = DOM_POINT_X_SLOT)]
+    x: f64,
+    #[webapi(slot = DOM_POINT_Y_SLOT)]
+    y: f64,
+    #[webapi(slot = DOM_POINT_Z_SLOT)]
+    z: f64,
+    #[webapi(slot = DOM_POINT_W_SLOT)]
+    w: f64,
+}
+
 macro_rules! dom_matrix_object_declaration {
     ($name:ident, $interface:ident) => {
         #[derive(WebApiObject)]
@@ -194,16 +210,47 @@ struct DomPointPrototypeAccessorsDeclaration {
 }
 
 #[derive(WebApiFunctionTemplate)]
-#[webapi(interface = web_api_interfaces::DOMPoint)]
-struct DomPointPrototypeMethodsDeclaration {
+#[webapi(interface = web_api_interfaces::DOMPointReadOnly)]
+struct DomPointReadOnlyPrototypeMethodsDeclaration {
+    #[webapi(
+        method = "matrixTransform",
+        length = 0,
+        callback = dom_point_matrix_transform_callback
+    )]
+    matrix_transform: (),
+
     #[webapi(method = "toJSON", enumerable, callback = dom_point_to_json_callback)]
     to_json: (),
+}
+
+#[derive(WebApiFunctionTemplate)]
+#[webapi(interface = web_api_interfaces::DOMPointReadOnly)]
+struct DomPointReadOnlyPrototypeAccessorsDeclaration {
+    #[webapi(accessor_property, getter = dom_point_getter_callback, data = callback_data_index_value(scope, 0), enumerable)]
+    x: (),
+    #[webapi(accessor_property, getter = dom_point_getter_callback, data = callback_data_index_value(scope, 1), enumerable)]
+    y: (),
+    #[webapi(accessor_property, getter = dom_point_getter_callback, data = callback_data_index_value(scope, 2), enumerable)]
+    z: (),
+    #[webapi(accessor_property, getter = dom_point_getter_callback, data = callback_data_index_value(scope, 3), enumerable)]
+    w: (),
 }
 
 #[derive(WebApiFunctionTemplate)]
 #[webapi(interface = web_api_interfaces::DOMPoint, enumerable)]
 struct DomPointConstructorDeclaration {
     #[webapi(static_method = "fromPoint", length = 0, callback = dom_point_from_point_callback)]
+    from_point: (),
+}
+
+#[derive(WebApiFunctionTemplate)]
+#[webapi(interface = web_api_interfaces::DOMPointReadOnly)]
+struct DomPointReadOnlyConstructorDeclaration {
+    #[webapi(
+        static_method = "fromPoint",
+        length = 0,
+        callback = dom_point_readonly_from_point_callback
+    )]
     from_point: (),
 }
 
@@ -488,6 +535,35 @@ impl Default for DomPointInit {
     }
 }
 
+#[derive(Default, webidl::WebIdlDictionary)]
+#[webidl(prefix = "DOMMatrixInit")]
+struct DomMatrixInit {
+    a: Option<f64>,
+    b: Option<f64>,
+    c: Option<f64>,
+    d: Option<f64>,
+    e: Option<f64>,
+    f: Option<f64>,
+    #[webidl(name = "is2D")]
+    is_2d: Option<bool>,
+    m11: Option<f64>,
+    m12: Option<f64>,
+    m13: Option<f64>,
+    m14: Option<f64>,
+    m21: Option<f64>,
+    m22: Option<f64>,
+    m23: Option<f64>,
+    m24: Option<f64>,
+    m31: Option<f64>,
+    m32: Option<f64>,
+    m33: Option<f64>,
+    m34: Option<f64>,
+    m41: Option<f64>,
+    m42: Option<f64>,
+    m43: Option<f64>,
+    m44: Option<f64>,
+}
+
 pub(super) fn dom_point_constructor_callback<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     args: v8::FunctionCallbackArguments<'s>,
@@ -500,20 +576,43 @@ pub(super) fn dom_point_constructor_callback<'s>(
         );
         return;
     }
-    let Some(x) = geometry_number_arg(scope, &args, 0, 0.0, "DOMPoint") else {
+    let Some(init) = dom_point_constructor_init(scope, &args, "DOMPoint") else {
         return;
     };
-    let Some(y) = geometry_number_arg(scope, &args, 1, 0.0, "DOMPoint") else {
-        return;
-    };
-    let Some(z) = geometry_number_arg(scope, &args, 2, 0.0, "DOMPoint") else {
-        return;
-    };
-    let Some(w) = geometry_number_arg(scope, &args, 3, 1.0, "DOMPoint") else {
-        return;
-    };
-    initialize_dom_point_object(scope, args.this(), x, y, z, w);
+    initialize_dom_point_object(scope, args.this(), init.x, init.y, init.z, init.w);
     rv.set(args.this().into());
+}
+
+pub(super) fn dom_point_readonly_constructor_callback<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    args: v8::FunctionCallbackArguments<'s>,
+    mut rv: v8::ReturnValue<'_, v8::Value>,
+) {
+    if !args.is_construct_call() {
+        throw_type_error(
+            scope,
+            "Failed to construct 'DOMPointReadOnly': Please use the 'new' operator.",
+        );
+        return;
+    }
+    let Some(init) = dom_point_constructor_init(scope, &args, "DOMPointReadOnly") else {
+        return;
+    };
+    initialize_dom_point_readonly_object(scope, args.this(), init.x, init.y, init.z, init.w);
+    rv.set(args.this().into());
+}
+
+fn dom_point_constructor_init<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    args: &v8::FunctionCallbackArguments<'s>,
+    prefix: &'static str,
+) -> Option<DomPointInit> {
+    Some(DomPointInit {
+        x: geometry_number_arg(scope, args, 0, 0.0, prefix)?,
+        y: geometry_number_arg(scope, args, 1, 0.0, prefix)?,
+        z: geometry_number_arg(scope, args, 2, 0.0, prefix)?,
+        w: geometry_number_arg(scope, args, 3, 1.0, prefix)?,
+    })
 }
 
 pub(super) fn dom_matrix_constructor_callback<'s>(
@@ -549,6 +648,19 @@ pub(in crate::context_bootstrap) fn initialize_dom_point_object<'s>(
     DomPointObjectDeclaration::new(x, y, z, w)
         .initialize(scope, object)
         .expect("DOMPoint declaration should initialize object");
+}
+
+fn initialize_dom_point_readonly_object<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    object: v8::Local<'s, v8::Object>,
+    x: f64,
+    y: f64,
+    z: f64,
+    w: f64,
+) {
+    DomPointReadOnlyObjectDeclaration::new(x, y, z, w)
+        .initialize(scope, object)
+        .expect("DOMPointReadOnly declaration should initialize object");
 }
 
 pub(in crate::context_bootstrap) fn build_dom_point_object<'s>(
@@ -629,7 +741,19 @@ pub(in crate::context_bootstrap) fn set_svg_point_read_only<'s>(
     );
 }
 
-fn build_dom_matrix_identity_object<'s>(
+fn build_dom_point_readonly_object<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    x: f64,
+    y: f64,
+    z: f64,
+    w: f64,
+) -> v8::Local<'s, v8::Object> {
+    DomPointReadOnlyObjectDeclaration::new(x, y, z, w)
+        .bind(scope)
+        .expect("DOMPointReadOnly declaration should bind")
+}
+
+pub(in crate::context_bootstrap) fn build_dom_matrix_identity_object<'s>(
     scope: &mut v8::PinScope<'s, '_>,
 ) -> v8::Local<'s, v8::Object> {
     build_dom_matrix_object(scope, DomMatrixComponents::identity())
@@ -659,10 +783,18 @@ pub(in crate::context_bootstrap) fn install_geometry_template_bindings<'s>(
 ) {
     let prototype = template.prototype_template(scope);
     match interface_name {
+        "DOMPointReadOnly" => {
+            DomPointReadOnlyConstructorDeclaration::initialize_template(scope, template);
+            DomPointReadOnlyPrototypeAccessorsDeclaration::initialize_prototype_template(
+                scope, prototype,
+            );
+            DomPointReadOnlyPrototypeMethodsDeclaration::initialize_prototype_template(
+                scope, prototype,
+            );
+        }
         "DOMPoint" => {
             DomPointConstructorDeclaration::initialize_template(scope, template);
             DomPointPrototypeAccessorsDeclaration::initialize_prototype_template(scope, prototype);
-            DomPointPrototypeMethodsDeclaration::initialize_prototype_template(scope, prototype);
         }
         "DOMMatrixReadOnly" => {
             DomMatrixReadOnlyConstructorDeclaration::initialize_template(scope, template);
@@ -711,7 +843,7 @@ fn dom_point_setter_callback<'s>(
         rv.set_undefined();
         return;
     };
-    if !dom_point_receiver_branded(scope, args.this()) {
+    if !web_api_interfaces::DOMPoint::is_instance(scope, args.this()) {
         throw_type_error(scope, "Illegal invocation");
         return;
     }
@@ -820,6 +952,145 @@ fn dom_point_from_point_callback<'s>(
         return;
     };
     rv.set(build_dom_point_object(scope, init.x, init.y, init.z, init.w).into());
+}
+
+fn dom_point_readonly_from_point_callback<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    args: v8::FunctionCallbackArguments<'s>,
+    mut rv: v8::ReturnValue<'_, v8::Value>,
+) {
+    let Some(init) = optional_dom_point_init_arg(scope, &args, 0, "DOMPointReadOnly.fromPoint")
+    else {
+        return;
+    };
+    rv.set(build_dom_point_readonly_object(scope, init.x, init.y, init.z, init.w).into());
+}
+
+fn dom_point_matrix_transform_callback<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    args: v8::FunctionCallbackArguments<'s>,
+    mut rv: v8::ReturnValue<'_, v8::Value>,
+) {
+    if !dom_point_receiver_branded(scope, args.this()) {
+        throw_type_error(scope, "Illegal invocation");
+        return;
+    }
+    let Some(matrix) = dom_matrix_init_arg(scope, &args, 0) else {
+        return;
+    };
+    let point = DomPointInit {
+        x: dom_point_slot(scope, args.this(), DOM_POINT_X_SLOT, 0.0),
+        y: dom_point_slot(scope, args.this(), DOM_POINT_Y_SLOT, 0.0),
+        z: dom_point_slot(scope, args.this(), DOM_POINT_Z_SLOT, 0.0),
+        w: dom_point_slot(scope, args.this(), DOM_POINT_W_SLOT, 1.0),
+    };
+    rv.set(
+        build_dom_point_object(
+            scope,
+            matrix.m11 * point.x
+                + matrix.m21 * point.y
+                + matrix.m31 * point.z
+                + matrix.m41 * point.w,
+            matrix.m12 * point.x
+                + matrix.m22 * point.y
+                + matrix.m32 * point.z
+                + matrix.m42 * point.w,
+            matrix.m13 * point.x
+                + matrix.m23 * point.y
+                + matrix.m33 * point.z
+                + matrix.m43 * point.w,
+            matrix.m14 * point.x
+                + matrix.m24 * point.y
+                + matrix.m34 * point.z
+                + matrix.m44 * point.w,
+        )
+        .into(),
+    );
+}
+
+fn dom_matrix_init_arg<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    args: &v8::FunctionCallbackArguments<'s>,
+    index: i32,
+) -> Option<DomMatrixComponents> {
+    if index >= args.length() || args.get(index).is_undefined() {
+        return Some(DomMatrixComponents::identity());
+    }
+    let init = match webidl::parse_dictionary::<DomMatrixInit>(
+        scope,
+        args.get(index),
+        webidl::Context::argument("DOMPointReadOnly.matrixTransform", (index + 1) as usize),
+    ) {
+        Ok(Some(init)) => init,
+        Ok(None) => DomMatrixInit::default(),
+        Err(error) => {
+            webidl::throw_error(scope, &error);
+            return None;
+        }
+    };
+    validated_dom_matrix_init(scope, init)
+}
+
+fn validated_dom_matrix_init(
+    scope: &mut v8::PinScope<'_, '_>,
+    init: DomMatrixInit,
+) -> Option<DomMatrixComponents> {
+    let m11 = validated_dom_matrix_alias(scope, "a", init.a, "m11", init.m11, 1.0)?;
+    let m12 = validated_dom_matrix_alias(scope, "b", init.b, "m12", init.m12, 0.0)?;
+    let m21 = validated_dom_matrix_alias(scope, "c", init.c, "m21", init.m21, 0.0)?;
+    let m22 = validated_dom_matrix_alias(scope, "d", init.d, "m22", init.m22, 1.0)?;
+    let m41 = validated_dom_matrix_alias(scope, "e", init.e, "m41", init.m41, 0.0)?;
+    let m42 = validated_dom_matrix_alias(scope, "f", init.f, "m42", init.m42, 0.0)?;
+    let components = DomMatrixComponents {
+        m11,
+        m12,
+        m13: init.m13.unwrap_or(0.0),
+        m14: init.m14.unwrap_or(0.0),
+        m21,
+        m22,
+        m23: init.m23.unwrap_or(0.0),
+        m24: init.m24.unwrap_or(0.0),
+        m31: init.m31.unwrap_or(0.0),
+        m32: init.m32.unwrap_or(0.0),
+        m33: init.m33.unwrap_or(1.0),
+        m34: init.m34.unwrap_or(0.0),
+        m41,
+        m42,
+        m43: init.m43.unwrap_or(0.0),
+        m44: init.m44.unwrap_or(1.0),
+    };
+    if init.is_2d == Some(true) && !components.is_2d() {
+        throw_type_error(
+            scope,
+            "DOMMatrixInit is2D is true, but the matrix contains 3D values.",
+        );
+        return None;
+    }
+    Some(components)
+}
+
+fn validated_dom_matrix_alias(
+    scope: &mut v8::PinScope<'_, '_>,
+    alias_name: &'static str,
+    alias: Option<f64>,
+    matrix_name: &'static str,
+    matrix: Option<f64>,
+    default: f64,
+) -> Option<f64> {
+    if let (Some(alias), Some(matrix)) = (alias, matrix)
+        && !same_dom_matrix_number(alias, matrix)
+    {
+        throw_type_error(
+            scope,
+            &format!("DOMMatrixInit {alias_name} and {matrix_name} values differ."),
+        );
+        return None;
+    }
+    Some(matrix.or(alias).unwrap_or(default))
+}
+
+fn same_dom_matrix_number(lhs: f64, rhs: f64) -> bool {
+    lhs == rhs || (lhs.is_nan() && rhs.is_nan())
 }
 
 fn dom_matrix_from_matrix_callback<'s>(
@@ -957,7 +1228,7 @@ fn dom_point_receiver_branded<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     receiver: v8::Local<'s, v8::Object>,
 ) -> bool {
-    web_api_interfaces::DOMPoint::is_instance(scope, receiver)
+    web_api_interfaces::DOMPointReadOnly::is_instance(scope, receiver)
 }
 
 fn dom_matrix_require_readonly_receiver<'s>(
