@@ -26,6 +26,7 @@ mod events;
 pub(crate) mod exposed_interfaces;
 mod file_api;
 mod form_data_runtime;
+mod geometry_clone;
 mod geometry_runtime;
 mod history_mutation;
 mod history_runtime;
@@ -236,7 +237,10 @@ mod worker_host;
 mod worker_location_runtime;
 
 pub(super) use self::assets::ContextBootstrapAssets;
-use self::assets::{build_constructor_template, build_constructor_template_with_callback};
+use self::assets::{
+    build_constructor_template, build_constructor_template_for_profile,
+    build_constructor_template_with_callback,
+};
 pub(crate) use self::broadcast_channel::{
     dispatch_authorized_page_broadcast_channel_event, dispatch_broadcast_channel_events_for_channel,
 };
@@ -291,6 +295,10 @@ pub(crate) use self::file_api::{
     flush_one_pending_file_reader, is_file_list_object, selected_file_from_object,
 };
 pub(crate) use self::form_data_runtime::form_data_request_body;
+pub(crate) use self::geometry_clone::{
+    GeometryClonePayload, build_geometry_object_from_clone_payload,
+    geometry_clone_payload_from_object,
+};
 use self::geometry_runtime::{build_dom_point_object, optional_dom_point_init_arg};
 pub(crate) use self::image_data::{
     ImageDataClonePayload, build_image_data_object_from_clone_payload,
@@ -642,6 +650,20 @@ pub(in crate::context_bootstrap) fn build_profiled_exposed_interface_template<'s
         return Ok(template);
     }
     let template = match spec.interface.name() {
+        "DOMMatrixReadOnly" => build_constructor_template_with_callback(
+            scope,
+            spec,
+            0,
+            profile,
+            geometry_runtime::dom_matrix_readonly_worker_constructor_callback,
+        )?,
+        "DOMMatrix" => build_constructor_template_with_callback(
+            scope,
+            spec,
+            0,
+            profile,
+            geometry_runtime::dom_matrix_worker_constructor_callback,
+        )?,
         "StorageManager" => {
             let template = navigator_runtime::build_storage_manager_worker_template(scope);
             template.read_only_prototype();
@@ -675,9 +697,11 @@ pub(in crate::context_bootstrap) fn build_profiled_exposed_interface_template<'s
         "EventSource" => build_constructor_template_with_callback(
             scope,
             spec,
+            1,
+            profile,
             worker_unsupported_constructor_callback,
         )?,
-        _ => build_constructor_template(scope, spec)?,
+        _ => build_constructor_template_for_profile(scope, spec, profile)?,
     };
     if profile == exposed_interfaces::TemplateBuildProfile::DedicatedWorker
         && spec.interface.name() == "FileSystemFileHandle"
