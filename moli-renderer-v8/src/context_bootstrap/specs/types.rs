@@ -130,6 +130,7 @@ pub(in crate::context_bootstrap) enum ConstructorKind {
     DomPointReadOnly,
     DomPoint,
     DomQuad,
+    DomMatrixReadOnly,
     DomMatrix,
     ResizeObserver,
     ResizeObserverEntry,
