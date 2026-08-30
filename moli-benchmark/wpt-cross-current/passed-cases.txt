@@ -3082,6 +3082,7 @@ css/css-will-change/parsing/will-change-valid.html
 css/css-will-change/will-change-contents-crash.html
 css/css-will-change/will-change-inherit-dynamic.html
 css/cssom-view/CaretPosition-001.html
+css/cssom-view/DOMRectList.html
 css/cssom-view/Element-currentCSSZoom.html
 css/cssom-view/GetBoundingRect.html
 css/cssom-view/HTMLImageElement-x-and-y-ignore-transforms.html
@@ -3356,10 +3357,16 @@ css/geometry/DOMMatrix-stringifier.html
 css/geometry/DOMMatrixInit-validate-fixup.html
 css/geometry/DOMPoint-001.html
 css/geometry/DOMPoint-002.html
+css/geometry/DOMQuad-001.html
+css/geometry/DOMQuad-002.html
+css/geometry/DOMQuad-nan.html
 css/geometry/DOMRect-001.html
 css/geometry/DOMRect-002.html
 css/geometry/DOMRect-nan.html
+css/geometry/DOMRectList.html
 css/geometry/WebKitCSSMatrix.html
+css/geometry/historical.html
+css/geometry/spec-examples.html
 css/mediaqueries/aspect-ratio-serialization.html
 css/mediaqueries/duplicate-media-stylesheet-crash.html
 css/mediaqueries/dynamic-range.html
