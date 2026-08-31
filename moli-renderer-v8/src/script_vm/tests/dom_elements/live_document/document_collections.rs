@@ -373,6 +373,145 @@ fn live_document_named_properties_follow_html_candidate_and_liveness_rules() {
 }
 
 #[test]
+fn live_document_enumerates_supported_property_names_in_document_order() {
+    let mut vm = new_parsed_test_vm(
+        "https://example.com/",
+        r#"<!doctype html><html><body>
+          <embed name="embedName">
+          <form id="formId" name="formName"></form>
+          <iframe id="frameId" name="frameName"></iframe>
+          <img name="imageName">
+          <object id="objectId" name="objectName">
+            <object id="nestedObjectId" name="nestedObjectName"></object>
+          </object>
+          <img id="imageId" name="imageWithIdName">
+          <img id="imageIdOnly">
+          <img name="duplicateName">
+          <form name="duplicateName"></form>
+          <img name="42">
+          <template id="templateId"><img name="templateImage"></template>
+        </body></html>"#,
+    );
+
+    let result = vm
+        .eval(
+            r#"
+            (() => {
+              const supported = [
+                "embedName", "formName", "frameName", "imageName",
+                "objectId", "objectName", "nestedObjectId", "nestedObjectName",
+                "imageId", "imageWithIdName", "duplicateName", "42"
+              ];
+              const ownNames = Object.getOwnPropertyNames(document);
+              const initial = {
+                includesEverySupportedName: supported.every(name => ownNames.includes(name)),
+                nonIndexOrder: ownNames.filter(name => supported.includes(name) && name !== "42"),
+                duplicateCount: ownNames.filter(name => name === "duplicateName").length,
+                numericNamePresent: ownNames.includes("42"),
+                excludedNamesAbsent: [
+                  "formId", "frameId", "imageIdOnly", "templateId", "templateImage"
+                ].every(name => !ownNames.includes(name))
+              };
+
+              const image = document.querySelector('[name="imageName"]');
+              image.id = "dynamicImageId";
+              image.name = "dynamicImageName";
+              const changedNames = Object.getOwnPropertyNames(document);
+              const changed = [
+                !changedNames.includes("imageName"),
+                changedNames.includes("dynamicImageId"),
+                changedNames.includes("dynamicImageName")
+              ];
+              image.remove();
+              const removedNames = Object.getOwnPropertyNames(document);
+              const removed = [
+                !removedNames.includes("dynamicImageId"),
+                !removedNames.includes("dynamicImageName")
+              ];
+              return JSON.stringify({ initial, changed, removed });
+            })()
+            "#,
+        )
+        .expect("Document supported-property-name enumeration should evaluate");
+
+    assert_eq!(
+        result,
+        r#"{"initial":{"includesEverySupportedName":true,"nonIndexOrder":["embedName","formName","frameName","imageName","objectId","objectName","nestedObjectId","nestedObjectName","imageId","imageWithIdName","duplicateName"],"duplicateCount":1,"numericNamePresent":true,"excludedNamesAbsent":true},"changed":[true,true,true],"removed":[true,true]}"#
+    );
+}
+
+#[test]
+fn live_document_named_iframe_singletons_return_child_windows() {
+    let mut vm = new_parsed_test_vm(
+        "https://example.com/",
+        r#"<!doctype html><html><body>
+          <iframe id="single-frame" name="singleFrame"></iframe>
+          <iframe id="duplicate-first" name="duplicateFrame"></iframe>
+          <iframe id="duplicate-second" name="duplicateFrame"></iframe>
+          <iframe id="numeric-frame" name="42"></iframe>
+          <iframe id="id-only-frame"></iframe>
+          <iframe id="dynamic-frame"></iframe>
+        </body></html>"#,
+    );
+
+    let result = vm
+        .eval(
+            r#"
+            (() => {
+              const single = document.getElementById("single-frame");
+              const first = document.getElementById("duplicate-first");
+              const second = document.getElementById("duplicate-second");
+              const numeric = document.getElementById("numeric-frame");
+              const dynamic = document.getElementById("dynamic-frame");
+              const duplicate = document.duplicateFrame;
+              const initial = {
+                singletonIsWindow: document.singleFrame === single.contentWindow,
+                singletonClass: Object.prototype.toString.call(document.singleFrame),
+                duplicateIsCollection: duplicate instanceof HTMLCollection,
+                duplicateMembers:
+                  duplicate.length === 2 && duplicate[0] === first && duplicate[1] === second,
+                numericIsWindow: document[42] === numeric.contentWindow,
+                idOnlyAbsent:
+                  document["id-only-frame"] === undefined &&
+                  !("id-only-frame" in document),
+              };
+
+              dynamic.name = "dynamicBefore";
+              const beforeUpdate = document.dynamicBefore === dynamic.contentWindow;
+              dynamic.name = "dynamicAfter";
+              dynamic.id = "differentId";
+              const afterUpdate =
+                document.dynamicBefore === undefined &&
+                !("dynamicBefore" in document) &&
+                document.dynamicAfter === dynamic.contentWindow &&
+                document.differentId === undefined;
+
+              single.removeAttribute("name");
+              const removedName =
+                document.singleFrame === undefined && !("singleFrame" in document);
+              dynamic.remove();
+              const removedElement =
+                document.dynamicAfter === undefined && !("dynamicAfter" in document);
+
+              return JSON.stringify({
+                initial,
+                beforeUpdate,
+                afterUpdate,
+                removedName,
+                removedElement,
+              });
+            })()
+            "#,
+        )
+        .expect("document iframe named-property probe should evaluate");
+
+    assert_eq!(
+        result,
+        r#"{"initial":{"singletonIsWindow":true,"singletonClass":"[object Window]","duplicateIsCollection":true,"duplicateMembers":true,"numericIsWindow":true,"idOnlyAbsent":true},"beforeUpdate":true,"afterUpdate":true,"removedName":true,"removedElement":true}"#
+    );
+}
+
+#[test]
 fn legacy_named_access_filters_name_candidates_by_consumer() {
     let mut vm = new_parsed_test_vm(
         "https://example.com/",
