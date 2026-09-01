@@ -248,6 +248,43 @@ struct SvgAnimatedEnumerationProperty {
     kind: SvgAnimatedEnumerationKind,
 }
 
+#[derive(Clone, Copy)]
+enum SvgAnimatedIntegerComponent {
+    Scalar,
+    PairFirst,
+    PairSecondOrFirst,
+}
+
+#[derive(Clone, Copy)]
+struct SvgAnimatedIntegerProperty {
+    index: usize,
+    interface: &'static str,
+    local_name: &'static str,
+    name: &'static str,
+    attribute: &'static str,
+    cache_slot: &'static str,
+    initial_value: i32,
+    component: SvgAnimatedIntegerComponent,
+}
+
+#[derive(Clone, Copy)]
+enum SvgAnimatedNumberComponent {
+    Scalar,
+    PairFirst,
+    PairSecondOrFirst,
+    NumberOrPercentage,
+}
+
+#[derive(Clone, Copy)]
+struct SvgAnimatedNumberProperty {
+    index: usize,
+    interface: &'static str,
+    name: &'static str,
+    attribute: &'static str,
+    initial_value: f64,
+    component: SvgAnimatedNumberComponent,
+}
+
 #[derive(webidl::WebIdlArgs)]
 #[webidl(prefix = "SVG list item")]
 struct SvgListItemArgs<'s> {
