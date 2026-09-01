@@ -51,6 +51,88 @@ return 'ok';
 }
 
 #[test]
+fn url_components_encode_carets_only_in_hierarchical_paths() {
+    assert_url_components(
+        r#"
+for (const [name, create] of factories) {
+  for (const prefix of ['https://host', 'file://', 'custom:', 'custom://host']) {
+    const object = create(prefix + '/a^b/%5e?^#^');
+    assert(object.href === prefix + '/a%5Eb/%5e?^#^', name + ': path caret encoded once');
+    assert(object.pathname === '/a%5Eb/%5e', name + ': pathname uses the path encode set');
+    object.pathname = '/^/%5e';
+    assert(object.href === prefix + '/%5E/%5e?^#^', name + ': pathname setter shares encoding');
+    object.search = '^';
+    object.hash = '^';
+    assert(object.search === '?^' && object.hash === '#^', name + ': suffix carets are literal');
+  }
+  const opaque = create('data:a b^c?^#^');
+  assert(opaque.href === 'data:a b^c?^#^', name + ': opaque path uses its own encode set');
+  opaque.pathname = '/replacement^';
+  assert(opaque.pathname === 'a b^c', name + ': opaque pathname is not mutable');
+}
+"#,
+    );
+}
+
+#[test]
+fn url_components_encode_the_final_opaque_space_during_parsing() {
+    assert_url_components(
+        r#"
+for (const [name, create] of factories) {
+  for (const [input, path] of [
+    ['payload ', 'payload%20'], ['payload   ', 'payload  %20'],
+    ['payload \t\n\r', 'payload%20'], ['payload \t \n \r', 'payload  %20'],
+    ['payload%20', 'payload%20'], ['payload %3F', 'payload %3F'],
+  ]) {
+    for (const suffix of ['?', '#', '?q', '#h', '?q#h', '?#']) {
+      const object = create('data:' + input + suffix);
+      const expected = 'data:' + path + suffix;
+      assert(object.href === expected, name + ': canonical href at construction: ' + expected);
+      assert(object.pathname === path, name + ': canonical path before any setter');
+      assert(new URL(object.href).href === expected, name + ': serialization is stable');
+      object.href = 'custom:' + input + suffix;
+      assert(object.href === 'custom:' + path + suffix, name + ': href replacement shares parsing');
+    }
+  }
+}
+"#,
+    );
+}
+
+#[test]
+fn url_components_opaque_path_is_stable_across_suffix_and_search_params_mutations() {
+    assert_url_components(
+        r#"
+const base = 'data:payload  %20';
+for (const [name, create] of factories) {
+  for (const first of ['search', 'hash']) {
+    const object = create('data:payload   ?q#h');
+    const params = object.searchParams;
+    object[first] = '';
+    assert(object.href === base + (first === 'search' ? '#h' : '?q'), name + ': clearing one suffix');
+    object[first === 'search' ? 'hash' : 'search'] = '';
+    assert(object.href === base, name + ': clearing both suffixes preserves the path');
+    object.search = '?';
+    object.hash = '#';
+    assert(object.href === base + '?#', name + ': empty suffixes keep their delimiters');
+    if (params) {
+      assert(object.searchParams === params, name + ': setters retain searchParams identity');
+      params.append('q', 'value');
+      assert(object.href === base + '?q=value#', name + ': append does not modify path');
+      params.delete('q');
+      assert(object.href === base + '#', name + ': delete removes only the query');
+      params.sort();
+      assert(object.href === base + '#', name + ': sorting empty params preserves the path');
+      object.hash = '';
+      assert(object.href === base, name + ': removing the final suffix preserves the path');
+    }
+  }
+}
+"#,
+    );
+}
+
+#[test]
 fn url_components_empty_getters_preserve_href() {
     assert_url_components(
         r#"
@@ -347,6 +429,135 @@ for (const tag of ['a', 'area']) {
   }};
   assert(object.ownerDocument === owner && object.href === 'https://adopted.test/replacement?q=keep#frag',
     `${tag}: conversion adopts the node before URL parsing`);
+}
+"#,
+    );
+}
+
+#[test]
+fn url_hierarchical_path_mutations_keep_hosts_and_logical_paths_separate() {
+    assert_url_components(
+        r#"
+for (const input of ['custom:/old?q#f', 'custom:/.//old?q#f']) {
+  for (const value of ['//p', '/.//p', '/..//p']) {
+    checkSetter(input, 'pathname', value, 'custom:/.//p?q#f');
+  }
+  checkSetter(input, 'pathname', 'p', 'custom:/p?q#f');
+  checkSetter(input, 'pathname', '', 'custom:/?q#f');
+}
+checkSetter('custom:///old?q#f', 'pathname', '', 'custom://?q#f');
+checkSetter('custom://host/old?q#f', 'pathname', '//p', 'custom://host//p?q#f');
+checkSetter('custom:/.//p?q#f', 'host', 'h:77', 'custom://h:77//p?q#f');
+for (const [name, create] of factories) {
+  for (const hostname of ['h', '', '[::1]']) {
+    const object = create('custom:/.//p?q#f');
+    assert(object.pathname === '//p', name + ': prefix is not part of pathname');
+    object.hostname = hostname;
+    assert(object.href === 'custom://' + hostname + '//p?q#f', name + ': add authority');
+    assert(object.pathname === '//p', name + ': authority change preserves path');
+    assert(object.search === '?q' && object.hash === '#f', name + ': suffix offsets');
+    assert(new URL(object.href).pathname === '//p', name + ': serialized URL round-trips');
+    object.pathname = '';
+    assert(object.href === 'custom://' + hostname + '?q#f', name + ': empty authority path');
+  }
+}
+"#,
+    );
+}
+
+#[test]
+fn url_relative_resolution_distinguishes_special_slashes_and_non_special_backslashes() {
+    assert_url_components(
+        r#"
+for (const [input, base, expected] of [
+  ['///next.test/a/../p?q#f', 'https://user:pass@old.test:123/a/b', 'https://next.test/p?q#f'],
+  ['///\\//\\//next.test/p', 'http://old.test/a/b', 'http://next.test/p'],
+  ['\\p', 'custom://host/a/b', 'custom://host/a/\\p'],
+  ['\\/p', 'custom://host/a/b', 'custom://host/a/\\/p'],
+  ['\\\\p', 'custom://host/a/b', 'custom://host/a/\\\\p'],
+  ['\\p', 'custom:/.//a/b', 'custom:/.//a/\\p'],
+  ['///next', 'custom://host/a/b', 'custom:///next'],
+  ['////next', 'custom:/a/b', 'custom:////next'],
+]) {
+  for (const constructor of [URL, frame.contentWindow.URL]) {
+    assert(new constructor(input, base).href === expected, 'relative constructor: ' + input);
+    assert(constructor.parse(input, base).href === expected, 'relative URL.parse: ' + input);
+    assert(constructor.canParse(input, base), 'relative URL.canParse: ' + input);
+  }
+  for (const owner of [document, frame.contentDocument,
+    document.implementation.createHTMLDocument('relative path')]) {
+    const baseElement = owner.head.appendChild(owner.createElement('base'));
+    baseElement.href = base;
+    for (const tag of ['a', 'area']) {
+      const link = owner.body.appendChild(owner.createElement(tag));
+      link.href = input;
+      assert(link.href === expected, tag + ': relative document base: ' + input);
+      link.remove();
+    }
+    baseElement.remove();
+  }
+}
+for (const constructor of [URL, frame.contentWindow.URL]) {
+  assert(constructor.parse('///?q', 'https://host/') === null, 'empty special host fails');
+  assert(!constructor.canParse('//\\host', 'custom://base/'), 'backslash in opaque host fails');
+}
+"#,
+    );
+}
+
+#[test]
+fn file_url_components_preserve_hosts_drive_letters_and_empty_path_segments() {
+    assert_url_components(
+        r#"
+for (const [input, expected] of [
+  ['file://server///?q#f', 'file://server///?q#f'],
+  ['file://server/C|/path', 'file://server/C:/path'],
+  ['file:///w|/m', 'file:///w:/m'],
+  ['file://localhost////foo', 'file://////foo'],
+]) {
+  for (const [name, create] of factories) {
+    const object = create(input);
+    assert(object.href === expected, `${name}: parsing ${input}`);
+    assert(object.origin === 'null', `${name}: file origin stays opaque`);
+    object.href = object.href;
+    assert(object.href === expected, `${name}: file serialization round-trips`);
+  }
+}
+checkSetter('file://monkey/', 'pathname', '\\\\', 'file://monkey//');
+checkSetter('file:///unicorn', 'pathname', '//\\/', 'file://////');
+checkSetter('file:///unicorn', 'pathname', '//monkey/..//', 'file://///');
+checkSetter('file://host/old?q#f', 'pathname', 'C|/new', 'file://host/C:/new?q#f');
+"#,
+    );
+}
+
+#[test]
+fn file_url_relative_resolution_matches_document_base_and_static_url_parsing() {
+    assert_url_components(
+        r#"
+for (const [input, base, expected] of [
+  ['/', 'file://host/C:/a/b', 'file://host/C:/'],
+  ['C|/new', 'file://host/D:/a/b', 'file://host/C:/new'],
+  ['/..//share//file', 'file://host/path', 'file://host//share//file'],
+  ['..', 'file://host/a/C:/', 'file://host/a/'],
+]) {
+  for (const constructor of [URL, frame.contentWindow.URL]) {
+    assert(new constructor(input, base).href === expected, 'relative URL constructor');
+    assert(constructor.parse(input, base).href === expected, 'relative URL.parse');
+    assert(constructor.canParse(input, base), 'relative URL.canParse');
+  }
+  for (const owner of [document, frame.contentDocument,
+    document.implementation.createHTMLDocument('file base')]) {
+    const baseElement = owner.head.appendChild(owner.createElement('base'));
+    baseElement.href = base;
+    for (const tag of ['a', 'area']) {
+      const link = owner.body.appendChild(owner.createElement(tag));
+      link.href = input;
+      assert(link.href === expected, `${tag}: file document base`);
+      link.remove();
+    }
+    baseElement.remove();
+  }
 }
 "#,
     );
