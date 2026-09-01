@@ -2347,3 +2347,32 @@ fn svg_filter_primitives_expose_native_dom_attributes() {
         "true"
     );
 }
+
+#[test]
+fn svg_animated_integers_use_native_identity_in_windowless_and_child_documents() {
+    let mut vm = new_parsed_test_vm(
+        "https://svg-animated-integer.test/",
+        "<!doctype html><html><body><iframe></iframe></body></html>",
+    );
+    assert_eq!(vm.eval(r#"(() => {
+      const ns = 'http://www.w3.org/2000/svg';
+      const child = document.querySelector('iframe').contentWindow;
+      const check = (ok, label) => { if (!ok) throw Error(label); };
+      for (const realm of [window, child]) {
+        for (const doc of [realm.document, realm.document.implementation.createHTMLDocument('')]) {
+          const filter = doc.createElementNS(ns, 'feConvolveMatrix');
+          const getter = Object.getOwnPropertyDescriptor(window.SVGFEConvolveMatrixElement.prototype, 'orderX').get;
+          const value = getter.call(filter);
+          check(value instanceof realm.SVGAnimatedInteger, 'producer realm');
+          check(value === filter.orderX && value.baseVal === 3, 'retained native identity');
+          filter.setAttribute('order', '4 6');
+          check(value.baseVal === 4 && filter.orderY.baseVal === 6, 'attribute synchronization');
+          value.baseVal = 7;
+          check(filter.getAttribute('order') === '7 6', 'windowless native reflection');
+          filter.removeAttribute('order');
+          check(value.baseVal === 3 && value.animVal === 3, 'removed attribute default');
+        }
+      }
+      return true;
+    })()"#).unwrap(), "true");
+}

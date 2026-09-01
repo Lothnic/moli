@@ -1824,9 +1824,12 @@ pub(super) fn svg_animated_integer_getter<'s>(
         rv.set_undefined();
         return;
     };
+    let Some(receiver) = moli_webapi_declare::web_api_object_target(scope, args.this()) else {
+        return;
+    };
     if !require_svg_receiver(
         scope,
-        args.this(),
+        receiver,
         "SVGAnimatedInteger",
         &format!("{name} getter"),
     ) {
@@ -1840,11 +1843,11 @@ pub(super) fn svg_animated_integer_getter<'s>(
             return;
         }
     };
-    sync_svg_animated_integer_from_owner_attribute(scope, args.this());
-    let initial_value = svg_animated_integer_property(scope, args.this())
+    sync_svg_animated_integer_from_owner_attribute(scope, receiver);
+    let initial_value = svg_animated_integer_property(scope, receiver)
         .map(|property| property.initial_value)
         .unwrap_or_default();
-    let value = get_private_value(scope, args.this(), slot)
+    let value = get_private_value(scope, receiver, slot)
         .and_then(|value| value.int32_value(scope))
         .unwrap_or(initial_value);
     rv.set(v8::Integer::new(scope, value).into());
@@ -2022,9 +2025,12 @@ pub(super) fn svg_animated_integer_setter<'s>(
     ) else {
         return;
     };
+    let Some(receiver) = moli_webapi_declare::web_api_object_target(scope, args.this()) else {
+        return;
+    };
     if !require_svg_receiver(
         scope,
-        args.this(),
+        receiver,
         "SVGAnimatedInteger",
         &format!("{name} setter"),
     ) || name != "baseVal"
@@ -2042,8 +2048,8 @@ pub(super) fn svg_animated_integer_setter<'s>(
             return;
         }
     };
-    set_svg_animated_integer_values(scope, args.this(), value);
-    reflect_svg_animated_integer_to_owner_attribute(scope, args.this());
+    set_svg_animated_integer_values(scope, receiver, value);
+    reflect_svg_animated_integer_to_owner_attribute(scope, receiver);
 }
 
 pub(super) fn svg_animated_transform_list_getter<'s>(

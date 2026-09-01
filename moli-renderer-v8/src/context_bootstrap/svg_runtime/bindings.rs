@@ -1145,7 +1145,7 @@ struct SvgAnimatedNumberTemplateAccessorsDeclaration {
 }
 
 #[derive(WebApiFunctionTemplate)]
-#[webapi(interface = web_api_interfaces::SVGAnimatedInteger, enumerable)]
+#[webapi(interface = web_api_interfaces::SVGAnimatedInteger, enumerable, receiver)]
 struct SvgAnimatedIntegerTemplateAccessorsDeclaration {
     #[webapi(
         accessor_property = "baseVal",
