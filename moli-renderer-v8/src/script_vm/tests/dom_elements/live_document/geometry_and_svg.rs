@@ -345,6 +345,386 @@ fn svg_owner_svg_element_tracks_the_nearest_svg_fragment_root() {
 }
 
 #[test]
+fn svg_animated_lengths_reflect_initial_and_content_attribute_values() {
+    let mut vm = new_parsed_test_vm(
+        "https://svg-animated-length-reflection.test/",
+        "<!doctype html><html><head></head><body></body></html>",
+    );
+
+    let result = vm
+        .eval(
+            r#"
+            (() => {
+              const assert = (condition, message) => {
+                if (!condition) throw new Error(message);
+              };
+              const ns = "http://www.w3.org/2000/svg";
+              const cases = [
+                ["filter", SVGFilterElement, [
+                  ["x", "-10%"], ["y", "-10%"],
+                  ["width", "120%"], ["height", "120%"],
+                ]],
+                ["feBlend", SVGFEBlendElement, [
+                  ["x", "0%"], ["y", "0%"],
+                  ["width", "100%"], ["height", "100%"],
+                ]],
+                ["linearGradient", SVGLinearGradientElement, [
+                  ["x1", "0%"], ["y1", "0%"], ["x2", "100%"], ["y2", "0%"],
+                ]],
+                ["marker", SVGMarkerElement, [
+                  ["refX", "0"], ["refY", "0"],
+                  ["markerWidth", "3"], ["markerHeight", "3"],
+                ]],
+                ["mask", SVGMaskElement, [
+                  ["x", "-10%"], ["y", "-10%"],
+                  ["width", "120%"], ["height", "120%"],
+                ]],
+                ["pattern", SVGPatternElement, [
+                  ["x", "0"], ["y", "0"], ["width", "0"], ["height", "0"],
+                ]],
+                ["radialGradient", SVGRadialGradientElement, [
+                  ["cx", "50%"], ["cy", "50%"], ["r", "50%"],
+                  ["fx", "50%"], ["fy", "50%"], ["fr", "0%"],
+                ]],
+                ["svg", SVGSVGElement, [
+                  ["x", "0"], ["y", "0"], ["width", "100%"], ["height", "100%"],
+                ]],
+                ["text", SVGTextContentElement, [["textLength", "0"]]],
+                ["textPath", SVGTextPathElement, [["startOffset", "0"]]],
+              ];
+
+              for (const [tag, owner, attributes] of cases) {
+                const element = document.createElementNS(ns, tag);
+                for (const [name, initial] of attributes) {
+                  const descriptor = Object.getOwnPropertyDescriptor(owner.prototype, name);
+                  assert(typeof descriptor?.get === "function", `${owner.name}.${name} getter`);
+                  assert(descriptor.set === undefined, `${owner.name}.${name} setter`);
+                  assert(descriptor.enumerable && descriptor.configurable,
+                    `${owner.name}.${name} flags`);
+
+                  const animated = element[name];
+                  assert(animated instanceof SVGAnimatedLength, `${tag}.${name} interface`);
+                  assert(element[name] === animated, `${tag}.${name} SameObject`);
+                  assert(animated.baseVal.valueAsString === initial,
+                    `${tag}.${name} initial baseVal`);
+                  assert(animated.animVal.valueAsString === initial,
+                    `${tag}.${name} initial animVal`);
+
+                  element.setAttribute(name, "42");
+                  assert(element[name] === animated, `${tag}.${name} SameObject after set`);
+                  assert(animated.baseVal.valueAsString === "42" &&
+                    animated.animVal.valueAsString === "42", `${tag}.${name} content update`);
+
+                  element.setAttribute(name, "foobar");
+                  assert(element[name] === animated, `${tag}.${name} SameObject after invalid`);
+                  assert(animated.baseVal.valueAsString === initial &&
+                    animated.animVal.valueAsString === initial, `${tag}.${name} invalid fallback`);
+
+                  element.removeAttribute(name);
+                  assert(element[name] === animated, `${tag}.${name} SameObject after remove`);
+                  assert(animated.baseVal.valueAsString === initial &&
+                    animated.animVal.valueAsString === initial, `${tag}.${name} removed fallback`);
+                }
+              }
+              return "ok";
+            })()
+            "#,
+        )
+        .expect("SVG animated length reflection probe should evaluate");
+
+    assert_eq!(result, "ok");
+}
+
+#[test]
+fn svg_fit_to_view_box_attributes_are_live_and_reflected() {
+    let mut vm = new_parsed_test_vm(
+        "https://svg-fit-to-view-box.test/",
+        "<!doctype html><html><head></head><body></body></html>",
+    );
+
+    let result = vm
+        .eval(
+            r#"
+            (() => {
+              const assert = (condition, message) => {
+                if (!condition) throw new Error(message);
+              };
+              const throws = (callback, expected, message) => {
+                try {
+                  callback();
+                } catch (error) {
+                  assert(error.name === expected, `${message}: ${error.name}`);
+                  return;
+                }
+                throw new Error(`${message}: did not throw`);
+              };
+              const accessor = (prototype, name) => {
+                const descriptor = Object.getOwnPropertyDescriptor(prototype, name);
+                assert(typeof descriptor?.get === "function", `${prototype.constructor.name}.${name} getter`);
+                assert(descriptor.set === undefined, `${prototype.constructor.name}.${name} setter`);
+                assert(descriptor.enumerable && descriptor.configurable,
+                  `${prototype.constructor.name}.${name} flags`);
+                return descriptor;
+              };
+              const ns = "http://www.w3.org/2000/svg";
+
+              for (const constructor of [
+                SVGAnimatedRect,
+                SVGPreserveAspectRatio,
+                SVGAnimatedPreserveAspectRatio,
+              ]) {
+                assert(typeof constructor === "function", `${constructor.name} constructor`);
+                throws(() => new constructor(), "TypeError", `${constructor.name} illegal constructor`);
+              }
+
+              const fitCases = [
+                ["svg", SVGSVGElement],
+                ["symbol", SVGSymbolElement],
+                ["marker", SVGMarkerElement],
+                ["pattern", SVGPatternElement],
+                ["view", SVGViewElement],
+              ];
+              for (const [localName, constructor] of fitCases) {
+                accessor(constructor.prototype, "viewBox");
+                accessor(constructor.prototype, "preserveAspectRatio");
+                const element = document.createElementNS(ns, localName);
+                const viewBox = element.viewBox;
+                const aspectRatio = element.preserveAspectRatio;
+                assert(viewBox instanceof SVGAnimatedRect, `${localName}.viewBox interface`);
+                assert(aspectRatio instanceof SVGAnimatedPreserveAspectRatio,
+                  `${localName}.preserveAspectRatio interface`);
+                assert(element.viewBox === viewBox, `${localName}.viewBox SameObject`);
+                assert(element.preserveAspectRatio === aspectRatio,
+                  `${localName}.preserveAspectRatio SameObject`);
+              }
+
+              const imageDescriptor = accessor(
+                SVGImageElement.prototype,
+                "preserveAspectRatio",
+              );
+              assert(!("viewBox" in SVGImageElement.prototype), "image has no viewBox");
+              const image = document.createElementNS(ns, "image");
+              assert(image.preserveAspectRatio instanceof SVGAnimatedPreserveAspectRatio,
+                "image preserveAspectRatio interface");
+              assert(image.preserveAspectRatio === image.preserveAspectRatio,
+                "image preserveAspectRatio SameObject");
+
+              const svg = document.createElementNS(ns, "svg");
+              const animatedRect = svg.viewBox;
+              const baseRect = animatedRect.baseVal;
+              const animRect = animatedRect.animVal;
+              assert(baseRect instanceof SVGRect && animRect instanceof SVGRect,
+                "viewBox rectangle interfaces");
+              for (const rect of [baseRect, animRect]) {
+                assert(!(rect instanceof DOMRect), "viewBox uses native SVGRect, not DOMRect");
+                assert(Object.getPrototypeOf(rect) === SVGRect.prototype,
+                  "viewBox native rectangle prototype");
+                assert(Object.prototype.toString.call(rect) === "[object SVGRect]",
+                  "viewBox native rectangle tag");
+              }
+              assert(baseRect !== animRect, "viewBox base and animated rectangles are distinct");
+              assert(Object.prototype.toString.call(animatedRect) === "[object SVGAnimatedRect]",
+                "animated rectangle tag");
+              assert(baseRect.x === 0 && baseRect.y === 0 &&
+                baseRect.width === 0 && baseRect.height === 0, "initial viewBox");
+              assert(!svg.hasAttribute("viewBox"), "viewBox getter does not create attribute");
+
+              svg.setAttribute("viewBox", "10 20 30 40");
+              assert(baseRect.x === 10 && baseRect.y === 20 &&
+                baseRect.width === 30 && baseRect.height === 40,
+                "cached base rectangle tracks content attribute");
+              assert(animRect.x === 10 && animRect.y === 20 &&
+                animRect.width === 30 && animRect.height === 40,
+                "cached animated rectangle tracks content attribute");
+              baseRect.x = 11;
+              assert(svg.getAttribute("viewBox") === "11 20 30 40",
+                "base rectangle mutation reflects to viewBox");
+              assert(baseRect.x === 11 && animRect.x === 11,
+                "viewBox values remain synchronized after mutation");
+              throws(() => { animRect.x = 12; }, "NoModificationAllowedError",
+                "animated rectangle is read-only");
+              svg.setAttribute("viewBox", "0 0 -1 2");
+              assert(baseRect.x === 0 && baseRect.width === 0,
+                "invalid viewBox uses the initial value");
+              svg.removeAttribute("viewBox");
+              assert(baseRect.x === 0 && baseRect.height === 0,
+                "removed viewBox uses the initial value");
+
+              const animatedAspectRatio = svg.preserveAspectRatio;
+              const baseAspectRatio = animatedAspectRatio.baseVal;
+              const animAspectRatio = animatedAspectRatio.animVal;
+              assert(baseAspectRatio instanceof SVGPreserveAspectRatio &&
+                animAspectRatio instanceof SVGPreserveAspectRatio,
+                "preserveAspectRatio value interfaces");
+              assert(baseAspectRatio !== animAspectRatio,
+                "preserveAspectRatio base and animated values are distinct");
+              assert(baseAspectRatio.align ===
+                SVGPreserveAspectRatio.SVG_PRESERVEASPECTRATIO_XMIDYMID,
+                "initial preserveAspectRatio align");
+              assert(baseAspectRatio.meetOrSlice ===
+                SVGPreserveAspectRatio.SVG_MEETORSLICE_MEET,
+                "initial preserveAspectRatio meetOrSlice");
+              assert(!svg.hasAttribute("preserveAspectRatio"),
+                "preserveAspectRatio getter does not create attribute");
+
+              svg.setAttribute("preserveAspectRatio", "xMinYMax slice");
+              assert(baseAspectRatio.align ===
+                SVGPreserveAspectRatio.SVG_PRESERVEASPECTRATIO_XMINYMAX,
+                "cached base aspect ratio tracks content attribute");
+              assert(animAspectRatio.meetOrSlice ===
+                SVGPreserveAspectRatio.SVG_MEETORSLICE_SLICE,
+                "cached animated aspect ratio tracks content attribute");
+              baseAspectRatio.align =
+                SVGPreserveAspectRatio.SVG_PRESERVEASPECTRATIO_XMAXYMIN;
+              baseAspectRatio.meetOrSlice = SVGPreserveAspectRatio.SVG_MEETORSLICE_SLICE;
+              assert(svg.getAttribute("preserveAspectRatio") === "xMaxYMin slice",
+                "base aspect ratio mutation reflects canonical syntax");
+              assert(animAspectRatio.align ===
+                SVGPreserveAspectRatio.SVG_PRESERVEASPECTRATIO_XMAXYMIN,
+                "animated aspect ratio tracks base mutation");
+              baseAspectRatio.align = SVGPreserveAspectRatio.SVG_PRESERVEASPECTRATIO_UNKNOWN;
+              baseAspectRatio.meetOrSlice = SVGPreserveAspectRatio.SVG_MEETORSLICE_UNKNOWN;
+              assert(svg.getAttribute("preserveAspectRatio") === "xMaxYMin slice",
+                "unknown enumeration assignments are ignored");
+              throws(() => { animAspectRatio.align = 1; }, "NoModificationAllowedError",
+                "animated aspect ratio align is read-only");
+              throws(() => { animAspectRatio.meetOrSlice = 1; },
+                "NoModificationAllowedError", "animated aspect ratio meetOrSlice is read-only");
+              svg.setAttribute("preserveAspectRatio", "invalid");
+              assert(baseAspectRatio.align ===
+                SVGPreserveAspectRatio.SVG_PRESERVEASPECTRATIO_XMIDYMID &&
+                animAspectRatio.meetOrSlice === SVGPreserveAspectRatio.SVG_MEETORSLICE_MEET,
+                "invalid preserveAspectRatio uses the initial value");
+              svg.removeAttribute("preserveAspectRatio");
+              assert(baseAspectRatio.align ===
+                SVGPreserveAspectRatio.SVG_PRESERVEASPECTRATIO_XMIDYMID,
+                "removed preserveAspectRatio uses the initial value");
+
+              const constants = [
+                ["SVG_PRESERVEASPECTRATIO_UNKNOWN", 0],
+                ["SVG_PRESERVEASPECTRATIO_NONE", 1],
+                ["SVG_PRESERVEASPECTRATIO_XMINYMIN", 2],
+                ["SVG_PRESERVEASPECTRATIO_XMIDYMIN", 3],
+                ["SVG_PRESERVEASPECTRATIO_XMAXYMIN", 4],
+                ["SVG_PRESERVEASPECTRATIO_XMINYMID", 5],
+                ["SVG_PRESERVEASPECTRATIO_XMIDYMID", 6],
+                ["SVG_PRESERVEASPECTRATIO_XMAXYMID", 7],
+                ["SVG_PRESERVEASPECTRATIO_XMINYMAX", 8],
+                ["SVG_PRESERVEASPECTRATIO_XMIDYMAX", 9],
+                ["SVG_PRESERVEASPECTRATIO_XMAXYMAX", 10],
+                ["SVG_MEETORSLICE_UNKNOWN", 0],
+                ["SVG_MEETORSLICE_MEET", 1],
+                ["SVG_MEETORSLICE_SLICE", 2],
+              ];
+              for (const [name, value] of constants) {
+                assert(SVGPreserveAspectRatio[name] === value, `constructor ${name}`);
+                assert(SVGPreserveAspectRatio.prototype[name] === value, `prototype ${name}`);
+              }
+
+              const viewBoxDescriptor = Object.getOwnPropertyDescriptor(
+                SVGSVGElement.prototype,
+                "viewBox",
+              );
+              throws(() => viewBoxDescriptor.get.call(document.createElementNS(ns, "rect")),
+                "TypeError", "viewBox receiver brand");
+              throws(() => imageDescriptor.get.call(document.createElementNS(ns, "rect")),
+                "TypeError", "image preserveAspectRatio receiver brand");
+              const animatedRectDescriptor = Object.getOwnPropertyDescriptor(
+                SVGAnimatedRect.prototype,
+                "baseVal",
+              );
+              throws(() => animatedRectDescriptor.get.call({}), "TypeError",
+                "animated rectangle receiver brand");
+              const alignDescriptor = Object.getOwnPropertyDescriptor(
+                SVGPreserveAspectRatio.prototype,
+                "align",
+              );
+              throws(() => alignDescriptor.get.call({}), "TypeError",
+                "preserveAspectRatio receiver brand");
+              return "ok";
+            })()
+            "#,
+        )
+        .expect("SVG fit-to-view-box reflection probe should evaluate");
+
+    assert_eq!(result, "ok");
+}
+
+#[test]
+fn svg_view_box_rects_preserve_native_float_and_reentrant_setter_semantics() {
+    let mut vm = new_parsed_test_vm(
+        "https://svg-view-box-native-rect.test/",
+        "<!doctype html><html><head></head><body></body></html>",
+    );
+
+    let result = vm
+        .eval(
+            r#"
+            (() => {
+              const assert = (condition, message) => {
+                if (!condition) throw new Error(message);
+              };
+              const throws = (callback, name) => {
+                try { callback(); } catch (error) {
+                  assert(error.name === name, `expected ${name}, got ${error.name}`);
+                  return;
+                }
+                throw new Error(`expected ${name}`);
+              };
+              const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+              const fields = ["x", "y", "width", "height"];
+              const values = rect => fields.map(field => rect[field]);
+              svg.setAttribute("viewBox", "1.2 2.4 3.6 4.8");
+              const base = svg.viewBox.baseVal;
+              const anim = svg.viewBox.animVal;
+              const assertValues = expected => {
+                for (const rect of [base, anim]) {
+                  assert(JSON.stringify(values(rect)) === JSON.stringify(expected.map(Math.fround)),
+                    `float values: ${values(rect)}`);
+                }
+              };
+              assertValues([1.2, 2.4, 3.6, 4.8]);
+              svg.setAttribute("viewBox", "5.5 6.6 7.7 8.8");
+              assertValues([5.5, 6.6, 7.7, 8.8]);
+              base.x = "1.2";
+              base.width = 1e20;
+              assertValues([1.2, 6.6, 1e20, 8.8]);
+              const reflected = svg.getAttribute("viewBox");
+              assert(JSON.stringify(reflected.split(" ").map(Number).map(Math.fround)) ===
+                JSON.stringify(values(base)), "float serialization round trip");
+              for (const invalid of [NaN, Infinity, -Infinity, 1e40, undefined, Symbol()]) {
+                throws(() => { base.x = invalid; }, "TypeError");
+                assert(svg.getAttribute("viewBox") === reflected,
+                  "rejected float assignment preserves the attribute");
+              }
+              throws(() => { anim.width = 1; }, "NoModificationAllowedError");
+              const domRectX = Object.getOwnPropertyDescriptor(DOMRect.prototype, "x");
+              throws(() => domRectX.get.call(base), "TypeError");
+              throws(() => domRectX.set.call(anim, 7), "TypeError");
+              assert(svg.getAttribute("viewBox") === reflected,
+                "read-only and foreign-interface setters preserve the attribute");
+
+              base.x = {
+                valueOf() {
+                  svg.setAttribute("viewBox", "10 20 30 40");
+                  return 9;
+                }
+              };
+              assert(svg.getAttribute("viewBox") === "9 20 30 40",
+                "numeric coercion preserves reentrant changes to the other fields");
+              assertValues([9, 20, 30, 40]);
+              svg.setAttribute("viewBox", "0 0 1e40 1");
+              assertValues([0, 0, 0, 0]);
+              return "ok";
+            })()
+            "#,
+        )
+        .expect("native SVG viewBox rectangle probe should evaluate");
+
+    assert_eq!(result, "ok");
+}
+
+#[test]
 fn svg_historical_interfaces_keep_current_element_constructors_only() {
     let mut vm = new_parsed_test_vm(
         "https://svg-historical-interfaces.test/",
@@ -766,6 +1146,351 @@ fn svg_filter_and_text_path_enumerations_reflect_typed_content_attributes() {
 }
 
 #[test]
+fn svg_animated_integers_reflect_filter_content_attributes() {
+    let mut vm = new_parsed_test_vm(
+        "https://svg-animated-integer.test/",
+        "<!doctype html><html><body></body></html>",
+    );
+
+    let result = vm
+        .eval(
+            r#"
+            (() => {
+              const assert = (condition, message) => {
+                if (!condition) throw new Error(message);
+              };
+              const ns = "http://www.w3.org/2000/svg";
+              const convolve = document.createElementNS(ns, "feConvolveMatrix");
+              const turbulence = document.createElementNS(ns, "feTurbulence");
+
+              assert(typeof SVGAnimatedInteger === "function", "constructor exposed");
+              let illegalConstructor = false;
+              try {
+                new SVGAnimatedInteger();
+              } catch (error) {
+                illegalConstructor = error instanceof TypeError;
+              }
+              assert(illegalConstructor, "illegal constructor");
+
+              const baseDescriptor = Object.getOwnPropertyDescriptor(
+                SVGAnimatedInteger.prototype,
+                "baseVal",
+              );
+              const animDescriptor = Object.getOwnPropertyDescriptor(
+                SVGAnimatedInteger.prototype,
+                "animVal",
+              );
+              assert(typeof baseDescriptor.get === "function" &&
+                typeof baseDescriptor.set === "function", "baseVal descriptor");
+              assert(typeof animDescriptor.get === "function" && animDescriptor.set === undefined,
+                "animVal descriptor");
+              assert(baseDescriptor.enumerable && baseDescriptor.configurable &&
+                animDescriptor.enumerable && animDescriptor.configurable,
+                "animated integer descriptor flags");
+
+              const orderX = convolve.orderX;
+              const orderY = convolve.orderY;
+              const targetX = convolve.targetX;
+              const targetY = convolve.targetY;
+              const numOctaves = turbulence.numOctaves;
+              for (const [owner, property, value, initial] of [
+                [convolve, "orderX", orderX, 3],
+                [convolve, "orderY", orderY, 3],
+                [convolve, "targetX", targetX, 0],
+                [convolve, "targetY", targetY, 0],
+                [turbulence, "numOctaves", numOctaves, 1],
+              ]) {
+                assert(value instanceof SVGAnimatedInteger, `${property} interface`);
+                assert(Object.prototype.toString.call(value) === "[object SVGAnimatedInteger]",
+                  `${property} tag`);
+                assert(owner[property] === value, `${property} SameObject`);
+                assert(value.baseVal === initial && value.animVal === initial,
+                  `${property} initial value`);
+                const descriptor = Object.getOwnPropertyDescriptor(
+                  Object.getPrototypeOf(owner),
+                  property,
+                );
+                assert(typeof descriptor.get === "function" && descriptor.set === undefined,
+                  `${property} element descriptor`);
+                assert(descriptor.enumerable && descriptor.configurable,
+                  `${property} element descriptor flags`);
+              }
+
+              convolve.setAttribute("order", "5");
+              assert(orderX.baseVal === 5 && orderY.baseVal === 5, "single order value");
+              convolve.setAttribute("order", "5 7");
+              assert(orderX.baseVal === 5 && orderY.baseVal === 7, "paired order values");
+              convolve.setAttribute("order", "5, 7");
+              assert(orderX.baseVal === 5 && orderY.baseVal === 7, "comma order values");
+              convolve.setAttribute("order", "-1.5");
+              assert(orderX.baseVal === 3 && orderY.baseVal === 3, "invalid order value");
+              convolve.removeAttribute("order");
+              assert(orderX.baseVal === 3 && orderY.baseVal === 3, "removed order value");
+
+              convolve.setAttribute("targetX", "42");
+              convolve.setAttribute("targetY", "-4");
+              turbulence.setAttribute("numOctaves", "6");
+              assert(targetX.baseVal === 42 && targetY.baseVal === -4,
+                "target content attributes");
+              assert(numOctaves.baseVal === 6, "numOctaves content attribute");
+              turbulence.setAttribute("numOctaves", "invalid");
+              assert(numOctaves.baseVal === 1, "invalid numOctaves value");
+
+              targetX.baseVal = -1;
+              assert(convolve.getAttribute("targetX") === "-1", "negative reflection");
+              assert(targetX.baseVal === -1 && targetX.animVal === -1,
+                "negative reflected values");
+              targetX.baseVal = 300;
+              assert(targetX.baseVal === 300, "positive assignment");
+              targetX.baseVal = "aString";
+              assert(targetX.baseVal === 0 && convolve.getAttribute("targetX") === "0",
+                "WebIDL string conversion");
+              targetX.baseVal = convolve;
+              assert(targetX.baseVal === 0, "WebIDL object conversion");
+
+              orderX.baseVal = -2;
+              assert(orderX.baseVal === -2 && orderY.baseVal === 3,
+                "orderX reflected independently");
+              assert(convolve.getAttribute("order") === "-2 3", "orderX serialization");
+              orderY.baseVal = 8;
+              assert(orderX.baseVal === -2 && orderY.baseVal === 8,
+                "orderY reflected independently");
+              assert(convolve.getAttribute("order") === "-2 8", "orderY serialization");
+
+              let incompatibleAnimatedReceiver = false;
+              try {
+                baseDescriptor.get.call({});
+              } catch (error) {
+                incompatibleAnimatedReceiver = error instanceof TypeError;
+              }
+              assert(incompatibleAnimatedReceiver, "animated integer receiver brand");
+
+              const orderDescriptor = Object.getOwnPropertyDescriptor(
+                SVGFEConvolveMatrixElement.prototype,
+                "orderX",
+              );
+              let incompatibleElementReceiver = false;
+              try {
+                orderDescriptor.get.call(turbulence);
+              } catch (error) {
+                incompatibleElementReceiver = error instanceof TypeError;
+              }
+              assert(incompatibleElementReceiver, "element receiver brand");
+              return "ok";
+            })()
+            "#,
+        )
+        .expect("SVG animated integer probe should evaluate");
+
+    assert_eq!(result, "ok");
+}
+
+#[test]
+fn svg_animated_numbers_reflect_filter_and_stop_content_attributes() {
+    let mut vm = new_parsed_test_vm(
+        "https://svg-animated-number.test/",
+        "<!doctype html><html><body></body></html>",
+    );
+
+    let result = vm
+        .eval(
+            r#"
+            (() => {
+              const assert = (condition, message) => {
+                if (!condition) throw new Error(message);
+              };
+              const ns = "http://www.w3.org/2000/svg";
+              const cases = [
+                ["feFuncA", SVGFEFuncAElement, SVGComponentTransferFunctionElement, [
+                  ["slope", "slope", 1], ["intercept", "intercept", 0],
+                  ["amplitude", "amplitude", 1], ["exponent", "exponent", 1],
+                  ["offset", "offset", 0],
+                ]],
+                ["feComposite", SVGFECompositeElement, SVGFECompositeElement, [
+                  ["k1", "k1", 0], ["k2", "k2", 0],
+                  ["k3", "k3", 0], ["k4", "k4", 0],
+                ]],
+                ["feConvolveMatrix", SVGFEConvolveMatrixElement,
+                  SVGFEConvolveMatrixElement, [
+                    ["divisor", "divisor", 1], ["bias", "bias", 0],
+                    ["kernelUnitLengthX", "kernelUnitLength", 0],
+                    ["kernelUnitLengthY", "kernelUnitLength", 0],
+                  ]],
+                ["feDiffuseLighting", SVGFEDiffuseLightingElement,
+                  SVGFEDiffuseLightingElement, [
+                    ["surfaceScale", "surfaceScale", 1],
+                    ["diffuseConstant", "diffuseConstant", 1],
+                    ["kernelUnitLengthX", "kernelUnitLength", 0],
+                    ["kernelUnitLengthY", "kernelUnitLength", 0],
+                  ]],
+                ["feDisplacementMap", SVGFEDisplacementMapElement,
+                  SVGFEDisplacementMapElement, [["scale", "scale", 0]]],
+                ["feDistantLight", SVGFEDistantLightElement,
+                  SVGFEDistantLightElement, [
+                    ["azimuth", "azimuth", 0], ["elevation", "elevation", 0],
+                  ]],
+                ["feDropShadow", SVGFEDropShadowElement, SVGFEDropShadowElement, [
+                  ["dx", "dx", 2], ["dy", "dy", 2],
+                  ["stdDeviationX", "stdDeviation", 2],
+                  ["stdDeviationY", "stdDeviation", 2],
+                ]],
+                ["feGaussianBlur", SVGFEGaussianBlurElement,
+                  SVGFEGaussianBlurElement, [
+                    ["stdDeviationX", "stdDeviation", 0],
+                    ["stdDeviationY", "stdDeviation", 0],
+                  ]],
+                ["feMorphology", SVGFEMorphologyElement, SVGFEMorphologyElement, [
+                  ["radiusX", "radius", 0], ["radiusY", "radius", 0],
+                ]],
+                ["feOffset", SVGFEOffsetElement, SVGFEOffsetElement, [
+                  ["dx", "dx", 0], ["dy", "dy", 0],
+                ]],
+                ["fePointLight", SVGFEPointLightElement, SVGFEPointLightElement, [
+                  ["x", "x", 0], ["y", "y", 0], ["z", "z", 0],
+                ]],
+                ["feSpecularLighting", SVGFESpecularLightingElement,
+                  SVGFESpecularLightingElement, [
+                    ["surfaceScale", "surfaceScale", 1],
+                    ["specularConstant", "specularConstant", 1],
+                    ["specularExponent", "specularExponent", 1],
+                    ["kernelUnitLengthX", "kernelUnitLength", 0],
+                    ["kernelUnitLengthY", "kernelUnitLength", 0],
+                  ]],
+                ["feSpotLight", SVGFESpotLightElement, SVGFESpotLightElement, [
+                  ["x", "x", 0], ["y", "y", 0], ["z", "z", 0],
+                  ["pointsAtX", "pointsAtX", 0], ["pointsAtY", "pointsAtY", 0],
+                  ["pointsAtZ", "pointsAtZ", 0],
+                  ["specularExponent", "specularExponent", 1],
+                  ["limitingConeAngle", "limitingConeAngle", 0],
+                ]],
+                ["feTurbulence", SVGFETurbulenceElement, SVGFETurbulenceElement, [
+                  ["baseFrequencyX", "baseFrequency", 0],
+                  ["baseFrequencyY", "baseFrequency", 0], ["seed", "seed", 0],
+                ]],
+                ["stop", SVGStopElement, SVGStopElement, [["offset", "offset", 0]]],
+              ];
+
+              assert(typeof SVGAnimatedNumber === "function", "constructor exposed");
+              let illegalConstructor = false;
+              try {
+                new SVGAnimatedNumber();
+              } catch (error) {
+                illegalConstructor = error instanceof TypeError;
+              }
+              assert(illegalConstructor, "illegal constructor");
+
+              const baseDescriptor = Object.getOwnPropertyDescriptor(
+                SVGAnimatedNumber.prototype,
+                "baseVal",
+              );
+              const animDescriptor = Object.getOwnPropertyDescriptor(
+                SVGAnimatedNumber.prototype,
+                "animVal",
+              );
+              assert(typeof baseDescriptor.get === "function" &&
+                typeof baseDescriptor.set === "function", "baseVal descriptor");
+              assert(typeof animDescriptor.get === "function" && animDescriptor.set === undefined,
+                "animVal descriptor");
+
+              for (const [tag, constructor, owner, properties] of cases) {
+                const element = document.createElementNS(ns, tag);
+                assert(element instanceof constructor, `${tag} interface`);
+                for (const [property, attribute, initial] of properties) {
+                  const descriptor = Object.getOwnPropertyDescriptor(owner.prototype, property);
+                  assert(typeof descriptor.get === "function" && descriptor.set === undefined,
+                    `${owner.name}.${property} descriptor`);
+                  assert(descriptor.enumerable && descriptor.configurable,
+                    `${owner.name}.${property} descriptor flags`);
+
+                  const animated = element[property];
+                  assert(animated instanceof SVGAnimatedNumber, `${tag}.${property} interface`);
+                  assert(element[property] === animated, `${tag}.${property} SameObject`);
+                  assert(animated.baseVal === initial && animated.animVal === initial,
+                    `${tag}.${property} initial value`);
+
+                  element.setAttribute(attribute, "42");
+                  assert(animated.baseVal === 42 && animated.animVal === 42,
+                    `${tag}.${property} live content update`);
+                  element.setAttribute(attribute, "foobar");
+                  assert(animated.baseVal === initial && animated.animVal === initial,
+                    `${tag}.${property} invalid fallback`);
+                  element.removeAttribute(attribute);
+                  assert(animated.baseVal === initial && animated.animVal === initial,
+                    `${tag}.${property} removed fallback`);
+                }
+              }
+
+              const gaussian = document.createElementNS(ns, "feGaussianBlur");
+              const deviationX = gaussian.stdDeviationX;
+              const deviationY = gaussian.stdDeviationY;
+              gaussian.setAttribute("stdDeviation", "5");
+              assert(deviationX.baseVal === 5 && deviationY.baseVal === 5,
+                "single optional-number value");
+              gaussian.setAttribute("stdDeviation", "5, 7");
+              assert(deviationX.baseVal === 5 && deviationY.baseVal === 7,
+                "paired optional-number values");
+              deviationX.baseVal = 3;
+              assert(gaussian.getAttribute("stdDeviation") === "3 7",
+                "first pair component reflection");
+              deviationY.baseVal = 9;
+              assert(gaussian.getAttribute("stdDeviation") === "3 9" &&
+                deviationX.baseVal === 3 && deviationY.animVal === 9,
+                "second pair component reflection");
+
+              const specular = document.createElementNS(ns, "feSpecularLighting");
+              const surfaceScale = specular.surfaceScale;
+              surfaceScale.baseVal = -1;
+              assert(surfaceScale.baseVal === -1 && surfaceScale.animVal === -1 &&
+                specular.getAttribute("surfaceScale") === "-1", "scalar reflection");
+              surfaceScale.baseVal = 300;
+              for (const invalid of ["aString", NaN, Infinity, specular]) {
+                let rejected = false;
+                try {
+                  surfaceScale.baseVal = invalid;
+                } catch (error) {
+                  rejected = error instanceof TypeError;
+                }
+                assert(rejected && surfaceScale.baseVal === 300,
+                  "restricted float rejects invalid values");
+              }
+
+              const stop = document.createElementNS(ns, "stop");
+              const stopOffset = stop.offset;
+              stop.setAttribute("offset", "50%");
+              assert(stopOffset.baseVal === 0.5 && stopOffset.animVal === 0.5,
+                "stop percentage content value");
+              stopOffset.baseVal = 0.25;
+              assert(stop.getAttribute("offset") === "0.25", "stop number reflection");
+
+              let incompatibleAnimatedReceiver = false;
+              try {
+                baseDescriptor.get.call({});
+              } catch (error) {
+                incompatibleAnimatedReceiver = error instanceof TypeError;
+              }
+              assert(incompatibleAnimatedReceiver, "animated number receiver brand");
+
+              const k1Descriptor = Object.getOwnPropertyDescriptor(
+                SVGFECompositeElement.prototype,
+                "k1",
+              );
+              let incompatibleElementReceiver = false;
+              try {
+                k1Descriptor.get.call(specular);
+              } catch (error) {
+                incompatibleElementReceiver = error instanceof TypeError;
+              }
+              assert(incompatibleElementReceiver, "element receiver brand");
+              return "ok";
+            })()
+            "#,
+        )
+        .expect("SVG animated number probe should evaluate");
+
+    assert_eq!(result, "ok");
+}
+
+#[test]
 fn svg_animated_boolean_reflects_preserve_alpha() {
     let mut vm = new_parsed_test_vm(
         "https://svg-animated-boolean.test/",
@@ -1001,6 +1726,249 @@ fn svg_marker_orient_angle_is_a_live_animated_angle() {
             "#,
         )
         .expect("SVG animated angle probe should evaluate");
+
+    assert_eq!(result, "ok");
+}
+
+#[test]
+fn svg_svg_element_value_factories_create_typed_objects() {
+    let mut vm = new_parsed_test_vm(
+        "https://svg-value-factories.test/",
+        "<!doctype html><html><body></body></html>",
+    );
+
+    let result = vm
+        .eval(
+            r#"
+            (() => {
+              const assert = (condition, message) => {
+                if (!condition) throw new Error(message);
+              };
+              const rejectsTypeError = callback => {
+                try {
+                  callback();
+                  return false;
+                } catch (error) {
+                  return error instanceof TypeError;
+                }
+              };
+              const rejectsDom = (name, callback) => {
+                try {
+                  callback();
+                  return false;
+                } catch (error) {
+                  return error.name === name;
+                }
+              };
+              const ns = "http://www.w3.org/2000/svg";
+              const svg = document.createElementNS(ns, "svg");
+              const wrongReceiver = document.createElementNS(ns, "rect");
+
+              const factoryNames = [
+                "createSVGNumber",
+                "createSVGLength",
+                "createSVGAngle",
+                "createSVGPoint",
+                "createSVGMatrix",
+                "createSVGRect",
+                "createSVGTransform",
+                "createSVGTransformFromMatrix",
+              ];
+              for (const name of factoryNames) {
+                const descriptor = Object.getOwnPropertyDescriptor(SVGSVGElement.prototype, name);
+                assert(typeof descriptor.value === "function", `${name} method`);
+                assert(descriptor.value.length === 0, `${name} arity`);
+                assert(descriptor.enumerable && descriptor.configurable && descriptor.writable,
+                  `${name} descriptor flags`);
+                assert(rejectsTypeError(() => descriptor.value.call(wrongReceiver)),
+                  `${name} receiver brand`);
+              }
+
+              const number = svg.createSVGNumber();
+              const length = svg.createSVGLength();
+              const point = svg.createSVGPoint();
+              const rect = svg.createSVGRect();
+              assert(number instanceof SVGNumber && number.value === 0, "SVGNumber result");
+              assert(length instanceof SVGLength && length.value === 0 &&
+                length.unitType === SVGLength.SVG_LENGTHTYPE_NUMBER, "SVGLength result");
+              assert(point instanceof DOMPoint && point instanceof SVGPoint,
+                "SVGPoint result interface");
+              assert(point.x === 0 && point.y === 0 && point.z === 0 && point.w === 1,
+                "SVGPoint defaults");
+              assert(rect instanceof SVGRect && !(rect instanceof DOMRect),
+                "SVGRect result interface");
+              assert(rect.x === 0 && rect.y === 0 && rect.width === 0 && rect.height === 0,
+                "SVGRect defaults");
+              assert(svg.createSVGNumber() !== number && svg.createSVGLength() !== length &&
+                svg.createSVGPoint() !== point && svg.createSVGRect() !== rect,
+                "factories return new objects");
+
+              number.value = 2;
+              assert(number.value === 2, "SVGNumber assignment");
+              assert(rejectsTypeError(() => { number.value = NaN; }),
+                "SVGNumber rejects NaN");
+              assert(number.value === 2, "SVGNumber preserves rejected assignment");
+
+              length.valueAsString = "2px";
+              assert(length.value === 2 && length.valueAsString === "2px",
+                "SVGLength assignment");
+              assert(rejectsDom("NotSupportedError", () => {
+                length.convertToSpecifiedUnits(SVGLength.SVG_LENGTHTYPE_UNKNOWN);
+              }), "SVGLength rejects unsupported unit");
+              assert(rejectsDom("SyntaxError", () => { length.valueAsString = "10deg"; }),
+                "SVGLength rejects invalid syntax");
+              assert(rejectsTypeError(() => { length.value = NaN; }),
+                "SVGLength rejects NaN");
+              assert(length.value === 2 && length.valueAsString === "2px",
+                "SVGLength preserves rejected assignments");
+
+              point.x = 100;
+              point.y = 200;
+              assert(point.x === 100 && point.y === 200, "SVGPoint assignment");
+              for (const invalid of [point, NaN, Infinity]) {
+                assert(rejectsTypeError(() => { point.x = invalid; }),
+                  "SVGPoint rejects non-finite values");
+                assert(point.x === 100, "SVGPoint preserves rejected assignment");
+              }
+              point.y = null;
+              assert(point.y === 0, "SVGPoint converts null");
+
+              Object.assign(rect, { x: 100, y: 200, width: 300, height: 400 });
+              assert(rect.x === 100 && rect.y === 200 && rect.width === 300 &&
+                rect.height === 400, "SVGRect assignment");
+              for (const [property, invalid] of [
+                ["x", rect],
+                ["y", "aString"],
+                ["width", svg],
+                ["height", NaN],
+              ]) {
+                assert(rejectsTypeError(() => { rect[property] = invalid; }),
+                  `SVGRect rejects invalid ${property}`);
+              }
+              rect.y = null;
+              assert(rect.y === 0, "SVGRect converts null");
+
+              const regularPoint = new DOMPoint();
+              const regularRect = new DOMRect();
+              regularPoint.x = NaN;
+              regularRect.x = Infinity;
+              assert(Number.isNaN(regularPoint.x) && regularRect.x === Infinity,
+                "regular geometry objects remain unrestricted");
+              return "ok";
+            })()
+            "#,
+        )
+        .expect("SVG value factory probe should evaluate");
+
+    assert_eq!(result, "ok");
+}
+
+#[test]
+fn svg_lengths_preserve_specified_units_and_resolve_live_context() {
+    let mut vm = new_parsed_test_vm(
+        "https://svg-length-context.test/",
+        r#"<!doctype html>
+        <html style="font-size:20px;line-height:24px">
+          <body>
+            <svg id="svg" width="150" height="50" viewBox="0 0 150 50">
+              <rect id="rect" style="font-size:12px"/>
+              <text id="text" x="10ch" style="font-size:20px"></text>
+              <text id="cap" x="10cap" style="font-size:20px"></text>
+              <text id="ic" x="10ic" style="font-size:20px"></text>
+              <text id="lh" x="10lh" style="font-size:20px;line-height:24px"></text>
+              <text id="rlh" x="10rlh" style="font-size:10px"></text>
+              <rect id="rem" x="5rem"/>
+              <rect id="viewport" x="10vw"/>
+            </svg>
+          </body>
+        </html>"#,
+    );
+
+    let result = vm
+        .eval(
+            r#"
+            (() => {
+              const assert = (condition, message) => {
+                if (!condition) throw new Error(message);
+              };
+              const close = (actual, expected, tolerance = 1e-6) =>
+                Math.abs(actual - expected) <= tolerance;
+              const svg = document.getElementById("svg");
+
+              const standalone = svg.createSVGLength();
+              standalone.valueAsString = "48px";
+              standalone.convertToSpecifiedUnits(SVGLength.SVG_LENGTHTYPE_CM);
+              assert(standalone.valueAsString === "1.27cm",
+                `absolute serialization: ${standalone.valueAsString}`);
+              assert(close(standalone.valueInSpecifiedUnits, 1.27),
+                "absolute specified value");
+              assert(close(standalone.value, 48), "absolute user value");
+              standalone.value = 96;
+              assert(close(standalone.valueInSpecifiedUnits, 2.54),
+                "value setter preserves unit");
+              standalone.valueInSpecifiedUnits = 1;
+              assert(close(standalone.value, 96 / 2.54),
+                "specified setter resolves user value");
+
+              standalone.valueAsString = "40q";
+              assert(standalone.unitType === SVGLength.SVG_LENGTHTYPE_UNKNOWN,
+                "modern unit type");
+              assert(close(standalone.value, 96 / 2.54), "quarter millimeter value");
+              standalone.convertToSpecifiedUnits(SVGLength.SVG_LENGTHTYPE_MM);
+              assert(standalone.valueAsString === "10mm", "quarter millimeter conversion");
+
+              const rect = document.getElementById("rect");
+              const x = rect.x.baseVal;
+              x.valueAsString = "3px";
+              x.convertToSpecifiedUnits(SVGLength.SVG_LENGTHTYPE_PERCENTAGE);
+              assert(x.valueAsString === "2%" && close(x.value, 3),
+                `percentage conversion uses SVG viewport: ${x.valueAsString}|${x.value}|${x.valueInSpecifiedUnits}`);
+              x.valueAsString = "6px";
+              x.convertToSpecifiedUnits(SVGLength.SVG_LENGTHTYPE_EMS);
+              assert(x.valueAsString === "0.5em" && close(x.value, 6),
+                "em conversion uses owner font size");
+
+              svg.removeAttribute("viewBox");
+              x.valueAsString = "50%";
+              assert(close(x.value, 75), "initial percentage basis");
+              svg.width.baseVal.value = 300;
+              assert(close(x.value, 150), "live percentage basis");
+
+              const ch = document.getElementById("text").x.baseVal[0];
+              assert(ch.unitType === SVGLength.SVG_LENGTHTYPE_UNKNOWN,
+                "list modern unit type");
+              assert(close(ch.value, 100), "ch resolves from owner font size");
+              ch.value = 200;
+              assert(close(ch.valueInSpecifiedUnits, 20), "ch reverse conversion");
+
+              for (const [id, expected] of [
+                ["cap", 140],
+                ["ic", 200],
+                ["lh", 240],
+                ["rlh", 240],
+                ["rem", 100],
+              ]) {
+                const modern = document.getElementById(id).x.baseVal[0] ??
+                  document.getElementById(id).x.baseVal;
+                assert(modern.unitType === SVGLength.SVG_LENGTHTYPE_UNKNOWN,
+                  `${id} unit type`);
+                assert(close(modern.value, expected), `${id} context value`);
+                const specified = modern.valueInSpecifiedUnits;
+                modern.value = expected * 2;
+                assert(close(modern.valueInSpecifiedUnits, specified * 2),
+                  `${id} reverse conversion`);
+              }
+
+              const viewport = document.getElementById("viewport").x.baseVal;
+              const viewportValue = viewport.value;
+              viewport.value = viewportValue * 2;
+              assert(close(viewport.valueInSpecifiedUnits, 20),
+                "viewport reverse conversion");
+              return "ok";
+            })()
+            "#,
+        )
+        .expect("SVG length context probe should evaluate");
 
     assert_eq!(result, "ok");
 }
