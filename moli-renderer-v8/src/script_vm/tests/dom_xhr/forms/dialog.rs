@@ -1,5 +1,232 @@
 use super::*;
 
+#[test]
+fn dialog_show_focuses_autofocus_descendant_only_once() {
+    let mut vm = new_storage_test_vm("https://dialog-autofocus-once.test/");
+
+    let result = vm
+        .eval(
+            r#"
+(() => {
+  const root = document.documentElement || document.appendChild(document.createElement('html'));
+  const host = document.body || root.appendChild(document.createElement('body'));
+  const dialog = document.createElement('dialog');
+  dialog.innerHTML = '<input><input id=target autofocus>';
+  host.appendChild(dialog);
+  dialog.show();
+  const focusedOnShow = document.activeElement === dialog.querySelector('#target');
+  document.activeElement.blur();
+  return JSON.stringify({ focusedOnShow, activeAfterBlur: document.activeElement.localName });
+})()
+"#,
+        )
+        .expect("dialog autofocus-once probe should evaluate");
+
+    assert_eq!(result, r#"{"focusedOnShow":true,"activeAfterBlur":"body"}"#);
+    vm.with_default_context_scope_and_checkpoint_for_test(|scope, runtime_ptr| {
+        assert!(
+            !crate::native_bridge::element::post_parse_autofocus_is_pending(unsafe {
+                &*runtime_ptr
+            })
+        );
+        assert!(!crate::native_bridge::element::process_post_parse_autofocus(scope, runtime_ptr));
+        Ok(())
+    })
+    .expect("processed dialog autofocus should suppress post-parse autofocus");
+    assert_eq!(
+        vm.eval("document.activeElement.localName")
+            .expect("active element should remain readable"),
+        "body"
+    );
+}
+
+#[test]
+fn dialog_show_without_focus_delegate_consumes_document_autofocus() {
+    let mut vm = new_storage_test_vm("https://dialog-autofocus-consumed.test/");
+
+    let result = vm
+        .eval(
+            r#"
+(() => {
+  const root = document.documentElement || document.appendChild(document.createElement('html'));
+  const host = document.body || root.appendChild(document.createElement('body'));
+  const dialog = document.createElement('dialog');
+  host.appendChild(dialog);
+  dialog.show();
+  const focusedDialog = document.activeElement === dialog;
+  dialog.close();
+
+  const input = document.createElement('input');
+  input.id = 'later';
+  input.autofocus = true;
+  host.insertBefore(input, dialog);
+  return JSON.stringify({ focusedDialog, focusedLater: document.activeElement === input });
+})()
+"#,
+        )
+        .expect("dialog autofocus-consumption probe should evaluate");
+
+    assert_eq!(result, r#"{"focusedDialog":true,"focusedLater":false}"#);
+    vm.with_default_context_scope_and_checkpoint_for_test(|scope, runtime_ptr| {
+        assert!(
+            !crate::native_bridge::element::post_parse_autofocus_is_pending(unsafe {
+                &*runtime_ptr
+            })
+        );
+        assert!(!crate::native_bridge::element::process_post_parse_autofocus(scope, runtime_ptr));
+        Ok(())
+    })
+    .expect("dialog focusing should consume later post-parse autofocus");
+    assert_eq!(
+        vm.eval("document.activeElement === document.querySelector('#later')")
+            .expect("later autofocus state should remain readable"),
+        "false"
+    );
+}
+
+#[test]
+fn dialog_show_skips_hidden_and_nonsequential_descendants() {
+    let mut vm = new_storage_test_vm("https://dialog-focus-delegate.test/");
+
+    let result = vm
+        .eval(
+            r#"
+(() => {
+  const root = document.documentElement || document.appendChild(document.createElement('html'));
+  const host = document.body || root.appendChild(document.createElement('body'));
+  const dialog = document.createElement('dialog');
+  dialog.innerHTML = `
+    <dialog><button autofocus></button></dialog>
+    <button hidden autofocus></button>
+    <button tabindex=-1></button>
+    <button id=target></button>`;
+  host.appendChild(dialog);
+  dialog.show();
+  const focusedSequential = document.activeElement === dialog.querySelector('#target');
+  dialog.querySelector('#target').remove();
+  dialog.close();
+  dialog.show();
+  return JSON.stringify({
+    focusedSequential,
+    focusedDialogFallback: document.activeElement === dialog
+  });
+})()
+"#,
+        )
+        .expect("dialog focus-delegate probe should evaluate");
+
+    assert_eq!(
+        result,
+        r#"{"focusedSequential":true,"focusedDialogFallback":true}"#
+    );
+}
+
+#[test]
+fn inert_modal_dialog_clears_focus_outside_its_subtree() {
+    let mut vm = new_storage_test_vm("https://inert-modal-focus-fixup.test/");
+
+    let result = vm
+        .eval(
+            r#"
+(() => {
+  const root = document.documentElement || document.appendChild(document.createElement('html'));
+  const host = document.body || root.appendChild(document.createElement('body'));
+  const outer = document.createElement('input');
+  const dialog = document.createElement('dialog');
+  dialog.inert = true;
+  dialog.innerHTML = '<input autofocus>';
+  host.append(outer, dialog);
+  outer.focus();
+  dialog.showModal();
+  return JSON.stringify({
+    focusedBody: document.activeElement === document.body,
+    dialogOpen: dialog.open
+  });
+})()
+"#,
+        )
+        .expect("inert modal focus-fixup probe should evaluate");
+
+    assert_eq!(result, r#"{"focusedBody":true,"dialogOpen":true}"#);
+}
+
+#[test]
+fn closing_dialog_restores_its_previously_focused_element() {
+    let mut vm = new_storage_test_vm("https://dialog-focus-restoration.test/");
+
+    let result = vm
+        .eval(
+            r#"
+(() => {
+  const root = document.documentElement || document.appendChild(document.createElement('html'));
+  const body = document.body || root.appendChild(document.createElement('body'));
+  const before = document.createElement('button');
+  const outside = document.createElement('button');
+  const dialog = document.createElement('dialog');
+  const shadowHost = document.createElement('div');
+  const shadow = shadowHost.attachShadow({mode: 'open'});
+  const shadowButton = document.createElement('button');
+  shadow.appendChild(shadowButton);
+  dialog.appendChild(shadowHost);
+  body.append(before, outside, dialog);
+
+  before.focus();
+  dialog.show();
+  shadowButton.focus();
+  dialog.close();
+  const shadowRestore = document.activeElement === before;
+
+  before.focus();
+  dialog.show();
+  outside.focus();
+  dialog.close();
+  const outsidePreserved = document.activeElement === outside;
+
+  const slotHost = document.createElement('div');
+  const slotShadow = slotHost.attachShadow({mode: 'open'});
+  slotShadow.innerHTML = '<dialog><slot></slot></dialog>';
+  const slottedButton = document.createElement('button');
+  slotHost.appendChild(slottedButton);
+  body.appendChild(slotHost);
+  const slotDialog = slotShadow.querySelector('dialog');
+  before.focus();
+  slotDialog.show();
+  slottedButton.focus();
+  slotDialog.close();
+  const slottedRestore = document.activeElement === before;
+
+  const modal = document.createElement('dialog');
+  body.appendChild(modal);
+  before.focus();
+  modal.showModal();
+  modal.blur();
+  const blurredToBody = document.activeElement === body;
+  modal.close();
+  const modalRestore = document.activeElement === before;
+
+  outside.focus();
+  modal.show();
+  const dialogFocused = document.activeElement === modal;
+  modal.close();
+  const dialogRestore = document.activeElement === outside;
+
+  return [
+    shadowRestore,
+    outsidePreserved,
+    slottedRestore,
+    blurredToBody,
+    modalRestore,
+    dialogFocused,
+    dialogRestore
+  ].join('|');
+})()
+"#,
+        )
+        .expect("dialog focus restoration probe should evaluate");
+
+    assert_eq!(result, "true|true|true|true|true|true|true");
+}
+
 #[tokio::test]
 async fn dialog_toggle_events_cancel_opening_and_coalesce_state_changes() {
     let loader = ResourceRequestClient::new(&moli_fetch::FetchConfig::default()).expect("loader");
