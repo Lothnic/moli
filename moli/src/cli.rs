@@ -175,6 +175,9 @@ pub struct FetchArgs {
     #[arg(long, value_enum, value_delimiter = ',')]
     pub strip_mode: Vec<StripModeChoice>,
 
+    /// Choose the page completion boundary. `done` reaches Load and then
+    /// observes best-effort DOM stability; use `load` for the exact browser
+    /// lifecycle milestone.
     #[arg(
         long = "wait",
         alias = "wait-until",
@@ -270,8 +273,9 @@ pub struct FetchArgs {
 
     /// Maximum total readiness time in milliseconds. Initial and HTTP-error
     /// replacement navigations, the selected lifecycle stage, response match,
-    /// selector, and script waits share one absolute deadline. Network-idle and
-    /// DOM-stable return the current page with a warning when it expires.
+    /// selector, and script waits share one absolute deadline. Done,
+    /// network-idle, and DOM-stable return the current page with a warning when
+    /// their best-effort observation expires.
     #[arg(
         short,
         long,
