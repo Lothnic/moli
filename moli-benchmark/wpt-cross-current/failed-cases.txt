@@ -2826,6 +2826,7 @@ html/browsers/the-window-object/accessing-other-browsing-contexts/indexed-browsi
 html/browsers/the-window-object/accessing-other-browsing-contexts/indexed-browsing-contexts-02.html
 html/browsers/the-window-object/garbage-collection-and-browsing-contexts/discard_iframe_history_3.html
 html/browsers/the-window-object/garbage-collection-and-browsing-contexts/discard_iframe_history_4.html
+html/browsers/the-window-object/open-close/closed-after-close.html
 html/browsers/the-window-object/open-close/creating_browsing_context_test_01.html
 html/browsers/the-window-object/open-close/open-features-non-integer-height.html
 html/browsers/the-window-object/open-close/open-features-non-integer-innerheight.html
