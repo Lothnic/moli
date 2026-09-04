@@ -5662,6 +5662,9 @@ html/browsers/browsing-the-web/navigating-across-documents/initial-empty-documen
 html/browsers/browsing-the-web/navigating-across-documents/initial-empty-document/iframe-src-204.html
 html/browsers/browsing-the-web/navigating-across-documents/initial-empty-document/iframe-src-aboutblank-navigate-immediately.html
 html/browsers/browsing-the-web/navigating-across-documents/initial-empty-document/iframe-src-aboutblank-wait-for-load.html
+html/browsers/browsing-the-web/navigating-across-documents/initial-empty-document/initial-content-replacement.html
+html/browsers/browsing-the-web/navigating-across-documents/initial-empty-document/load-event-iframe-element.html
+html/browsers/browsing-the-web/navigating-across-documents/initial-empty-document/load-pageshow-events-iframe-contentWindow.html
 html/browsers/browsing-the-web/navigating-across-documents/initial-empty-document/window-open-204-fragment.html
 html/browsers/browsing-the-web/navigating-across-documents/initial-empty-document/window-open-204.html
 html/browsers/browsing-the-web/navigating-across-documents/initial-empty-document/window-open-aboutblank.html
@@ -5809,6 +5812,7 @@ html/browsers/history/the-location-interface/location_protocol.html
 html/browsers/history/the-location-interface/location_reload.html
 html/browsers/history/the-location-interface/location_reload_javascript_url.html
 html/browsers/history/the-location-interface/location_replace.html
+html/browsers/history/the-location-interface/location_search.html
 html/browsers/history/the-location-interface/reload_document_open_write.html
 html/browsers/history/the-location-interface/reload_document_write.html
 html/browsers/history/the-location-interface/replace-with-nested-iframe.html
