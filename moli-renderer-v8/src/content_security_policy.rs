@@ -997,72 +997,62 @@ pub(crate) fn current_script_violation_location(
 }
 
 pub(crate) fn content_security_policy_trusted_types_sink_violation_with_disposition_and_reporting_endpoints(
-    policies: &[String],
+    policy: &str,
     protected_url: &Url,
     sink: &str,
     sample: &str,
     disposition: ContentSecurityPolicyDisposition,
     reporting_endpoints: &ContentSecurityPolicyReportingEndpoints,
 ) -> Option<ContentSecurityPolicyUrlViolation> {
-    policies.iter().find_map(|policy| {
-        if !policy_requires_trusted_types_for_script(policy) {
-            return None;
-        }
-        let document_uri = protected_url.to_string();
-        Some(ContentSecurityPolicyUrlViolation {
-            effective_directive: REQUIRE_TRUSTED_TYPES_FOR,
-            blocked_uri: "trusted-types-sink".to_owned(),
-            source_file: document_uri.clone(),
-            document_uri,
-            original_policy: policy.clone(),
-            disposition,
-            report_uri_endpoints: content_security_policy_report_uri_endpoints(
-                policy,
-                protected_url,
-            ),
-            report_to_endpoints: content_security_policy_report_to_endpoints(
-                policy,
-                reporting_endpoints,
-            ),
-            sample: trusted_types_sink_violation_sample(sink, sample),
-            line_number: 0,
-            column_number: 0,
-        })
+    if !policy_requires_trusted_types_for_script(policy) {
+        return None;
+    }
+    let document_uri = protected_url.to_string();
+    Some(ContentSecurityPolicyUrlViolation {
+        effective_directive: REQUIRE_TRUSTED_TYPES_FOR,
+        blocked_uri: "trusted-types-sink".to_owned(),
+        source_file: document_uri.clone(),
+        document_uri,
+        original_policy: policy.to_owned(),
+        disposition,
+        report_uri_endpoints: content_security_policy_report_uri_endpoints(policy, protected_url),
+        report_to_endpoints: content_security_policy_report_to_endpoints(
+            policy,
+            reporting_endpoints,
+        ),
+        sample: trusted_types_sink_violation_sample(sink, sample),
+        line_number: 0,
+        column_number: 0,
     })
 }
 
 pub(crate) fn content_security_policy_trusted_types_policy_violation_with_disposition_and_reporting_endpoints(
-    policies: &[String],
+    policy: &str,
     protected_url: &Url,
     policy_name: &str,
     is_duplicate: bool,
     disposition: ContentSecurityPolicyDisposition,
     reporting_endpoints: &ContentSecurityPolicyReportingEndpoints,
 ) -> Option<ContentSecurityPolicyUrlViolation> {
-    policies.iter().find_map(|policy| {
-        if policy_allows_trusted_type_policy_name(policy, policy_name, is_duplicate) {
-            return None;
-        }
-        let document_uri = protected_url.to_string();
-        Some(ContentSecurityPolicyUrlViolation {
-            effective_directive: TRUSTED_TYPES,
-            blocked_uri: "trusted-types-policy".to_owned(),
-            source_file: document_uri.clone(),
-            document_uri,
-            original_policy: policy.clone(),
-            disposition,
-            report_uri_endpoints: content_security_policy_report_uri_endpoints(
-                policy,
-                protected_url,
-            ),
-            report_to_endpoints: content_security_policy_report_to_endpoints(
-                policy,
-                reporting_endpoints,
-            ),
-            sample: trusted_types_violation_sample(policy_name),
-            line_number: 0,
-            column_number: 0,
-        })
+    if policy_allows_trusted_type_policy_name(policy, policy_name, is_duplicate) {
+        return None;
+    }
+    let document_uri = protected_url.to_string();
+    Some(ContentSecurityPolicyUrlViolation {
+        effective_directive: TRUSTED_TYPES,
+        blocked_uri: "trusted-types-policy".to_owned(),
+        source_file: document_uri.clone(),
+        document_uri,
+        original_policy: policy.to_owned(),
+        disposition,
+        report_uri_endpoints: content_security_policy_report_uri_endpoints(policy, protected_url),
+        report_to_endpoints: content_security_policy_report_to_endpoints(
+            policy,
+            reporting_endpoints,
+        ),
+        sample: trusted_types_violation_sample(policy_name),
+        line_number: 0,
+        column_number: 0,
     })
 }
 
@@ -1237,6 +1227,9 @@ fn policy_allows_trusted_type_policy_name(
         source == "*"
             || (!source.is_empty()
                 && source == policy_name
+                // Only tt-policy-name tokens can whitelist a literal name.
+                // The policy API itself accepts arbitrary strings, including
+                // under a wildcard, so do not validate policy_name globally.
                 && source.bytes().all(|byte| {
                     byte.is_ascii_alphanumeric()
                         || matches!(byte, b'-' | b'#' | b'=' | b'_' | b'/' | b'@' | b'.' | b'%')
@@ -1245,7 +1238,7 @@ fn policy_allows_trusted_type_policy_name(
     let duplicate_is_allowed = !is_duplicate
         || sources
             .iter()
-            .any(|source| csp_keyword_eq(source.trim(), "allow-duplicates"));
+            .any(|source| csp_keyword_eq(source, "allow-duplicates"));
     name_is_allowed && duplicate_is_allowed
 }
 
@@ -4546,26 +4539,31 @@ mod tests {
             assert!(policy_allows_trusted_type_policy_name(
                 &format!("trusted-types {name}"),
                 name,
-                false
+                false,
             ));
         }
         assert!(policy_allows_trusted_type_policy_name(
             "trusted-types valid policy*name",
             "valid",
-            false
+            false,
         ));
         assert!(!policy_allows_trusted_type_policy_name(
             "trusted-types valid policy*name",
             "policy*name",
-            false
+            false,
         ));
         for wildcard in ["\u{000b}*", "*\u{000b}", "policy*"] {
             assert!(!policy_allows_trusted_type_policy_name(
                 &format!("trusted-types {wildcard}"),
                 "valid",
-                false
+                false,
             ));
         }
+        assert!(!policy_allows_trusted_type_policy_name(
+            "trusted-types valid \u{000b}'allow-duplicates'",
+            "valid",
+            true,
+        ));
     }
 
     #[test]
@@ -4581,6 +4579,16 @@ mod tests {
             for policy in ["", "trusted-types *"] {
                 assert!(policy_allows_trusted_type_policy_name(policy, name, false));
             }
+            assert!(!policy_allows_trusted_type_policy_name(
+                "trusted-types *",
+                name,
+                true,
+            ));
+            assert!(policy_allows_trusted_type_policy_name(
+                "trusted-types * 'allow-duplicates'",
+                name,
+                true,
+            ));
         }
     }
 
