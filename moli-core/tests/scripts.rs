@@ -16,6 +16,9 @@ use tokio::time::Duration;
 #[path = "scripts/child_synthetic_modules.rs"]
 mod child_synthetic_modules;
 
+#[path = "scripts/preparation_errors.rs"]
+mod preparation_errors;
+
 fn diagnostic_global<'a>(
     page: &'a moli_core::page::Page,
     name: &str,
@@ -5282,7 +5285,9 @@ async fn module_wasm_csp_blocks_cross_origin_script_element_fetch() -> Result<()
         .await?;
     assert_eq!(
         diagnostic_global(&page, "moduleWasmCspViolationCount"),
-        Some(&JsValueSnapshot::Number(1.0))
+        Some(&JsValueSnapshot::Number(1.0)),
+        "script report: {:#?}",
+        page.script_execution()
     );
     assert_eq!(
         diagnostic_global(&page, "moduleWasmCspViolationText"),
@@ -5293,6 +5298,12 @@ async fn module_wasm_csp_blocks_cross_origin_script_element_fetch() -> Result<()
     assert_eq!(
         diagnostic_global(&page, "moduleWasmCspExecuted"),
         Some(&JsValueSnapshot::String(String::new()))
+    );
+    assert!(
+        page.subresource_network_records()
+            .iter()
+            .all(|record| record.url().path() != "/assets/execute-start.wasm"),
+        "CSP must block the dynamic module before source transport starts"
     );
 
     server.shutdown().await;
