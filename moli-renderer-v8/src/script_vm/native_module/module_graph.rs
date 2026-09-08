@@ -54,6 +54,7 @@ impl ScriptVm {
     ) -> std::result::Result<(ModuleRecordEntry, ModuleIdentityHash), ModuleLoadError> {
         match key.kind() {
             ModuleKind::JavaScript => {
+                let origin = source.origin();
                 let Some(source) = source.text_source() else {
                     return Err(ModuleLoadError::new(
                         ModuleLoadStage::Compile,
@@ -66,6 +67,7 @@ impl ScriptVm {
                     source,
                     source_url,
                     fetch_metadata,
+                    origin,
                 )
             }
             ModuleKind::Json | ModuleKind::Css => {
@@ -104,7 +106,9 @@ impl ScriptVm {
         source: &str,
         source_url: &Url,
         fetch_metadata: &crate::module_runtime::ModuleFetchMetadata,
+        source_origin: Option<&crate::document_module_graph::ModuleSourceOrigin>,
     ) -> std::result::Result<(ModuleRecordEntry, ModuleIdentityHash), ModuleLoadError> {
+        let mut exception_id = None;
         self.renderer_document_isolate
             .with_entered_renderer_document_isolate(|isolate| {
                 let scope = pin!(v8::HandleScope::new(isolate));
@@ -120,11 +124,18 @@ impl ScriptVm {
                     &mut scope,
                     source_url.as_str(),
                     fetch_metadata,
+                    source_origin,
                 );
                 let mut compiler_source =
                     v8::script_compiler::Source::new(source_string, Some(&origin));
                 let module = v8::script_compiler::compile_module(&scope, &mut compiler_source)
                     .ok_or_else(|| {
+                        if let Some(exception) = scope.exception() {
+                            match retain_module_exception(&mut scope, exception) {
+                                Ok(id) => exception_id = Some(id),
+                                Err(error) => return error,
+                            }
+                        }
                         let exception = scope
                             .exception()
                             .and_then(|exception| exception.to_detail_string(&scope))
@@ -157,7 +168,10 @@ impl ScriptVm {
             })
             .map_err(|error| {
                 let message = error.to_string();
-                let load_error = ModuleLoadError::new(ModuleLoadStage::Compile, message.clone());
+                let mut load_error = ModuleLoadError::new(ModuleLoadStage::Compile, message.clone());
+                if let Some(exception_id) = exception_id {
+                    load_error = load_error.with_exception_id(exception_id);
+                }
                 if message.starts_with("v8 failed to compile WebAssembly module `") {
                     load_error
                         .with_error_constructor(ScriptErrorConstructorKind::WebAssemblyCompileError)
@@ -502,6 +516,13 @@ impl ScriptVm {
                             return Ok(Ok(Some(promise)));
                         }
                     }
+                }
+                // Script-element evaluation consumes rejection itself, either
+                // below or through its retained TLA continuation. Claim that
+                // responsibility before cleanup can notify rejected promises.
+                // Dynamic import returned above and owns its own reaction.
+                if let Some(promise) = promise {
+                    promise.mark_as_handled();
                 }
                 if let Err(error) = Self::perform_microtask_checkpoints(&mut scope, None) {
                     return Ok(Err(ModuleLoadError::new(
