@@ -516,12 +516,30 @@ impl FetchedModuleSource {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModuleSourceOrigin {
+    /// Diagnostic source identity, independent of the module resolution base.
+    pub url: Url,
+    /// Zero-based offsets into the containing source document.
+    pub line_offset: u32,
+    pub column_offset: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ModuleSource {
     /// Share decoded text across fetch clients and the renderer's compiled record.
     Text(Arc<str>),
+    TextWithOrigin {
+        source: Arc<str>,
+        origin: Box<ModuleSourceOrigin>,
+    },
     /// Share immutable Wasm bytes across fetch clients and compilation.
     Binary(Arc<[u8]>),
 }
+
+/// Identifies a JavaScript exception retained by the host in its owning realm.
+/// The tree transports this token without owning or reconstructing the value.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ModuleExceptionId(pub u64);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ModuleLoadError {
@@ -529,6 +547,7 @@ pub struct ModuleLoadError {
     pub key: Option<Box<ModuleMapKey>>,
     pub message: String,
     pub error_constructor: Option<ModuleErrorConstructorKind>,
+    pub exception_id: Option<ModuleExceptionId>,
 }
 
 impl ModuleLoadError {
@@ -538,6 +557,7 @@ impl ModuleLoadError {
             key: None,
             message: message.into(),
             error_constructor: None,
+            exception_id: None,
         }
     }
 
@@ -548,6 +568,11 @@ impl ModuleLoadError {
 
     pub fn with_error_constructor(mut self, constructor: ModuleErrorConstructorKind) -> Self {
         self.error_constructor = Some(constructor);
+        self
+    }
+
+    pub fn with_exception_id(mut self, exception_id: ModuleExceptionId) -> Self {
+        self.exception_id = Some(exception_id);
         self
     }
 }
