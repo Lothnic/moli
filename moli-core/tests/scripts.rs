@@ -6730,3 +6730,6 @@ mod child_markup_insertion;
 
 #[path = "scripts/document_close.rs"]
 mod document_close;
+
+#[path = "scripts/post_parse_async.rs"]
+mod post_parse_async;
