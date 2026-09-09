@@ -30,6 +30,11 @@ use tokio::time::Duration;
 
 #[path = "web_apis/abort_signal.rs"]
 mod abort_signal;
+#[path = "web_apis/callback_cleanup.rs"]
+mod callback_cleanup;
+#[path = "web_apis/event_dispatch.rs"]
+mod event_dispatch;
+
 fn diagnostic_global<'a>(
     page: &'a moli_core::page::Page,
     name: &str,
