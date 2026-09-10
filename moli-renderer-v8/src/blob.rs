@@ -413,6 +413,10 @@ pub(super) fn object_url_bytes_and_type(url: &str) -> Option<(Vec<u8>, String)> 
     blob_store().object_url_bytes_and_type(url)
 }
 
+pub(super) fn object_url_shared_bytes_and_type(url: &str) -> Option<(Arc<[u8]>, String)> {
+    blob_store().object_url_shared_bytes_and_type(url)
+}
+
 pub(super) fn collect_blob_bytes_and_type<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     parts_value: v8::Local<'s, v8::Value>,
@@ -519,9 +523,10 @@ pub(crate) fn cleanup_owner_resources(owner_id: ResourceOwnerId) {
 }
 
 pub(crate) fn cleanup_object_urls_for_context(
+    owner_id: ResourceOwnerId,
     context_token: native_bridge::RuntimeObservableContextToken,
 ) -> usize {
-    blob_store().cleanup_object_url_lifetime(context_token.as_u64())
+    blob_store().cleanup_object_url_lifetime(owner_id, context_token.as_u64())
 }
 
 fn release_blob_wrapper_ref(blob_id: BlobId) {
