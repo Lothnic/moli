@@ -38,10 +38,9 @@ pub(crate) use self::async_fetch::{
 pub(crate) use self::beacon::{navigator_send_beacon_callback, send_link_audit_ping};
 pub(super) use self::bindings::install_window_network_bindings;
 pub(in crate::network_host) use self::body::{
-    PreparedBodyInit, body_init, body_is_unusable, body_is_used, body_stream_object,
-    readable_body_stream_unusable,
+    PreparedBodyInit, body_init, body_is_unusable, body_is_used, readable_body_stream_unusable,
 };
-pub(crate) use self::body::{append_default_body_content_type, has_header};
+pub(crate) use self::body::{append_default_body_content_type, body_stream_object, has_header};
 #[cfg(test)]
 pub(crate) use self::body_source::pending_network_body_source_buffered_len_for_test;
 pub(in crate::network_host) use self::body_source::{
@@ -101,9 +100,8 @@ pub(crate) use self::fetch_surface::{
     RESPONSE_URL_SLOT, is_branded_response_object,
 };
 pub(crate) use self::fetch_surface::{
-    consume_webassembly_streaming_response_value, initialize_fetch_realm_helpers,
-    install_request_bindings, install_response_bindings,
-    set_request_destination_for_service_worker_fetch_event,
+    consume_webassembly_streaming_response_value, install_request_bindings,
+    install_response_bindings, set_request_destination_for_service_worker_fetch_event,
     set_request_mode_for_service_worker_fetch_event,
     set_request_reload_navigation_for_service_worker_fetch_event,
 };
@@ -136,6 +134,7 @@ pub(crate) use self::request::{
 };
 pub(crate) use self::request::{
     parse_fetch_init, parse_request_redirect_mode_label, request_object_credentials_mode,
+    validate_fetch_body,
 };
 pub(in crate::network_host) use self::request_scope::{
     XHR_CHILD_CONTEXT_HANDLE_SLOT, active_subresource_network_partition_key,
@@ -202,7 +201,6 @@ pub(in crate::network_host) const NETWORK_BODY_SLOT: &str = "__lmBody";
 pub(in crate::network_host) const NETWORK_BODY_BYTES_SLOT: &str = "__lmBodyBytes";
 pub(in crate::network_host) const NETWORK_BODY_SOURCE_SLOT: &str = "__lmNetworkBodySource";
 pub(in crate::network_host) const NETWORK_BODY_SOURCE_KIND_SLOT: &str = "__lmNetworkBodySourceKind";
-pub(in crate::network_host) const BODY_STREAM_CONSUMER_SLOT: &str = "__lmConsumeReadableStreamBody";
 pub(crate) const BLOCKED_BY_CLIENT_ERROR_TEXT: &str = "net::ERR_BLOCKED_BY_CLIENT";
 pub(crate) const FILE_NOT_FOUND_ERROR_TEXT: &str = "net::ERR_FILE_NOT_FOUND";
 pub(crate) const FAILED_ERROR_TEXT: &str = "net::ERR_FAILED";
