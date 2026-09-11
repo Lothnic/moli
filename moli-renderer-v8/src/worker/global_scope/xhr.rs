@@ -1,7 +1,7 @@
 use super::*;
 use crate::network_host::{
     CapturedBlobUrl, ResolveContextUrlError, blob_url_entry,
-    fetch_browser_subresource_with_preflight_headers, local_url_response_with_blob_entry,
+    local_url_response_with_blob_entry,
 };
 use crossbeam_channel::{after, bounded, never, select};
 use moli_webapi_declare::WebApiObject;
@@ -629,12 +629,16 @@ fn send_synchronous_worker_xhr(
                 .build()
                 .map_err(|error| format!("failed to build worker sync XHR fetch runtime: {error}"))
                 .and_then(|runtime| {
-                    runtime.block_on(fetch_browser_subresource_with_preflight_headers(
-                        loader.request_client().clone(),
-                        request,
-                        Some(worker_cancel_handle),
-                        preflight_headers,
-                    ))
+                    runtime
+                        .block_on(
+                            fetch_browser_subresource_with_preflight_headers_and_network_metadata(
+                                loader.request_client().clone(),
+                                request,
+                                Some(worker_cancel_handle),
+                                preflight_headers,
+                            ),
+                        )
+                        .map(moli_fetch::NetworkFetchResult::into_response)
                 });
             let _ = response_tx.send(result);
         });
@@ -814,15 +818,6 @@ pub(crate) fn try_worker_xhr_abort_callback(
     };
 
     let xhr = args.this();
-    let ready_state_key = v8str(scope, "readyState");
-    let ready_state = xhr
-        .get(scope, ready_state_key.into())
-        .and_then(|value| value.number_value(scope))
-        .unwrap_or(0.0) as u32;
-    if ready_state == 0 || ready_state == 4 {
-        return true;
-    }
-
     cancel_worker_xhr_timeout(scope, xhr);
     clear_worker_xhr_timeout_start(scope, xhr);
     let internal_id =
@@ -864,15 +859,7 @@ pub(crate) fn try_worker_xhr_abort_callback(
         }
     }
 
-    set_xhr_state_bool(scope, xhr, XHR_ABORTED_SLOT, true);
-    set_xhr_state_bool(scope, xhr, XHR_SEND_FLAG_SLOT, false);
-    set_xhr_state_number(scope, xhr, XHR_ACTIVE_INTERNAL_ID_SLOT, 0.0);
-    set_xhr_state_number(scope, xhr, XHR_READY_STATE_SLOT, 4.0);
-    reset_xhr_response_for_request_error(scope, xhr);
-    dispatch_xhr_upload_abort_if_in_progress(scope, xhr);
-    xhr_dispatch_progress_event(scope, xhr, "abort", 0.0, 0.0);
-    xhr_dispatch_progress_event(scope, xhr, "loadend", 0.0, 0.0);
-    set_xhr_state_number(scope, xhr, XHR_READY_STATE_SLOT, 0.0);
+    crate::network_host::finish_xhr_abort(scope, xhr);
     true
 }
 
@@ -1196,7 +1183,7 @@ pub(in crate::worker) fn prepare_worker_xhr_send_request<'s>(
         };
 
     Ok(PreparedWorkerXhrSendRequest {
-        use_cors_preflight: xhr_has_upload_listeners(scope, xhr),
+        use_cors_preflight: capture_xhr_upload_listener_flag(scope, xhr),
         document_url,
         resolved_url,
         blob_url_entry: blob_url_entry(scope, xhr),
