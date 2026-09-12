@@ -283,8 +283,14 @@ async fn worker_xmlhttprequest_uses_worker_script_base_url_and_event_target_list
 #[tokio::test]
 async fn worker_xhr_request_stage_interception_can_fulfill_synthetic_response() {
     ensure_v8();
-    let mut handle = spawn_worker_with_request_client_and_network_policy(
-        r#"
+    for (status, expected_text) in [
+        (200, "fulfilled-worker-xhr"),
+        (204, ""),
+        (205, ""),
+        (304, ""),
+    ] {
+        let mut handle = spawn_worker_with_request_client_and_network_policy(
+            r#"
         onmessage = () => {
             const xhr = new XMLHttpRequest();
             xhr.onloadend = () => {
@@ -300,54 +306,55 @@ async fn worker_xhr_request_stage_interception_can_fulfill_synthetic_response() 
             xhr.send("payload");
         };
         "#
-        .into(),
-        "http://example.test/worker/main.js".into(),
-        ResourceRequestClient::new(&FetchConfig::default()).expect("worker xhr loader"),
-        WorkerNetworkPolicy {
-            network_partition_key: Some("credentialless-worker-xhr".to_owned()),
-            ..WorkerNetworkPolicy::default()
-        },
-    );
-    handle.set_fetch_subresource_interception(true, Some(SubresourceResourceType::Xhr));
-    handle.post_message(serialize_test_string("go"));
+            .into(),
+            "http://example.test/worker/main.js".into(),
+            ResourceRequestClient::new(&FetchConfig::default()).expect("worker xhr loader"),
+            WorkerNetworkPolicy {
+                network_partition_key: Some("credentialless-worker-xhr".to_owned()),
+                ..WorkerNetworkPolicy::default()
+            },
+        );
+        handle.set_fetch_subresource_interception(true, Some(SubresourceResourceType::Xhr));
+        handle.post_message(serialize_test_string("go"));
 
-    let pending = timeout(TIMEOUT, handle.recv())
-        .await
-        .expect("timed out waiting for worker xhr pause")
-        .expect("worker channel closed");
-    let WorkerToParentMessage::PendingSubresourceFetch(pending) = pending else {
-        panic!("expected worker xhr pause, got {pending:?}");
-    };
-    assert!(pending.info.network_request_handle.is_none());
-    assert_eq!(pending.info.resource_type, SubresourceResourceType::Xhr);
-    assert_eq!(
-        pending.info.url.as_str(),
-        "http://example.test/intercepted-worker-xhr"
-    );
-    assert_eq!(pending.info.request_body.as_deref(), Some("payload"));
-    assert_eq!(
-        pending.network_partition_key.as_deref(),
-        Some("credentialless-worker-xhr")
-    );
+        let pending = timeout(TIMEOUT, handle.recv())
+            .await
+            .expect("timed out waiting for worker xhr pause")
+            .expect("worker channel closed");
+        let WorkerToParentMessage::PendingSubresourceFetch(pending) = pending else {
+            panic!("expected worker xhr pause, got {pending:?}");
+        };
+        assert!(pending.info.network_request_handle.is_none());
+        assert_eq!(pending.info.resource_type, SubresourceResourceType::Xhr);
+        assert_eq!(
+            pending.info.url.as_str(),
+            "http://example.test/intercepted-worker-xhr"
+        );
+        assert_eq!(pending.info.request_body.as_deref(), Some("payload"));
+        assert_eq!(
+            pending.network_partition_key.as_deref(),
+            Some("credentialless-worker-xhr")
+        );
 
-    let request = pending_worker_xhr_continue(pending.fetch_id, 31, &pending.info, false);
-    handle.fulfill_pending_xhr(
-        request,
-        204,
-        vec![
-            ("content-type".to_owned(), b"text/plain".to_vec()),
-            (
-                "x-worker-xhr-intercept".to_owned(),
-                b"request-stage".to_vec(),
-            ),
-        ],
-        RendererSyntheticResponseBody::from_bytes(b"fulfilled-worker-xhr".to_vec()),
-    );
+        let request = pending_worker_xhr_continue(pending.fetch_id, 31, &pending.info, false);
+        handle.fulfill_pending_xhr(
+            request,
+            status,
+            vec![
+                ("content-type".to_owned(), b"text/plain".to_vec()),
+                (
+                    "x-worker-xhr-intercept".to_owned(),
+                    b"request-stage".to_vec(),
+                ),
+            ],
+            RendererSyntheticResponseBody::from_bytes(b"fulfilled-worker-xhr".to_vec()),
+        );
 
-    assert_eq!(
-        recv_post_json(&mut handle).await,
-        r#"{"readyState":4,"status":204,"header":"request-stage","text":"fulfilled-worker-xhr"}"#
-    );
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&recv_post_json(&mut handle).await).unwrap(),
+            serde_json::json!({"readyState":4,"status":status,"header":"request-stage","text":expected_text})
+        );
+    }
 }
 
 #[tokio::test]
@@ -1150,6 +1157,96 @@ async fn worker_xhr_upload_listener_preflight_survives_sync_and_interception() {
         }
         assert_eq!(recv_post_json(&mut handle).await, "[200,\"ok\"]", "{mode}");
         timeout(TIMEOUT, server).await.unwrap().unwrap();
+    }
+}
+
+#[tokio::test]
+async fn worker_xhr_partial_upload_can_abort_or_reopen_without_stale_completion() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    ensure_v8();
+    for reopen in [false, true] {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let origin = format!("http://{}", listener.local_addr().unwrap());
+        let total = 16 * 1024 * 1024;
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let head = read_http_request_head(&mut socket).await.unwrap();
+            assert!(head.starts_with("POST /upload HTTP/1.1"));
+            tokio::time::sleep(Duration::from_millis(150)).await;
+            let mut bytes = 0;
+            let mut chunk = [0; 65536];
+            while let Ok(count) = socket.read(&mut chunk).await {
+                if count == 0 {
+                    break;
+                }
+                bytes += count;
+            }
+            if reopen {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                let head = read_http_request_head(&mut socket).await.unwrap();
+                assert!(head.starts_with("GET /replacement HTTP/1.1"));
+                socket
+                    .write_all(
+                        b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok",
+                    )
+                    .await
+                    .unwrap();
+            }
+            bytes
+        });
+        let mut config = FetchConfig::default();
+        config.set_http_no_proxy(Some("*".to_owned()));
+        let loader = ResourceRequestClient::new(&config).unwrap();
+        let mut handle = spawn_worker_with_request_client(
+            format!(
+                r#"
+            const xhr = new XMLHttpRequest();
+            const events = [];
+            let partial = null;
+            for (const type of ["loadstart", "progress", "load", "loadend", "abort", "error"]) {{
+                xhr.upload.addEventListener(type, e => events.push([type, e.loaded, e.total, e.lengthComputable]));
+            }}
+            xhr.upload.onprogress = e => {{
+                if (!partial && e.loaded > 0 && e.loaded < e.total) {{
+                    partial = [e.loaded, e.total];
+                    if ({reopen}) {{ xhr.open("GET", "/replacement"); xhr.send(); }}
+                    else xhr.abort();
+                }}
+            }};
+            xhr.onloadend = () => {{ postMessage({{status: xhr.status, partial, events}}); close(); }};
+            xhr.open("POST", "/upload");
+            xhr.send("x".repeat({total}));
+            postMessage(events.map(e => e[0]));
+        "#
+            ),
+            format!("{origin}/worker.js"),
+            loader,
+        );
+        assert_eq!(recv_post_json(&mut handle).await, "[\"loadstart\"]");
+        let result: serde_json::Value =
+            serde_json::from_str(&recv_post_json(&mut handle).await).unwrap();
+        assert_eq!(result["status"], if reopen { 200 } else { 0 });
+        assert_eq!(result["partial"][1], total);
+        let loaded = result["partial"][0].as_u64().unwrap();
+        assert!(loaded > 0 && loaded < total as u64);
+        let events = result["events"].as_array().unwrap();
+        assert!(
+            !events
+                .iter()
+                .any(|event| event[0] == "load" || event[0] == "error")
+        );
+        let aborts: Vec<_> = events.iter().filter(|event| event[0] == "abort").collect();
+        let ends: Vec<_> = events
+            .iter()
+            .filter(|event| event[0] == "loadend")
+            .collect();
+        assert_eq!(aborts.len(), usize::from(!reopen));
+        assert_eq!(ends.len(), usize::from(!reopen));
+        if !reopen {
+            assert_eq!(*aborts[0], serde_json::json!(["abort", 0, 0, false]));
+            assert_eq!(*ends[0], serde_json::json!(["loadend", 0, 0, false]));
+        }
+        assert!(timeout(TIMEOUT, server).await.unwrap().unwrap() < total as usize);
     }
 }
 
