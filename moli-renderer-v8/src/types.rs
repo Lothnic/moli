@@ -245,6 +245,7 @@ pub(super) struct PendingWindowFetchContinuation {
     keepalive: bool,
     connect_policy: crate::document_runtime::DocumentConnectPolicySnapshot,
     csp_report_context: crate::network_host::WindowCspReportRequestContext,
+    redirect_mode: moli_fetch::RequestRedirectMode,
 }
 
 enum PendingWindowFetchPromise {
@@ -258,12 +259,14 @@ impl PendingWindowFetchContinuation {
         keepalive: bool,
         connect_policy: crate::document_runtime::DocumentConnectPolicySnapshot,
         csp_report_context: crate::network_host::WindowCspReportRequestContext,
+        redirect_mode: moli_fetch::RequestRedirectMode,
     ) -> Self {
         Self {
             promise: PendingWindowFetchPromise::Active(resolver),
             keepalive,
             connect_policy,
             csp_report_context,
+            redirect_mode,
         }
     }
 
@@ -303,6 +306,10 @@ impl PendingWindowFetchContinuation {
 
     pub(super) fn csp_report_context(&self) -> &crate::network_host::WindowCspReportRequestContext {
         &self.csp_report_context
+    }
+
+    pub(super) fn redirect_mode(&self) -> moli_fetch::RequestRedirectMode {
+        self.redirect_mode
     }
 }
 
@@ -730,17 +737,17 @@ impl From<std::result::Result<NavigationResponse, String>> for AsyncSubresourceF
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) enum AsyncSubresourceFetchResponseFilter {
     Basic,
-    Cors,
+    Cors(Vec<String>),
     Opaque,
     OpaqueRedirect,
 }
 
 impl AsyncSubresourceFetchResponseFilter {
-    pub(super) fn is_readable(self) -> bool {
-        matches!(self, Self::Basic | Self::Cors)
+    pub(super) fn is_readable(&self) -> bool {
+        matches!(self, Self::Basic | Self::Cors(_))
     }
 }
 
@@ -1006,6 +1013,7 @@ pub(super) struct ServiceWorkerControllerChangeCompletion {
 
 pub(super) struct StreamingSubresourceFetchState {
     pub(super) response_filter: Option<AsyncSubresourceFetchResponseFilter>,
+    pub(super) skip_fetch_security_validation: bool,
     pub(super) pending: PendingSubresourceFetchState,
     pub(super) request_url: Url,
     pub(super) request_method: String,
@@ -1021,12 +1029,13 @@ pub(super) struct StreamingSubresourceFetchState {
 
 impl StreamingSubresourceFetchState {
     pub(super) fn needs_orb_body_validation(&self) -> bool {
-        crate::network_host::fetch_response_needs_orb_body_validation(
-            &self.pending.info.document_url,
-            &self.head.final_url,
-            &self.head.headers,
-            self.pending.request_mode,
-        )
+        !self.skip_fetch_security_validation
+            && crate::network_host::fetch_response_needs_orb_body_validation(
+                &self.pending.request_origin,
+                &self.head.final_url,
+                &self.head.headers,
+                self.pending.request_mode,
+            )
     }
 }
 

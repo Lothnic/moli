@@ -673,58 +673,195 @@ mod tests {
     }
 
     #[test]
+    fn cors_response_fields_require_a_single_origin_value() {
+        let response_url = url("https://other.test/data");
+        for (origin, matching) in [
+            (
+                WebOrigin::from_url(&url("https://page.test/a")),
+                "https://page.test",
+            ),
+            (WebOrigin::Opaque, "null"),
+        ] {
+            for mode in [
+                RequestCredentialsMode::Omit,
+                RequestCredentialsMode::SameOrigin,
+                RequestCredentialsMode::Include,
+            ] {
+                for (values, allowed) in [
+                    (vec![], false),
+                    (vec![""], false),
+                    (vec![matching], true),
+                    (vec!["*"], mode != RequestCredentialsMode::Include),
+                    (vec!["https://wrong.test"], false),
+                    (vec![matching, matching], false),
+                    (vec![matching, ""], false),
+                    (vec!["", matching], false),
+                    (vec!["*", matching], false),
+                    (vec!["*", ""], false),
+                    (vec!["*, *"], false),
+                ] {
+                    let mut headers = vec![(
+                        "Access-Control-Allow-Credentials".to_owned(),
+                        "true".to_owned(),
+                    )];
+                    headers.extend(values.iter().enumerate().map(|(index, value)| {
+                        (
+                            if index == 0 {
+                                "Access-Control-Allow-Origin"
+                            } else {
+                                "access-control-allow-origin"
+                            }
+                            .to_owned(),
+                            (*value).to_owned(),
+                        )
+                    }));
+                    assert_eq!(
+                        validate_cors_response_chain(
+                            &origin,
+                            &header_response(response_url.clone(), headers.clone()),
+                            mode
+                        )
+                        .is_ok(),
+                        allowed,
+                        "origin={matching}, mode={mode:?}, values={values:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn cors_response_fields_check_credentials_only_when_included() {
+        let document_url = url("https://page.test/a");
+        let response_url = url("https://other.test/data");
+        for values in [
+            vec![],
+            vec![""],
+            vec!["true"],
+            vec!["TRUE"],
+            vec!["True"],
+            vec!["false"],
+            vec!["true, true"],
+            vec!["true", "true"],
+            vec!["true", "false"],
+            vec!["true", ""],
+            vec!["", "true"],
+        ] {
+            let mut headers = vec![(
+                "Access-Control-Allow-Origin".to_owned(),
+                "https://page.test".to_owned(),
+            )];
+            headers.extend(values.iter().enumerate().map(|(index, value)| {
+                (
+                    if index == 0 {
+                        "Access-Control-Allow-Credentials"
+                    } else {
+                        "ACCESS-CONTROL-ALLOW-CREDENTIALS"
+                    }
+                    .to_owned(),
+                    (*value).to_owned(),
+                )
+            }));
+            for mode in [
+                RequestCredentialsMode::Omit,
+                RequestCredentialsMode::SameOrigin,
+                RequestCredentialsMode::Include,
+            ] {
+                assert_eq!(
+                    validate_cors_response_chain(
+                        &document_url,
+                        &header_response(response_url.clone(), headers.clone()),
+                        mode
+                    )
+                    .is_ok(),
+                    mode != RequestCredentialsMode::Include || values == ["true"],
+                    "mode={mode:?}, values={values:?}"
+                );
+                assert!(
+                    validate_cors_response_chain(
+                        &document_url,
+                        &header_response(document_url.clone(), headers.clone()),
+                        mode
+                    )
+                    .is_ok(),
+                    "same-origin responses do not require CORS permission"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn cors_response_validation_uses_the_redirect_tainted_origin() {
         let home = url("https://page.test/a");
         let away = url("https://script.test/b");
         let elsewhere = url("https://other.test/c");
-        let origin = WebOrigin::from_url(&home);
-        for (redirects, serialized_origin) in [
-            (vec![(&home, &away)], origin.ascii_serialization()),
-            (vec![(&away, &elsewhere)], "null"),
-            (vec![(&home, &away), (&away, &home)], "null"),
-        ] {
-            let final_url = redirects.last().expect("redirect target").1.clone();
-            let mut head = header_response(
-                final_url,
-                vec![(
-                    "Access-Control-Allow-Origin".to_owned(),
-                    serialized_origin.to_owned(),
-                )],
-            );
-            head.redirected = true;
-            head.redirect_chain = redirects
-                .into_iter()
-                .map(|(from, to)| moli_fetch::RedirectInfo {
-                    source: RedirectSource::Network,
-                    from_url: from.clone(),
-                    to_url: to.clone(),
-                    status: 302,
-                    headers: vec![(
-                        "Access-Control-Allow-Origin".to_owned(),
-                        origin.ascii_serialization().to_owned(),
-                    )],
-                    network_extra_info_available: false,
-                    request_extra_info: None,
-                    response_extra_info: None,
-                    redirect_has_extra_info: false,
-                    request_cookie_report: None,
-                    cookie_set_reports: Vec::new(),
-                    from_cache: false,
-                    negotiated_http_version: None,
-                })
-                .collect();
-            assert_eq!(
-                head.url_list().serialized_origin(&origin),
-                serialized_origin
-            );
-            validate_cors_response_chain(&origin, &head, RequestCredentialsMode::SameOrigin)
-                .expect("each response must be authorized against its own request hop origin");
-            head.headers.clear();
-            assert!(
-                validate_cors_response_chain(&origin, &head, RequestCredentialsMode::SameOrigin)
-                    .is_err(),
-                "returning to the initial origin must not bypass CORS"
-            );
+        for origin in [WebOrigin::from_url(&home), WebOrigin::Opaque] {
+            for source in [
+                RedirectSource::Network,
+                RedirectSource::ServiceWorker,
+                RedirectSource::Internal,
+            ] {
+                for (urls, tuple_origin) in [
+                    (vec![&home, &away], "https://page.test"),
+                    (vec![&away, &elsewhere], "null"),
+                    (vec![&home, &away, &home], "null"),
+                ] {
+                    let expected_origin = if origin.is_opaque() {
+                        "null"
+                    } else {
+                        tuple_origin
+                    };
+                    let mut head = header_response(
+                        (*urls.last().unwrap()).clone(),
+                        vec![("Access-Control-Allow-Origin".into(), expected_origin.into())],
+                    );
+                    head.redirected = true;
+                    head.redirect_chain = urls
+                        .windows(2)
+                        .map(|pair| moli_fetch::RedirectInfo {
+                            source,
+                            from_url: pair[0].clone(),
+                            to_url: pair[1].clone(),
+                            status: 302,
+                            // The response to each hop is checked before its redirect
+                            // changes the serialized origin for the following request.
+                            headers: if source == RedirectSource::Network {
+                                vec![(
+                                    "Access-Control-Allow-Origin".into(),
+                                    origin.ascii_serialization().into(),
+                                )]
+                            } else {
+                                Vec::new()
+                            },
+                            network_extra_info_available: false,
+                            request_extra_info: None,
+                            response_extra_info: None,
+                            redirect_has_extra_info: false,
+                            request_cookie_report: None,
+                            cookie_set_reports: Vec::new(),
+                            from_cache: false,
+                            negotiated_http_version: None,
+                        })
+                        .collect();
+                    assert_eq!(head.url_list().serialized_origin(&origin), expected_origin);
+                    assert!(head.url_list().has_cross_origin_url(&origin));
+                    validate_cors_response_chain(
+                        &origin,
+                        &head,
+                        RequestCredentialsMode::SameOrigin,
+                    )
+                    .expect("authorize network hops using their individual request origins");
+                    head.headers.clear();
+                    validate_cors_response_chain(
+                        &origin,
+                        &head,
+                        RequestCredentialsMode::SameOrigin,
+                    )
+                    .expect_err(
+                        "returning to the client origin cannot bypass final CORS validation",
+                    );
+                }
+            }
         }
     }
 
