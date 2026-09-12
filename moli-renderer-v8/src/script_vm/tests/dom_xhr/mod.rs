@@ -11,12 +11,17 @@ mod file_input;
 mod forms;
 mod misc;
 mod no_cors_redirect;
+mod null_body;
+mod open_validation;
 mod query_realms;
 mod response_headers;
+mod response_type;
 mod send_body;
 mod shadow_dom;
+mod streaming_failure;
 mod style_invalidation;
 mod upload_preflight;
+mod upload_transport;
 mod xhr;
 
 mod response_type;

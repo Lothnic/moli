@@ -36,7 +36,7 @@ pub(crate) use self::async_fetch::{
     fetch_browser_subresource_with_preflight_and_network_metadata,
     fetch_browser_subresource_with_preflight_headers,
     fetch_browser_subresource_with_preflight_headers_and_network_metadata, fetch_cors_script_text,
-    spawn_async_subresource_fetch,
+    observe_async_xhr_upload, spawn_async_subresource_fetch,
 };
 pub(crate) use self::beacon::{navigator_send_beacon_callback, send_link_audit_ping};
 pub(super) use self::bindings::install_window_network_bindings;
@@ -127,9 +127,9 @@ pub(crate) use self::media::{
     start_media_element_resource_fetch,
 };
 pub(in crate::network_host) use self::preflight_events::CorsPreflightNetworkObserver;
-pub(in crate::network_host) use self::request::normalize_request_method;
 pub(crate) use self::request::request_constructor_callback;
 pub(crate) use self::request::{FetchArgumentError, RequestUrlError};
+pub(in crate::network_host) use self::request::{RequestMethodError, normalize_request_method};
 pub(crate) use self::request::{
     mark_request_input_body_used_for_fetch, request_input_snapshot,
     try_resolve_request_constructor_url, try_resolve_request_constructor_url_for_base,
@@ -165,7 +165,7 @@ pub(crate) use self::response::{
     materialize_response_object_head,
     materialize_response_object_head_for_service_worker_respond_with,
     materialized_body_bytes_from_value, network_response_filter, response_constructor_callback,
-    validate_cors_preflight_response, validate_cors_response_chain,
+    response_has_null_body, validate_cors_preflight_response, validate_cors_response_chain,
     validate_cross_origin_embedder_and_document_isolation_policy,
     validate_cross_origin_resource_policy, validate_fetch_response_headers,
     validate_fetch_response_security_policy, validate_fetch_response_security_policy_with_body,
@@ -188,9 +188,10 @@ pub(crate) use self::xhr::{
     XHR_METHOD_SLOT, XHR_OPEN_GENERATION_SLOT, XHR_SEND_FLAG_SLOT, XHR_TIMEOUT_SLOT,
     XHR_TIMEOUT_START_MS_SLOT, XHR_TIMEOUT_TIMER_SLOT, XHR_URL_SLOT, XHR_WITH_CREDENTIALS_SLOT,
     apply_xhr_failure, apply_xhr_response, apply_xhr_response_body_source,
-    apply_xhr_response_body_source_with_status_text, apply_xhr_streaming_response_body_source,
-    apply_xhr_streaming_response_chunk, apply_xhr_streaming_response_head, apply_xhr_timeout,
-    capture_xhr_upload_listener_flag, dispatch_xhr_loadstart, dispatch_xhr_upload_complete,
+    apply_xhr_response_body_source_with_status_text, apply_xhr_streaming_failure,
+    apply_xhr_streaming_response_body_source, apply_xhr_streaming_response_chunk,
+    apply_xhr_streaming_response_head, apply_xhr_timeout, apply_xhr_upload_event,
+    capture_xhr_upload_listener_flag, dispatch_xhr_loadstart,
     finalize_xml_http_request_event_target_realm_bindings, finish_xhr_abort,
     install_progress_event_template_bindings, install_window_xml_http_request_template_bindings,
     install_xml_http_request_bindings, install_xml_http_request_event_target_bindings,
