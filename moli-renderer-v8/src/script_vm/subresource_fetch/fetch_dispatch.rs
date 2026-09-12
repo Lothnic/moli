@@ -642,10 +642,7 @@ impl ScriptVm {
                         record_started,
                     );
                     let mut observable_response = response;
-                    if matches!(
-                        pending.info.resource_type,
-                        SubresourceResourceType::Fetch | SubresourceResourceType::Xhr
-                    ) && !response_filter.is_some_and(|filter| filter.is_readable()) {
+                    if pending.info.resource_type == SubresourceResourceType::Xhr && !response_filter.as_ref().is_some_and(|filter| filter.is_readable()) {
                         observable_response.headers =
                             crate::network_host::filter_cors_exposed_response_headers(
                                 &pending.request_origin,
@@ -657,39 +654,42 @@ impl ScriptVm {
                         moli_trace::cdp_runtime_trace_enabled().then(Instant::now);
                     match pending.continuation {
                         PendingSubresourceContinuation::Fetch(fetch) => {
+                            let redirect_mode = fetch.redirect_mode();
                             let resolver = fetch
                                 .into_resolver()
                                 .expect("detached keepalive completion is handled before V8 entry");
                             let resolver = v8::Local::new(scope, &resolver);
-                            let (head, body) = observable_response.into_body();
+                            let (mut head, body) = observable_response.into_body();
+                            let response_request = crate::network_host::FetchResponseRequest {
+                                method: &response_request_method,
+                                mode: pending.request_mode,
+                                redirect_mode,
+                            };
+                            let response_filter = response_filter.or_else(|| Some(response_request.network_response_filter(
+                                &pending.request_origin,
+                                &head,
+                                pending.credentials_mode,
+                            )));
+                            if let Some(status_text) = response_status_text {
+                                head.status_text = Some(status_text);
+                            }
                             let body = if opaque_response_blocked {
                                 moli_fetch::ResponseBody::materialized_bytes(Vec::new())
                             } else {
                                 body
                             };
-                            let response_filter = opaque_response_blocked
-                                .then_some(AsyncSubresourceFetchResponseFilter::Opaque)
-                                .or(response_filter);
+                            // ORB discards the internal body; request policy
+                            // still selects opaque versus opaqueredirect.
+                            // Preserve explicit service-worker filter overrides.
                             let response_obj =
                                 crate::network_host::build_fetch_response_object_from_body_source_for_request_mode_with_filter(
                                     scope,
                                     &pending.request_origin,
-                                    crate::network_host::FetchResponseRequest {
-                                        method: &response_request_method,
-                                        mode: pending.request_mode,
-                                    },
+                                    response_request,
                                     head,
                                     body,
                                     response_filter,
                                 );
-                            if let Some(status_text) = response_status_text.as_deref() {
-                                crate::network_host::set_response_slot_string(
-                                    scope,
-                                    response_obj,
-                                    crate::network_host::RESPONSE_STATUS_TEXT_SLOT,
-                                    status_text,
-                                );
-                            }
                             resolver.resolve(scope, response_obj.into());
                         }
                         PendingSubresourceContinuation::Xhr { xhr, .. } => {
