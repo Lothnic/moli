@@ -2174,7 +2174,7 @@ async fn fetch_connected_link_readiness_with_service_worker(
             Ok(Some(response)) => {
                 let response_filter = response.response_filter;
                 let origin_clean =
-                    connected_link_origin_clean_from_service_worker_filter(response_filter);
+                    connected_link_origin_clean_from_service_worker_filter(response_filter.clone());
                 let response = *response.response;
                 let load_event_successful =
                     connected_link_load_event_successful(&response, response_filter);
@@ -2201,6 +2201,7 @@ async fn fetch_connected_link_readiness_with_service_worker(
                 &request_origin,
                 &response.head(),
                 request_mode,
+                moli_fetch::RequestRedirectMode::Follow,
             )
             .is_none_or(|filter| filter.is_readable());
             ConnectedLinkReadinessFetchResponse::new(response, origin_clean, load_event_successful)

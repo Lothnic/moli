@@ -310,6 +310,7 @@ fn register_pending_window_fetch_for_test(
         moli_fetch::RequestCredentialsMode::SameOrigin,
         moli_fetch::RequestMode::Cors,
         (&url).into(),
+        moli_fetch::RequestRedirectMode::Follow,
         None,
         Default::default(),
         crate::types::PendingSubresourceFetchInfo {
@@ -352,6 +353,7 @@ fn register_pending_window_fetch_for_test(
                 host.record_streaming_subresource_fetch(
                     crate::types::StreamingSubresourceFetchState {
                         response_filter: None,
+                        skip_fetch_security_validation: false,
                         pending,
                         request_url: url.clone(),
                         request_method: "GET".to_owned(),
@@ -473,6 +475,7 @@ fn register_pending_window_fetch_with_connect_policy_for_test(
         moli_fetch::RequestCredentialsMode::SameOrigin,
         moli_fetch::RequestMode::Cors,
         (&document_url).into(),
+        moli_fetch::RequestRedirectMode::Follow,
         None,
         Default::default(),
         crate::types::PendingSubresourceFetchInfo {

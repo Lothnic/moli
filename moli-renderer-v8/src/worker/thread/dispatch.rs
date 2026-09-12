@@ -28,9 +28,8 @@ use crate::network_host::{
     close_pending_network_body_stream, enqueue_pending_network_body_chunk,
     error_pending_network_body_stream_with_reason, materialize_response_object_body,
     materialize_response_object_body_with_chunk_callback,
-    materialize_response_object_head_for_service_worker_respond_with,
-    materialized_body_bytes_from_value, new_network_body_source_id,
-    set_request_destination_for_service_worker_fetch_event,
+    materialize_response_object_internal_head, materialized_body_bytes_from_value,
+    new_network_body_source_id, set_request_destination_for_service_worker_fetch_event,
     set_request_mode_for_service_worker_fetch_event,
     set_request_reload_navigation_for_service_worker_fetch_event,
 };
@@ -3037,7 +3036,7 @@ fn service_worker_respond_with_settled<'s>(
         return;
     };
     let result = if fulfilled {
-        match materialize_response_object_head_for_service_worker_respond_with(
+        match materialize_response_object_internal_head(
             scope,
             args.get(0),
             "FetchEvent.respondWith",
@@ -3217,6 +3216,7 @@ fn service_worker_fetch_response_from_materialized(
 ) -> ServiceWorkerFetchResponse {
     let response = head.with_body(body);
     ServiceWorkerFetchResponse {
+        cors_exposed_header_names: response.cors_exposed_header_names,
         final_url: response.final_url,
         response_type: response.response_type,
         redirected: response.redirected,
@@ -3231,6 +3231,7 @@ fn service_worker_fetch_response_head_from_materialized(
     head: &MaterializedResponseHead,
 ) -> MaterializedServiceWorkerFetchResponseHead {
     MaterializedServiceWorkerFetchResponseHead {
+        cors_exposed_header_names: head.cors_exposed_header_names.clone(),
         status_text: head.status_text.clone(),
         final_url: head.final_url.clone(),
         response_type: head.response_type.clone(),
@@ -3444,6 +3445,8 @@ fn start_service_worker_navigation_preload_response_in_context(
         crate::network_host::FetchResponseRequest {
             method: &started.request_method,
             mode: started.request_mode,
+            // Navigation preload always fetches with manual redirects.
+            redirect_mode: moli_fetch::RequestRedirectMode::Manual,
         },
         head,
         started.body_source_id,
