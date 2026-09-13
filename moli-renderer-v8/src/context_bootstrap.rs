@@ -189,7 +189,8 @@ pub(crate) use navigation_traversal_execution::apply_authorized_history_traversa
 pub(crate) use performance_runtime::PERFORMANCE_TIME_ORIGIN_SLOT;
 pub(crate) use performance_runtime::performance_slot_number;
 pub(crate) use selection_surface::{
-    selection_value_for_window, sync_selection_owner_document_for_window,
+    selection_text_for_clipboard, selection_value_for_window,
+    sync_selection_owner_document_for_window,
 };
 pub(crate) use shared::{dom_time_since_origin_millis, unix_epoch_millis};
 mod specs;
@@ -297,7 +298,10 @@ pub(crate) use self::file_api::{
     DirectoryReaderCallbackAdmission, DirectoryReaderCallbackTask,
     DirectoryReaderCallbackTaskEffect, FileEntryFileCallbackTask, FileEntryFileCallbackTaskEffect,
 };
-pub(crate) use self::file_api::{apply_drag_modifier_drop_effect, build_data_transfer_object};
+pub(crate) use self::file_api::{
+    apply_drag_modifier_drop_effect, build_clipboard_data_transfer, build_data_transfer_object,
+    clipboard_data_transfer_contents, disable_clipboard_data_transfer,
+};
 pub(crate) use self::file_api::{
     build_file_list_object, build_file_object, file_list_files_from_object,
     flush_one_pending_file_reader, selected_file_from_object,
