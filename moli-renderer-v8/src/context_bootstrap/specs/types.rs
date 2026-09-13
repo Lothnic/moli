@@ -98,6 +98,7 @@ pub(in crate::context_bootstrap) enum ConstructorKind {
     BroadcastChannel,
     EventSource,
     IdleDetector,
+    CloseWatcher,
     Notification,
     MessageChannel,
     MessagePort,
