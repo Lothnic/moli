@@ -1494,6 +1494,13 @@ async fn secondary_webapis_cover_file_file_list_and_resize_observer_basics() -> 
     page.finish_capture_screenshot(captured)?;
     page.evaluate_runtime_expression_async("runGeometryProbe()")
         .await?;
+    browser
+        .wait_for_script_truthy(
+            &mut page,
+            "document.body.getAttribute('data-resize-target') === 'true'",
+            Duration::from_secs(2),
+        )
+        .await?;
 
     assert!(
         page.serialize_html_async()
@@ -5853,7 +5860,8 @@ async fn rootless_intersection_observer_uses_deep_mock_flow() -> Result<()> {
 }
 
 #[tokio::test]
-async fn intersection_observer_root_scopes_delivery_to_descendants_only() -> Result<()> {
+async fn intersection_observer_root_reports_non_descendant_targets_as_non_intersecting()
+-> Result<()> {
     let server = FixtureServer::spawn().await?;
     let browser = Browser::new(AppConfig::default())?;
 
@@ -5863,18 +5871,20 @@ async fn intersection_observer_root_scopes_delivery_to_descendants_only() -> Res
     browser
         .wait_for_script_truthy(
             &mut page,
-            "globalThis.intersectionObserverRootScopedIds === 'inside'",
+            "globalThis.intersectionObserverRootScopedEntries === 'outside:false,inside:true'",
             Duration::from_secs(2),
         )
         .await?;
 
     assert_eq!(
-        diagnostic_global(&page, "intersectionObserverRootScopedIds"),
-        Some(&JsValueSnapshot::String("inside".to_owned()))
+        diagnostic_global(&page, "intersectionObserverRootScopedEntries"),
+        Some(&JsValueSnapshot::String(
+            "outside:false,inside:true".to_owned()
+        ))
     );
     assert_eq!(
         diagnostic_global(&page, "intersectionObserverRootScopedCount"),
-        Some(&JsValueSnapshot::Number(1.0))
+        Some(&JsValueSnapshot::Number(2.0))
     );
 
     server.shutdown().await;
@@ -6117,7 +6127,7 @@ async fn intersection_observer_threshold_crossings_report_exit_and_reentry() -> 
     browser
         .wait_for_script_truthy(
             &mut page,
-            "globalThis.intersectionThresholdCount === 3 && globalThis.intersectionThresholdBurstCount === 2",
+            "globalThis.intersectionThresholdCount === 3 && globalThis.intersectionThresholdBurstCount === 0",
             Duration::from_secs(2),
         )
         .await?;
@@ -6132,11 +6142,15 @@ async fn intersection_observer_threshold_crossings_report_exit_and_reentry() -> 
     );
     assert_eq!(
         diagnostic_global(&page, "intersectionThresholdBurstCount"),
-        Some(&JsValueSnapshot::Number(2.0))
+        Some(&JsValueSnapshot::Number(0.0))
     );
     assert_eq!(
         diagnostic_global(&page, "intersectionThresholdBurstCapture"),
-        Some(&JsValueSnapshot::String("false:false|true:true".to_owned()))
+        Some(&JsValueSnapshot::String(String::new()))
+    );
+    assert_eq!(
+        diagnostic_global(&page, "intersectionThresholdBurstCallbackCount"),
+        Some(&JsValueSnapshot::Number(1.0))
     );
 
     server.shutdown().await;

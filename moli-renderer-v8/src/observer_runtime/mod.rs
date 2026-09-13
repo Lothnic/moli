@@ -10,11 +10,14 @@ pub(crate) use callback::ObserverCallbackId;
 pub(crate) use dom_access::callback_binding_count_for_test;
 pub(crate) use dom_access::{
     ObserverCallbackResidence, ObserverStoreAccessToken, activate_performance_observer_callback,
-    active_performance_observer_callbacks, callback_is_current,
-    coalesce_child_list_replacement_records, deactivate_performance_observer_callback,
-    flush_slotchange_microtask, prepare_callback, queue_intersection_checks,
-    queue_mutation_records, register_callback, retire_context_token,
-    retire_execution_context_owner,
+    activate_resize_observer_callback, active_performance_observer_callbacks,
+    active_resize_observer_callbacks, callback_is_current, coalesce_child_list_replacement_records,
+    deactivate_performance_observer_callback, deactivate_resize_observer_callback,
+    deliver_document_intersections, document_has_rendering_observers, flush_slotchange_microtask,
+    prepare_callback, queue_intersection_checks, queue_mutation_records,
+    queue_resize_observer_rendering_updates, queue_style_rendering_update, register_callback,
+    rendering_observer_documents, retire_context_token, retire_execution_context_owner,
+    update_document_intersections,
 };
 
 use crate::web_api_interfaces;
@@ -36,7 +39,7 @@ use moli_css_parse::{normalize_root_margin, root_margin_components};
 use moli_webapi_declare::{WebApiFunctionTemplate, WebApiObject};
 
 use super::{
-    context_bootstrap::build_dom_rect_object,
+    context_bootstrap::{build_dom_rect_object, throw_dom_exception_value},
     host::report_event_callback_exception,
     native_bridge::document::{DETACHED_STATE_SLOT, detached_native_handle_for_runtime},
     native_bridge::{
@@ -172,8 +175,6 @@ pub(super) struct ObserverStore {
     mutation_delivery_scheduled: bool,
     next_intersection_observer_id: u32,
     intersection_observers: HashMap<u32, IntersectionObserverState>,
-    intersection_check_scheduled: bool,
-    intersection_delivery_scheduled: bool,
     // Geometry facts are derived from the current DOM and shared by every
     // observation in one mutation generation. `queue_mutation_records` owns
     // invalidation, matching the observer controller's update lifecycle.
@@ -335,7 +336,6 @@ struct ObserverMutationPlan {
 #[derive(Clone, Copy)]
 enum IntersectionMutationPlan {
     None,
-    CheckNow,
     ScheduleCheck,
 }
 
@@ -360,7 +360,8 @@ enum QueuedMutationRecordKind {
 struct IntersectionObserverState {
     observer: v8::Global<v8::Object>,
     callback: callback::ObserverCallback,
-    // Preserve observation order; duplicate observe() leaves the position unchanged.
+    // ObservationTargets is an ordered list; repeated observe() is a no-op,
+    // and unobserve()/observe() moves only that target to the end.
     observed_targets: IndexSet<NativeNodeId>,
     queued_entries: Vec<QueuedIntersectionEntry>,
     last_reported_entries: HashMap<NativeNodeId, LastReportedIntersection>,
@@ -410,17 +411,18 @@ struct MutationObserverConstructorArgs {
 
 #[derive(webidl::WebIdlDictionary)]
 #[webidl(prefix = "IntersectionObserverInit")]
-struct IntersectionObserverInitMembers<'s> {
+struct IntersectionObserverInitMembers {
+    // The derive converts members in declaration order; WebIDL requires lexical order.
+    #[webidl(default = 0)]
+    delay: i32,
     #[webidl(with = intersection_observer_root_member)]
     root: Option<NativeNodeId>,
     #[webidl(default = "0px")]
     root_margin: String,
     #[webidl(default = "0px")]
     scroll_margin: String,
-    #[webidl(legacy_nullish, converter = "raw")]
-    threshold: Option<v8::Local<'s, v8::Value>>,
-    #[webidl(default = 0)]
-    delay: i32,
+    #[webidl(with = intersection_observer_threshold_member)]
+    threshold: Vec<f64>,
     #[webidl(default = false)]
     track_visibility: bool,
 }
@@ -578,18 +580,10 @@ impl ObserverStore {
         // are suppressed when no MutationObserver is registered, that proxy is
         // wrong: an IO-only page would never see threshold deliveries.
         //
-        // Most mutations only need one browser-style async intersection update
-        // before the JS turn ends. Keep synchronous checks for mutations that
-        // connect/disconnect an observed target subtree so remove/reinsert pairs
-        // still report exit/reentry transitions within the same turn, but avoid
-        // re-reading every observed target for each unrelated attribute/text
-        // mutation.
-        let intersection = if !self.intersection_observers.is_empty() {
-            if self.intersection_mutation_needs_sync(dom_host, effects) {
-                IntersectionMutationPlan::CheckNow
-            } else {
-                IntersectionMutationPlan::ScheduleCheck
-            }
+        // Sample once after rendering. Transient remove/reinsert operations
+        // within one script must not manufacture exit/reentry notifications.
+        let intersection = if !self.intersection_observers.is_empty() && effects.did_change() {
+            IntersectionMutationPlan::ScheduleCheck
         } else {
             IntersectionMutationPlan::None
         };
@@ -597,40 +591,6 @@ impl ObserverStore {
             queue_mutation_delivery: queued_any,
             intersection,
         }
-    }
-
-    fn intersection_mutation_needs_sync(
-        &self,
-        dom_host: &DomHost,
-        effects: &DomMutationEffects,
-    ) -> bool {
-        if self.intersection_observers.is_empty() {
-            return false;
-        }
-        effects
-            .tree()
-            .disconnected_roots()
-            .iter()
-            .any(|removed_root| {
-                self.intersection_observers.values().any(|state| {
-                    state
-                        .observed_targets
-                        .iter()
-                        .any(|target| is_ancestor_or_self(dom_host, *removed_root, *target))
-                })
-            })
-            || effects
-                .tree()
-                .connected_roots()
-                .iter()
-                .any(|connected_root| {
-                    self.intersection_observers.values().any(|state| {
-                        state
-                            .observed_targets
-                            .iter()
-                            .any(|target| is_ancestor_or_self(dom_host, *connected_root, *target))
-                    })
-                })
     }
 
     pub(super) fn coalesce_child_list_replacement_records(
@@ -780,25 +740,40 @@ impl ObserverStore {
         deliveries
     }
 
-    fn collect_intersection_deliveries<'s>(
+    fn intersection_notification_observers(
+        &self,
+        owner: crate::native_bridge::WindowExecutionContextOwner,
+    ) -> Vec<u32> {
+        let mut ids: Vec<_> = self
+            .intersection_observers
+            .iter()
+            .filter_map(|(id, state)| {
+                state
+                    .callback
+                    .observer_identity()
+                    .is_some_and(|identity| identity.owner() == owner)
+                    .then_some(*id)
+            })
+            .collect();
+        ids.sort_unstable();
+        ids
+    }
+
+    fn take_intersection_delivery<'s>(
         &mut self,
         scope: &mut v8::PinScope<'s, '_>,
-    ) -> Vec<IntersectionObserverDelivery<'s>> {
-        let mut deliveries = Vec::new();
-        for state in self.intersection_observers.values_mut() {
-            if state.queued_entries.is_empty() {
-                continue;
-            }
-            let entries = mem::take(&mut state.queued_entries);
-            let observer = v8::Local::new(scope, &state.observer);
-            deliveries.push(IntersectionObserverDelivery {
-                observer,
-                callback: state.callback.prepare(scope),
-                entries,
-                options: state.options.clone(),
-            });
+        id: u32,
+    ) -> Option<IntersectionObserverDelivery<'s>> {
+        let state = self.intersection_observers.get_mut(&id)?;
+        if state.queued_entries.is_empty() {
+            return None;
         }
-        deliveries
+        Some(IntersectionObserverDelivery {
+            observer: v8::Local::new(scope, &state.observer),
+            callback: state.callback.prepare(scope),
+            entries: mem::take(&mut state.queued_entries),
+            options: state.options.clone(),
+        })
     }
 
     fn retire_execution_context_owner(
@@ -882,39 +857,39 @@ fn invoke_mutation_deliveries<'s>(
     }
 }
 
-fn invoke_intersection_deliveries<'s>(
+fn invoke_intersection_delivery<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     host_ptr: *mut JsContextHost,
-    deliveries: Vec<IntersectionObserverDelivery<'s>>,
+    delivery: IntersectionObserverDelivery<'s>,
 ) {
-    for delivery in deliveries {
-        if !delivery.callback.is_current(unsafe { &*host_ptr }) {
-            continue;
-        }
-        let entries =
-            build_intersection_entries_array(scope, host_ptr, &delivery.options, &delivery.entries);
-        let observer_value: v8::Local<'_, v8::Value> = delivery.observer.into();
-        match delivery.callback.invoke(
+    if !delivery.callback.is_current(unsafe { &*host_ptr }) {
+        return;
+    }
+    let entries =
+        build_intersection_entries_array(scope, host_ptr, &delivery.options, &delivery.entries);
+    let observer_value: v8::Local<'_, v8::Value> = delivery.observer.into();
+    let execution_scope = crate::script_cleanup::ScriptExecutionScope::enter(scope);
+    let outcome = delivery.callback.invoke(
+        scope,
+        host_ptr,
+        "IntersectionObserver callback",
+        observer_value,
+        &[entries.into(), observer_value],
+    );
+    if !scope.is_execution_terminating()
+        && let WindowWebIdlCallbackFunctionOutcome::Threw(report) = outcome
+    {
+        report_event_callback_exception(
             scope,
             host_ptr,
-            "IntersectionObserver callback",
-            observer_value,
-            &[entries.into(), observer_value],
-        ) {
-            WindowWebIdlCallbackFunctionOutcome::Threw(report) => {
-                report_event_callback_exception(
-                    scope,
-                    host_ptr,
-                    "intersectionobserver",
-                    delivery.callback.relevant_identity(),
-                    None,
-                    &report,
-                );
-            }
-            WindowWebIdlCallbackFunctionOutcome::Returned
-            | WindowWebIdlCallbackFunctionOutcome::Retired => {}
-        }
+            "intersectionobserver",
+            delivery.callback.relevant_identity(),
+            None,
+            &report,
+        );
     }
+    drop(execution_scope);
+    crate::script_cleanup::perform_callback_cleanup_checkpoint(scope);
 }
 
 impl MutationObserverState {
@@ -1190,16 +1165,14 @@ pub(super) fn intersection_observer_constructor_callback<'s>(
         rv.set_undefined();
         return;
     };
-    let options = match parse_intersection_observer_options(scope, parsed.options, |root| {
-        dom_access::is_intersection_root(host_ptr, root)
-    }) {
+    let options = match parse_intersection_observer_options(scope, parsed.options) {
         Ok(options) => options,
         Err(IntersectionObserverOptionsError::Range(message)) => {
             throw_range_error(scope, message);
             return;
         }
-        Err(IntersectionObserverOptionsError::Type(message)) => {
-            throw_type_error(scope, &message);
+        Err(IntersectionObserverOptionsError::Syntax(message)) => {
+            throw_dom_exception_value(scope, message, "SyntaxError");
             return;
         }
         Err(IntersectionObserverOptionsError::WebIdl(error)) => {
@@ -1587,7 +1560,7 @@ fn has_property(
 }
 
 enum IntersectionObserverOptionsError {
-    Type(String),
+    Syntax(&'static str),
     WebIdl(webidl::WebIdlError),
     Range(&'static str),
 }
@@ -1629,7 +1602,6 @@ fn intersection_observer_root_member<'s>(
 fn parse_intersection_observer_options<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     value: Option<v8::Local<'s, v8::Value>>,
-    mut root_is_valid: impl FnMut(NativeNodeId) -> bool,
 ) -> Result<IntersectionObserverOptions, IntersectionObserverOptionsError> {
     let Some(value) = value else {
         return Ok(IntersectionObserverOptions::default());
@@ -1644,31 +1616,23 @@ fn parse_intersection_observer_options<'s>(
         Err(error) => return Err(IntersectionObserverOptionsError::WebIdl(error)),
     };
 
-    let mut options = IntersectionObserverOptions::default();
-    if let Some(root) = init.root {
-        if !root_is_valid(root) {
-            return Err(IntersectionObserverOptionsError::Type(
-                "Failed to construct 'IntersectionObserver': root must be an Element or Document."
-                    .to_owned(),
-            ));
-        }
-        options.root = Some(root);
-    }
+    let mut options = IntersectionObserverOptions {
+        root: init.root,
+        ..IntersectionObserverOptions::default()
+    };
 
-    options.root_margin = normalize_root_margin(&init.root_margin).ok_or_else(|| {
-        IntersectionObserverOptionsError::Type(
-            "Failed to construct 'IntersectionObserver': rootMargin must contain 1 to 4 px or percentage values.".to_owned(),
-        )
-    })?;
-    options.scroll_margin = normalize_root_margin(&init.scroll_margin).ok_or_else(|| {
-        IntersectionObserverOptionsError::Type(
-            "Failed to construct 'IntersectionObserver': scrollMargin must contain 1 to 4 px or percentage values.".to_owned(),
-        )
-    })?;
+    options.root_margin = normalize_root_margin(&init.root_margin).ok_or(
+        IntersectionObserverOptionsError::Syntax(
+            "Failed to construct 'IntersectionObserver': rootMargin must contain 1 to 4 px or percentage values.",
+        ),
+    )?;
+    options.scroll_margin = normalize_root_margin(&init.scroll_margin).ok_or(
+        IntersectionObserverOptionsError::Syntax(
+            "Failed to construct 'IntersectionObserver': scrollMargin must contain 1 to 4 px or percentage values.",
+        ),
+    )?;
 
-    if let Some(thresholds) = threshold_option(scope, init.threshold)? {
-        options.thresholds = thresholds;
-    }
+    options.thresholds = normalize_intersection_thresholds(init.threshold)?;
     options.delay = init.delay;
     options.track_visibility = init.track_visibility;
     if options.track_visibility && options.delay < 100 {
@@ -1691,52 +1655,47 @@ fn bool_option(
         .is_some_and(|value| value.boolean_value(scope))
 }
 
-fn threshold_option<'s>(
+fn intersection_observer_threshold_member<'s>(
     scope: &mut v8::PinScope<'s, '_>,
-    value: Option<v8::Local<'s, v8::Value>>,
-) -> Result<Option<Vec<f64>>, IntersectionObserverOptionsError> {
-    let Some(value) = value else { return Ok(None) };
+    object: v8::Local<'s, v8::Object>,
+    member: &'static str,
+) -> Result<Vec<f64>, webidl::WebIdlError> {
+    let context = webidl::Context::member("IntersectionObserverInit", member);
+    let Some(value) =
+        webidl::optional_member::<v8::Local<'s, v8::Value>>(scope, object, member, context)?
+    else {
+        return Ok(vec![0.0]);
+    };
 
-    let mut thresholds = if value.is_object() {
-        webidl::convert::<webidl::Sequence<webidl::Double>>(
-            scope,
-            value,
-            webidl::Context::member("IntersectionObserverInit", "threshold"),
-        )
-        .map_err(IntersectionObserverOptionsError::WebIdl)?
-        .0
-        .into_iter()
-        .map(|value| validate_intersection_threshold(value.0))
-        .collect::<Result<Vec<_>, _>>()?
+    // Convert the union at its dictionary position, reading @@iterator once.
+    if let Some(sequence) =
+        webidl::convert_optional_sequence::<webidl::Double>(scope, value, context, &())?
+    {
+        Ok(sequence.0.into_iter().map(|value| value.0).collect())
     } else {
-        vec![threshold_number(scope, value)?]
-    };
-    thresholds.sort_by(|left, right| left.partial_cmp(right).unwrap_or(Ordering::Equal));
-    if thresholds.is_empty() {
-        thresholds.push(0.0);
+        Ok(vec![
+            webidl::convert::<webidl::Double>(scope, value, context)?.0,
+        ])
     }
-    Ok(Some(thresholds))
 }
 
-fn threshold_number<'s>(
-    scope: &mut v8::PinScope<'s, '_>,
-    value: v8::Local<'s, v8::Value>,
-) -> Result<f64, IntersectionObserverOptionsError> {
-    let Some(number) = value.number_value(scope) else {
-        return Err(IntersectionObserverOptionsError::Type(
-            "Failed to construct 'IntersectionObserver': threshold must be a number.".to_owned(),
-        ));
-    };
-    validate_intersection_threshold(number)
-}
-
-fn validate_intersection_threshold(number: f64) -> Result<f64, IntersectionObserverOptionsError> {
-    if !number.is_finite() || !(0.0..=1.0).contains(&number) {
+fn normalize_intersection_thresholds(
+    mut thresholds: Vec<f64>,
+) -> Result<Vec<f64>, IntersectionObserverOptionsError> {
+    // WebIDL conversion has completed; constructor validation follows margins.
+    if thresholds
+        .iter()
+        .any(|number| !(0.0..=1.0).contains(number))
+    {
         return Err(IntersectionObserverOptionsError::Range(
             "Failed to construct 'IntersectionObserver': threshold must be between 0 and 1.",
         ));
     }
-    Ok(number)
+    thresholds.sort_by(|left, right| left.partial_cmp(right).unwrap_or(Ordering::Equal));
+    if thresholds.is_empty() {
+        thresholds.push(0.0);
+    }
+    Ok(thresholds)
 }
 
 fn string_set_option(
@@ -2053,6 +2012,21 @@ fn node_is_intersection_root(dom_host: &DomHost, node: NativeNodeId) -> bool {
 
 fn node_is_intersection_target(dom_host: &DomHost, node: NativeNodeId) -> bool {
     dom_host.node(node).is_some_and(|node| node.is_element())
+}
+
+fn intersection_has_rendering_document(
+    runtime: &JsContextHost,
+    target: NativeNodeId,
+    options: &IntersectionObserverOptions,
+) -> bool {
+    // An explicit root belongs to its own Document even when the target is
+    // windowless or in another Document. For implicit roots, keep the target's
+    // browsing context semantics (IntersectionObserver issue #456).
+    runtime
+        .dom_host()
+        .owner_document_handle(options.root.unwrap_or(target))
+        .and_then(|document| runtime.window_endpoint_for_document(document))
+        .is_some()
 }
 
 fn target_is_intersection_observable(

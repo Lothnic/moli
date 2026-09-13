@@ -42,12 +42,22 @@ pub(super) struct CompletedIntersectionCheckBatch {
 }
 
 impl ObserverStore {
-    pub(super) fn take_intersection_check_batch(&mut self) -> Option<IntersectionCheckBatch> {
+    pub(super) fn take_intersection_check_batch(
+        &mut self,
+        owner: crate::native_bridge::WindowExecutionContextOwner,
+    ) -> Option<IntersectionCheckBatch> {
         if self.intersection_observers.is_empty() {
             return None;
         }
         let mut observers = Vec::with_capacity(self.intersection_observers.len());
         for (observer_id, state) in &self.intersection_observers {
+            if state
+                .callback
+                .observer_identity()
+                .is_none_or(|identity| identity.owner() != owner)
+            {
+                continue;
+            }
             observers.push(IntersectionObserverCheckInput {
                 observer_id: *observer_id,
                 options: state.options.clone(),
@@ -174,7 +184,12 @@ pub(super) fn compute_intersection_check_batch(
                 },
                 &check.options.thresholds,
             ),
-            None => target_is_intersection_observable(dom_host, check.target, &check.options),
+            // A disconnected Element in a live Document still receives its
+            // initial non-intersecting entry. Windowless Documents wait until
+            // adoption into a browsing context; parentage alone is insufficient.
+            None => {
+                super::intersection_has_rendering_document(runtime, check.target, &check.options)
+            }
         };
         results.push(IntersectionCheckResult {
             observer_id: check.observer_id,
@@ -213,9 +228,11 @@ fn compute_mock_intersection_check_batch(
                     },
                     &observer.options.thresholds,
                 ),
-                None => {
-                    target_is_intersection_observable(dom_host, target.target, &observer.options)
-                }
+                None => super::intersection_has_rendering_document(
+                    runtime,
+                    target.target,
+                    &observer.options,
+                ),
             };
             results.push(IntersectionCheckResult {
                 observer_id: observer.observer_id,
