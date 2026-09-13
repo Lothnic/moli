@@ -108,6 +108,9 @@ pub(crate) fn text_control_set_selection_range_with_direction_internal(
         (end, end)
     };
     let changed = runtime.set_selection_range_with_direction(handle, start, end, direction);
+    if runtime.active_element_handle() == Some(handle) {
+        runtime.note_text_control_selection(handle);
+    }
     if changed {
         queue_text_control_select_event(scope, runtime_ptr, handle);
         queue_text_control_selection_change_event(scope, runtime_ptr, handle);
@@ -137,6 +140,15 @@ pub(crate) fn replace_text_control_selection(
     }
 
     let runtime = unsafe { &*runtime_ptr };
+    let clipboard_edit = matches!(input_type, TextEditInputType::InsertFromPaste | TextEditInputType::DeleteByCut);
+    let handle = if clipboard_edit {
+        let Some(active) = runtime.active_element_handle() else {
+            return false;
+        };
+        active
+    } else {
+        handle
+    };
     if !is_text_control(runtime, handle)
         || !runtime.dom_host().is_connected(handle)
         || crate::native_bridge::element::form_control_is_effectively_disabled(runtime, handle)
@@ -146,6 +158,12 @@ pub(crate) fn replace_text_control_selection(
             .and_then(Node::as_element)
             .is_some_and(|element| element.attribute("readonly").is_some())
     {
+        return false;
+    }
+    if clipboard_edit && runtime.dom_host().node(handle).and_then(Node::as_element).is_none_or(|element| {
+        !(element.is_html_textarea() || (element.is_html_input() && matches!(element.input_type(),
+            InputType::Text | InputType::Search | InputType::Tel | InputType::Url | InputType::Email | InputType::Password | InputType::Number)))
+    }) {
         return false;
     }
     let value = text_control_value(runtime, handle);
@@ -614,7 +632,7 @@ pub(in crate::native_bridge) fn text_control_select_callback(
         return;
     };
     let len = text_control_value(unsafe { &*runtime_ptr }, handle)
-        .chars()
+        .encode_utf16()
         .count() as u32;
     let _ = text_control_set_selection_range_internal(scope, runtime_ptr, handle, 0, len);
     rv.set_undefined();
