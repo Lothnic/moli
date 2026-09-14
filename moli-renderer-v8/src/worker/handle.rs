@@ -109,6 +109,18 @@ pub(crate) enum WorkerMessage {
     ServiceWorkerPeriodicSyncEvent(Box<ServiceWorkerPeriodicSyncEvent>),
     /// Dispatch `navigator.serviceWorker` `controllerchange` in this worker client.
     ServiceWorkerControllerChange,
+    /// Dispatch updatefound on the original registration in this service worker realm.
+    ServiceWorkerRegistrationUpdateFound,
+    /// Settle a registration.update() promise on the requesting worker loop.
+    ServiceWorkerUpdateResult {
+        request_id: u64,
+        result: Box<
+            Result<
+                crate::service_worker_runtime::ServiceWorkerRegistrationSnapshot,
+                crate::service_worker_runtime::ServiceWorkerRegistrationError,
+            >,
+        >,
+    },
     /// Resolve a Service Worker `SyncManager.register()` request in the worker.
     ServiceWorkerSyncRegistrationResult(ServiceWorkerSyncRegistrationResult),
     /// Resolve a Service Worker `SyncManager.getTags()` request in the worker.
@@ -405,6 +417,14 @@ pub(crate) struct WorkerScriptResource {
     pub(crate) body_sha256: String,
     pub(crate) response_time_ms: u64,
     pub(crate) mime_type: Option<String>,
+    pub(crate) classic_script: Option<WorkerStoredClassicScript>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub(crate) struct WorkerStoredClassicScript {
+    pub(crate) source: Arc<str>,
+    pub(crate) muted_errors: bool,
+    pub(crate) redirect_urls: Vec<Url>,
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -447,6 +467,7 @@ impl WorkerScriptResource {
             body_sha256,
             response_time_ms,
             mime_type,
+            classic_script: None,
         }
     }
 
@@ -935,6 +956,12 @@ impl WorkerHandle {
         let _ = self
             .tx
             .send(WorkerMessage::ServiceWorkerLifecycleEvent(Box::new(event)));
+    }
+
+    pub(crate) fn dispatch_service_worker_registration_update_found(&self) {
+        let _ = self
+            .tx
+            .send(WorkerMessage::ServiceWorkerRegistrationUpdateFound);
     }
 
     pub(crate) fn dispatch_service_worker_fetch_event(&self, event: ServiceWorkerFetchEvent) {

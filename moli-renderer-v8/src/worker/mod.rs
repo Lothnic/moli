@@ -22,6 +22,9 @@ mod script_mime;
 mod thread;
 mod timer_callback;
 
+pub(crate) type WorkerScriptUpdateResources =
+    std::collections::HashMap<url::Url, Result<WorkerScriptResource, String>>;
+
 pub(crate) use thread::perform_callback_cleanup_checkpoint_if_worker;
 
 pub(crate) use data_url::decode_data_url_script_source;
@@ -56,8 +59,9 @@ pub(crate) use handle::{
     WorkerConsoleMessage, WorkerErrorPhase, WorkerErrorSource, WorkerFetchHandlerType,
     WorkerParentErrorEventKind, WorkerPendingFetchContinue, WorkerPendingSubresourceFetch,
     WorkerPendingXhrContinue, WorkerRuntimeEvent, WorkerRuntimeInspectorMessageBatch,
-    WorkerScriptResource, WorkerScriptResourceKind, WorkerToParentMessage,
-    WorkerWebSocketFrameEvent, WorkerWebSocketLifecycleEvent, worker_secure_context_for_script_url,
+    WorkerScriptResource, WorkerScriptResourceKind, WorkerStoredClassicScript,
+    WorkerToParentMessage, WorkerWebSocketFrameEvent, WorkerWebSocketLifecycleEvent,
+    worker_secure_context_for_script_url,
 };
 pub(crate) use handle::{WorkerDevToolsHandle, WorkerHandle, WorkerNetworkPolicy};
 pub(crate) use module_mime::{

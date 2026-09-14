@@ -84,6 +84,7 @@ use super::global_scope::{
     drain_service_worker_push_get_subscription_result, drain_service_worker_push_subscribe_result,
     drain_service_worker_push_unsubscribe_result, drain_service_worker_show_notification_result,
     drain_service_worker_sync_get_tags_result, drain_service_worker_sync_registration_result,
+    drain_service_worker_update_result,
     drain_worker_fetch_completion, drain_worker_opfs_completion, drain_worker_webcrypto_completion,
     drain_worker_xhr_event, fail_pending_worker_csp_report, fail_pending_worker_fetch,
     fail_pending_worker_fetch_auth, fail_pending_worker_fetch_response, fail_pending_worker_xhr,
@@ -201,6 +202,9 @@ pub(crate) struct WorkerSpawnOptions {
     pub(crate) broadcast_channel_top_level_site: Option<String>,
     pub(crate) creator_storage_key: Option<MoliStorageKey>,
     pub(crate) service_worker_runtime: Option<ServiceWorkerRuntimeService>,
+    pub(crate) service_worker_script_resources: Vec<WorkerScriptResource>,
+    pub(crate) service_worker_updated_script_resources: crate::worker::WorkerScriptUpdateResources,
+    pub(crate) service_worker_can_import_new_scripts: bool,
     pub(crate) reserved_service_worker_client_id: Option<ServiceWorkerClientId>,
     pub(crate) indexed_db_manager: Option<crate::context_bootstrap::WeakIndexedDbManager>,
     pub(crate) storage_bucket_store: Option<crate::context_bootstrap::SharedStorageBucketStore>,
@@ -336,6 +340,9 @@ impl WorkerSpawnOptions {
             broadcast_channel_top_level_site: None,
             creator_storage_key: None,
             service_worker_runtime: None,
+            service_worker_script_resources: Vec::new(),
+            service_worker_updated_script_resources: Default::default(),
+            service_worker_can_import_new_scripts: true,
             reserved_service_worker_client_id: None,
             indexed_db_manager: None,
             storage_bucket_store: None,
@@ -450,6 +457,24 @@ impl WorkerSpawnOptions {
 
     pub(crate) fn with_global_kind(mut self, global_kind: WorkerGlobalKind) -> Self {
         self.global_kind = global_kind;
+        self
+    }
+
+    pub(crate) fn with_service_worker_script_resources(
+        mut self,
+        resources: Vec<WorkerScriptResource>,
+        can_import_new_scripts: bool,
+    ) -> Self {
+        self.service_worker_script_resources = resources;
+        self.service_worker_can_import_new_scripts = can_import_new_scripts;
+        self
+    }
+
+    pub(crate) fn with_service_worker_updated_script_resources(
+        mut self,
+        resources: crate::worker::WorkerScriptUpdateResources,
+    ) -> Self {
+        self.service_worker_updated_script_resources = resources;
         self
     }
 
@@ -568,6 +593,7 @@ fn worker_has_pending_async(state: &Rc<RefCell<WorkerGlobalState>>) -> bool {
         || !state.pending_service_worker_client_focuses.is_empty()
         || !state.pending_service_worker_clients_open_windows.is_empty()
         || !state.pending_service_worker_show_notifications.is_empty()
+        || !state.pending_service_worker_updates.is_empty()
         || !state.pending_service_worker_get_notifications.is_empty()
         || !state.pending_service_worker_sync_registrations.is_empty()
         || !state.pending_service_worker_sync_get_tags.is_empty()
@@ -1321,6 +1347,9 @@ pub(crate) fn spawn_worker_with_options(options: WorkerSpawnOptions) -> WorkerHa
         broadcast_channel_top_level_site,
         creator_storage_key,
         service_worker_runtime,
+        service_worker_script_resources,
+        service_worker_updated_script_resources,
+        service_worker_can_import_new_scripts,
         reserved_service_worker_client_id,
         indexed_db_manager,
         storage_bucket_store,
@@ -1373,6 +1402,9 @@ pub(crate) fn spawn_worker_with_options(options: WorkerSpawnOptions) -> WorkerHa
                 broadcast_channel_top_level_site,
                 creator_storage_key,
                 service_worker_runtime,
+                service_worker_script_resources,
+                service_worker_updated_script_resources,
+                service_worker_can_import_new_scripts,
                 reserved_service_worker_client_id,
                 indexed_db_manager,
                 storage_bucket_store,
@@ -1507,6 +1539,9 @@ async fn worker_main(
     broadcast_channel_top_level_site: Option<String>,
     creator_storage_key: Option<MoliStorageKey>,
     service_worker_runtime: Option<ServiceWorkerRuntimeService>,
+    service_worker_script_resources: Vec<WorkerScriptResource>,
+    service_worker_updated_script_resources: crate::worker::WorkerScriptUpdateResources,
+    service_worker_can_import_new_scripts: bool,
     reserved_service_worker_client_id: Option<ServiceWorkerClientId>,
     indexed_db_manager: Option<crate::context_bootstrap::WeakIndexedDbManager>,
     storage_bucket_store: Option<crate::context_bootstrap::SharedStorageBucketStore>,
@@ -1627,6 +1662,12 @@ async fn worker_main(
         global_kind,
         script_kind,
         current_script_url,
+        service_worker_script_resources: service_worker_script_resources
+            .into_iter()
+            .map(|resource| (resource.request_url.clone(), resource))
+            .collect(),
+        service_worker_updated_script_resources,
+        service_worker_can_import_new_scripts,
         referrer_policy,
         module_static_import_content_security_policies,
         content_security_policies,
@@ -1683,6 +1724,8 @@ async fn worker_main(
         pending_service_worker_client_focuses: std::collections::HashMap::new(),
         pending_service_worker_clients_open_windows: std::collections::HashMap::new(),
         pending_service_worker_show_notifications: std::collections::HashMap::new(),
+        pending_service_worker_updates: std::collections::HashMap::new(),
+        service_worker_update_request_ids: Default::default(),
         pending_service_worker_get_notifications: std::collections::HashMap::new(),
         pending_service_worker_sync_registrations: std::collections::HashMap::new(),
         pending_service_worker_sync_get_tags: std::collections::HashMap::new(),
@@ -2448,6 +2491,37 @@ async fn worker_main(
                 let ctx = v8::Local::new(scope, &context);
                 let scope = &mut v8::ContextScope::new(scope, ctx);
                 drain_service_worker_clients_open_window_result(scope, &state, result);
+                perform_worker_microtask_checkpoint_and_report_pending_promise_rejections(scope);
+                drain_worker_dynamic_module_imports(scope, &state, &module_graph_fetch_tx);
+            }
+            WorkerLoopWake::Message(Some(WorkerMessage::ServiceWorkerUpdateResult {
+                request_id,
+                result,
+            })) => {
+                if pending_module_bootstrap.is_some() {
+                    pending_bootstrap_messages
+                        .push_back(WorkerMessage::ServiceWorkerUpdateResult { request_id, result });
+                    continue;
+                }
+                let scope = pin!(v8::HandleScope::new(worker_isolate.worker_isolate_mut()));
+                let scope = &mut scope.init();
+                let ctx = v8::Local::new(scope, &context);
+                let scope = &mut v8::ContextScope::new(scope, ctx);
+                drain_service_worker_update_result(scope, &state, request_id, *result);
+                perform_worker_microtask_checkpoint_and_report_pending_promise_rejections(scope);
+                drain_worker_dynamic_module_imports(scope, &state, &module_graph_fetch_tx);
+            }
+            WorkerLoopWake::Message(Some(WorkerMessage::ServiceWorkerRegistrationUpdateFound)) => {
+                if pending_module_bootstrap.is_some() {
+                    pending_bootstrap_messages
+                        .push_back(WorkerMessage::ServiceWorkerRegistrationUpdateFound);
+                    continue;
+                }
+                let scope = pin!(v8::HandleScope::new(worker_isolate.worker_isolate_mut()));
+                let scope = &mut scope.init();
+                let ctx = v8::Local::new(scope, &context);
+                let scope = &mut v8::ContextScope::new(scope, ctx);
+                super::global_scope::dispatch_service_worker_registration_update_found(scope);
                 perform_worker_microtask_checkpoint_and_report_pending_promise_rejections(scope);
                 drain_worker_dynamic_module_imports(scope, &state, &module_graph_fetch_tx);
             }
