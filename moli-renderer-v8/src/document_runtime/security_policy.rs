@@ -82,22 +82,99 @@ pub(crate) enum DocumentNavigationEmbeddingContext<'a> {
 
 #[derive(Debug, Clone)]
 pub(crate) struct DocumentConnectPolicySnapshot {
-    enforce_policies: Vec<String>,
+    policy_self_url: Option<Box<Url>>,
+    enforce_policies: Vec<DocumentContentSecurityPolicyString>,
     report_only_policies: Vec<String>,
     reporting_endpoints: ContentSecurityPolicyReportingEndpoints,
 }
 
 impl DocumentConnectPolicySnapshot {
-    pub(crate) fn from_policy_container(policy: &DocumentPolicyContainer) -> Self {
-        let mut enforce_policies = policy.response_content_security_policies.clone();
-        enforce_policies.extend(policy.document_content_security_policies.iter().cloned());
+    pub(crate) fn from_policies(
+        enforce_policies: Vec<String>,
+        report_only_policies: Vec<String>,
+        reporting_endpoints: ContentSecurityPolicyReportingEndpoints,
+    ) -> Self {
         Self {
-            enforce_policies,
-            report_only_policies: policy
+            policy_self_url: None,
+            enforce_policies: document_response_content_security_policy_strings(
+                &enforce_policies,
+                &reporting_endpoints,
+            ),
+            report_only_policies,
+            reporting_endpoints,
+        }
+    }
+
+    pub(crate) fn has_policies(&self) -> bool {
+        !self.enforce_policies.is_empty() || !self.report_only_policies.is_empty()
+    }
+
+    pub(crate) fn from_inherited_policy(
+        policy: &crate::content_security_policy::InheritedContentSecurityPolicy,
+    ) -> Self {
+        let mut snapshot = Self::from_policies(
+            policy.header_policies.clone(),
+            policy.report_only_policies.clone(),
+            policy.reporting_endpoints.clone(),
+        );
+        snapshot.policy_self_url = policy.self_url.clone().map(Box::new);
+        snapshot
+            .enforce_policies
+            .extend(policy.meta_policies.iter().map(|policy_text| {
+                DocumentContentSecurityPolicyString {
+                    policy: policy_text.clone(),
+                    report_uri_enabled: false,
+                    reporting_endpoints: policy.reporting_endpoints.clone(),
+                }
+            }));
+        snapshot
+    }
+
+    pub(crate) fn check_redirect(
+        &self,
+        document_url: &Url,
+        request_url: &Url,
+    ) -> DocumentContentSecurityPolicyCheck {
+        let policy_url = self.policy_self_url.as_deref().unwrap_or(document_url);
+        let mut result = DocumentContentSecurityPolicyCheck {
+            report_only_violations: document_connect_policy_violations(
+                &self.report_only_policies,
+                &self.reporting_endpoints,
+                policy_url,
+                request_url,
+                ContentSecurityPolicyRedirectStatus::FollowedRedirect,
+                ContentSecurityPolicyDisposition::Report,
+            ),
+            enforced_violations: document_connect_policy_violations_from_document_policies(
+                self.enforce_policies.clone(),
+                policy_url,
+                request_url,
+                ContentSecurityPolicyRedirectStatus::FollowedRedirect,
+                ContentSecurityPolicyDisposition::Enforce,
+            ),
+        };
+        for violation in result
+            .report_only_violations
+            .iter_mut()
+            .chain(&mut result.enforced_violations)
+        {
+            violation.document_uri =
+                crate::content_security_policy::csp_url_for_report(document_url);
+            violation.source_file =
+                crate::content_security_policy::csp_url_for_report(document_url);
+        }
+        result
+    }
+
+    #[cfg(test)]
+    pub(crate) fn from_policy_container(policy: &DocumentPolicyContainer) -> Self {
+        Self::from_policies(
+            policy.response_content_security_policies.clone(),
+            policy
                 .response_content_security_report_only_policies
                 .clone(),
-            reporting_endpoints: policy.content_security_reporting_endpoints.clone(),
-        }
+            policy.content_security_reporting_endpoints.clone(),
+        )
     }
 
     pub(crate) fn enforce_violation(
@@ -106,14 +183,21 @@ impl DocumentConnectPolicySnapshot {
         request_url: &Url,
         redirect_status: ContentSecurityPolicyRedirectStatus,
     ) -> Option<DocumentContentSecurityPolicyViolation> {
-        document_connect_policy_violation(
-            &self.enforce_policies,
-            &self.reporting_endpoints,
-            document_url,
+        document_url_policy_violation_from_document_policies(
+            self.enforce_policies.clone(),
+            self.policy_self_url.as_deref().unwrap_or(document_url),
             request_url,
+            ContentSecurityPolicyResourceKind::DocumentConnect,
             redirect_status,
             ContentSecurityPolicyDisposition::Enforce,
         )
+        .map(|mut violation| {
+            violation.document_uri =
+                crate::content_security_policy::csp_url_for_report(document_url);
+            violation.source_file =
+                crate::content_security_policy::csp_url_for_report(document_url);
+            violation
+        })
     }
 
     pub(crate) fn report_only_violation(
@@ -125,11 +209,18 @@ impl DocumentConnectPolicySnapshot {
         document_connect_policy_violation(
             &self.report_only_policies,
             &self.reporting_endpoints,
-            document_url,
+            self.policy_self_url.as_deref().unwrap_or(document_url),
             request_url,
             redirect_status,
             ContentSecurityPolicyDisposition::Report,
         )
+        .map(|mut violation| {
+            violation.document_uri =
+                crate::content_security_policy::csp_url_for_report(document_url);
+            violation.source_file =
+                crate::content_security_policy::csp_url_for_report(document_url);
+            violation
+        })
     }
 }
 
@@ -882,6 +973,79 @@ impl DocumentRuntime {
             report_only_violations,
             enforced_violations,
         }
+    }
+
+    pub(crate) fn document_connect_policy_snapshot_for_document(
+        &self,
+        document_handle: Option<DomHandle>,
+        policy: &DocumentPolicyContainer,
+    ) -> DocumentConnectPolicySnapshot {
+        if self.bypass_content_security_policy() {
+            return DocumentConnectPolicySnapshot::from_policies(
+                Vec::new(),
+                Vec::new(),
+                Default::default(),
+            );
+        }
+        DocumentConnectPolicySnapshot {
+            policy_self_url: policy
+                .content_security_policy_self_url
+                .clone()
+                .map(Box::new),
+            enforce_policies: self.document_content_security_policy_strings_for_optional_document(
+                document_handle,
+                &policy.response_content_security_policies,
+                &policy.content_security_reporting_endpoints,
+            ),
+            report_only_policies: policy
+                .response_content_security_report_only_policies
+                .clone(),
+            reporting_endpoints: policy.content_security_reporting_endpoints.clone(),
+        }
+    }
+
+    pub(crate) fn local_worker_content_security_policy_source(
+        &self,
+        document: Option<DomHandle>,
+        document_url: &Url,
+        policy: &DocumentPolicyContainer,
+    ) -> crate::content_security_policy::ContentSecurityPolicySource {
+        use crate::content_security_policy::InheritedContentSecurityPolicy;
+        let snapshot = if self.bypass_content_security_policy() {
+            InheritedContentSecurityPolicy::default()
+        } else {
+            InheritedContentSecurityPolicy {
+                self_url: Some(
+                    policy
+                        .content_security_policy_self_url
+                        .as_ref()
+                        .unwrap_or(document_url)
+                        .clone(),
+                ),
+                header_policies: policy.response_content_security_policies.clone(),
+                meta_policies: document
+                    .map(|handle| self.meta_content_security_policy_strings_for_document(handle))
+                    .unwrap_or_default(),
+                report_only_policies: policy
+                    .response_content_security_report_only_policies
+                    .clone(),
+                reporting_endpoints: policy.content_security_reporting_endpoints.clone(),
+            }
+        };
+        let mut sources = self.local_worker_policy_sources.borrow_mut();
+        if let Some(source) = document
+            .and_then(|handle| sources.get(&handle))
+            .and_then(std::sync::Weak::upgrade)
+        {
+            *source.write() = snapshot;
+            return source;
+        }
+        sources.retain(|_, source| source.strong_count() != 0);
+        let source = std::sync::Arc::new(parking_lot::RwLock::new(snapshot));
+        if let Some(document) = document {
+            sources.insert(document, std::sync::Arc::downgrade(&source));
+        }
+        source
     }
 
     pub(crate) fn document_subresource_csp_check(
@@ -1960,6 +2124,14 @@ impl DocumentRuntime {
             return;
         }
         if let Some(policy) = policy {
+            if let Some(source) = self
+                .local_worker_policy_sources
+                .borrow()
+                .get(&document_handle)
+                .and_then(std::sync::Weak::upgrade)
+            {
+                source.write().meta_policies.push(policy.clone());
+            }
             self.delivered_meta_content_security_policies
                 .borrow_mut()
                 .entry(document_handle)
@@ -2568,6 +2740,54 @@ mod tests {
         let mut runtime = runtime_for_html("<!doctype html>");
         runtime.set_response_content_security_policies(&[policy.to_owned()]);
         runtime
+    }
+
+    #[test]
+    fn connect_policy_snapshot_preserves_policy_deliveries_and_meta_reporting_rules() {
+        let runtime = runtime_for_html(
+            r#"<!doctype html><meta http-equiv="Content-Security-Policy"
+                content="connect-src 'self'; report-uri /report">"#,
+        );
+        let policy_text = "connect-src 'self'; report-uri /report".to_owned();
+        let mut headers = Vec::new();
+        for name in [
+            "Content-Security-Policy",
+            "Content-Security-Policy-Report-Only",
+        ] {
+            for _ in 0..2 {
+                headers.push((name.to_owned(), policy_text.clone()));
+            }
+        }
+        let policy = DocumentPolicyContainer::from_navigation_response_headers(
+            &headers,
+            runtime.document_url(),
+        );
+        runtime.initialize_inherited_meta_content_security_policies(
+            runtime.document_handle(),
+            std::slice::from_ref(&policy_text),
+        );
+        let snapshot = runtime.document_connect_policy_snapshot_for_document(
+            Some(runtime.document_handle()),
+            &policy,
+        );
+        let (reported, blocked) = snapshot
+            .check_redirect(
+                runtime.document_url(),
+                &Url::parse("https://other.test/target").unwrap(),
+            )
+            .into_violations();
+        assert_eq!(reported.len(), 2);
+        assert_eq!(blocked.len(), 4);
+        for violation in reported.iter().chain(&blocked[..2]) {
+            assert_eq!(
+                violation.report_uri_endpoints,
+                vec!["https://example.test/report"]
+            );
+        }
+        for violation in &blocked[2..] {
+            assert_eq!(violation.original_policy, policy_text);
+            assert!(violation.report_uri_endpoints.is_empty());
+        }
     }
 
     #[test]
