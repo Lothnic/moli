@@ -690,71 +690,7 @@ fn window_named_properties_respect_later_prototype_properties_and_descriptor_fla
         r#"{"visibleValue":"visibleNamed","visibleOwn":true,"descriptorWritable":true,"descriptorEnumerable":false,"descriptorConfigurable":true,"eventTargetValue":"event-target","eventTargetOwn":false,"objectValue":"object","objectOwn":false}"#
     );
 }
-#[test]
-fn main_and_child_window_proxies_have_immutable_prototypes() {
-    let mut vm = new_storage_test_vm("https://window-proxy-prototype.test/");
 
-    let result = vm
-        .eval(
-            r#"
-            (() => {
-                "use strict";
-                const frame = document.createElement("iframe");
-                (document.body || document.documentElement || document).appendChild(frame);
-
-                const probe = target => {
-                    const original = Object.getPrototypeOf(target);
-                    const replacement = {};
-                    const outcome = callback => {
-                        try {
-                            callback();
-                            return "returned";
-                        } catch (error) {
-                            return error && error.name;
-                        }
-                    };
-
-                    const objectDifferent = outcome(() => {
-                        Object.setPrototypeOf(target, replacement);
-                    });
-                    const dunderDifferent = outcome(() => {
-                        target.__proto__ = replacement;
-                    });
-                    const reflectDifferent = Reflect.setPrototypeOf(target, replacement);
-                    const unchanged = Object.getPrototypeOf(target) === original;
-                    const objectSame = Object.setPrototypeOf(target, original) === target;
-                    const dunderSame = outcome(() => {
-                        target.__proto__ = original;
-                    });
-                    const reflectSame = Reflect.setPrototypeOf(target, original);
-
-                    return {
-                        objectDifferent,
-                        dunderDifferent,
-                        reflectDifferent,
-                        unchanged,
-                        objectSame,
-                        dunderSame,
-                        reflectSame,
-                    };
-                };
-
-                const observations = {
-                    main: probe(window),
-                    child: probe(frame.contentWindow),
-                };
-                frame.remove();
-                return JSON.stringify(observations);
-            })()
-            "#,
-        )
-        .expect("WindowProxy immutable prototype probe should evaluate");
-
-    assert_eq!(
-        result,
-        r#"{"main":{"objectDifferent":"TypeError","dunderDifferent":"TypeError","reflectDifferent":false,"unchanged":true,"objectSame":true,"dunderSame":"returned","reflectSame":true},"child":{"objectDifferent":"TypeError","dunderDifferent":"TypeError","reflectDifferent":false,"unchanged":true,"objectSame":true,"dunderSame":"returned","reflectSame":true}}"#
-    );
-}
 #[test]
 fn window_internal_child_context_identity_is_not_read_from_web_properties() {
     let mut vm = new_storage_test_vm("https://window-private-identity.test/");
@@ -2065,4 +2001,157 @@ fn location_ancestor_origins_snapshots_frame_referrer_policy_per_navigation() {
         committed,
         r#"{"snapshotted":["null"],"snapshottedNewDocumentList":true,"snapshottedStable":true,"future":["https://ancestor-policy.test"],"futureNewDocumentList":true,"futureStable":true}"#
     );
+}
+
+#[test]
+fn window_named_properties_numeric_names_respect_prototype_shadowing() {
+    let mut vm = new_storage_test_vm("https://window-named-properties.test/");
+
+    let result = vm
+        .eval(
+            r#"
+            (() => {
+                if (!document.documentElement) {
+                    document.appendChild(document.createElement("html"));
+                }
+                if (!document.body) {
+                    document.documentElement.appendChild(document.createElement("body"));
+                }
+                const frame = document.createElement("iframe");
+                (document.body || document.documentElement || document).appendChild(frame);
+                const probe = w => {
+                    const wp = Object.getPrototypeOf(w.Window.prototype);
+                    const named = w.document.createElement("div");
+                    named.id = "0";
+                    w.document.body.appendChild(named);
+                    const checks = [];
+                    const check = (value, own) => {
+                        const descriptor = Object.getOwnPropertyDescriptor(wp, 0);
+                        checks.push(wp[0] === value, Object.hasOwn(wp, 0) === own,
+                            own ? descriptor.value === value : descriptor === undefined);
+                    };
+                    try {
+                        check(named, true);
+                        w.Object.prototype[0] = 20;
+                        check(20, false);
+                        w.EventTarget.prototype[0] = 30;
+                        check(30, false);
+                        delete w.EventTarget.prototype[0];
+                        check(20, false);
+                        delete w.Object.prototype[0];
+                        check(named, true);
+
+                        let calls = 0;
+                        let getterThis;
+                        Object.defineProperty(w.EventTarget.prototype, 0, {
+                            configurable: true,
+                            get() { calls++; getterThis = this; return 40; }
+                        });
+                        checks.push(Object.getOwnPropertyDescriptor(wp, 0) === undefined,
+                            !Object.hasOwn(wp, 0), Reflect.has(wp, 0), calls === 0);
+                        const receiver = Object.create(null);
+                        checks.push(Reflect.get(wp, 0, receiver) === 40,
+                            calls === 1, getterThis === receiver);
+                    } finally {
+                        delete w.Object.prototype[0];
+                        delete w.EventTarget.prototype[0];
+                        named.remove();
+                    }
+                    return checks;
+                };
+                const result = [probe(window), probe(frame.contentWindow)];
+                frame.remove();
+                return JSON.stringify(result);
+            })()
+            "#,
+        )
+        .expect("numeric Window named properties should respect prototype visibility");
+
+    let checks: Vec<Vec<bool>> = serde_json::from_str(&result).expect("visibility probe results");
+    assert_eq!(checks, vec![vec![true; 22]; 2]);
+}
+
+#[test]
+fn window_named_properties_ignore_inherited_proxy_traps() {
+    let mut vm = new_storage_test_vm("https://window-named-properties.test/");
+
+    let result = vm
+        .eval(
+            r#"
+            (() => {
+                if (!document.documentElement) {
+                    document.appendChild(document.createElement("html"));
+                }
+                if (!document.body) {
+                    document.documentElement.appendChild(document.createElement("body"));
+                }
+                const frame = document.createElement("iframe");
+                (document.body || document.documentElement || document).appendChild(frame);
+                const probe = w => {
+                    const wp = Object.getPrototypeOf(w.Window.prototype);
+                    const prototype = w.Object.prototype;
+                    const constructor = w.HTMLDivElement;
+                    const elementPrototype = constructor.prototype;
+                    const named = w.document.createElement("div");
+                    named.id = "namedProbe";
+                    w.document.body.appendChild(named);
+                    const operations = [
+                        ["get", () => wp.namedProbe === named &&
+                            constructor.prototype === elementPrototype],
+                        ["has", () => "namedProbe" in wp],
+                        ["getOwnPropertyDescriptor", () =>
+                            Object.getOwnPropertyDescriptor(wp, "namedProbe").value === named],
+                        ["ownKeys", () => {
+                            const keys = Reflect.ownKeys(wp);
+                            return keys.length === 1 && keys[0] === Symbol.toStringTag;
+                        }],
+                        ["getPrototypeOf", () => Object.getPrototypeOf(wp) === w.EventTarget.prototype],
+                        ["isExtensible", () => Reflect.isExtensible(wp)],
+                        ["preventExtensions", () => !Reflect.preventExtensions(wp)]
+                    ];
+                    const checks = [];
+                    for (const [trap, operation] of operations) {
+                        for (const accessor of [false, true]) {
+                            let calls = 0;
+                            const poison = () => { calls++; throw new Error("inherited " + trap); };
+                            const descriptor = Object.create(null);
+                            descriptor.configurable = true;
+                            descriptor[accessor ? "get" : "value"] = poison;
+                            Object.defineProperty(prototype, trap, descriptor);
+                            let passed = false;
+                            try {
+                                passed = operation();
+                            } catch (_) {
+                                // Preserve the result so every trap and both realms are checked.
+                            } finally {
+                                delete prototype[trap];
+                            }
+                            checks.push(passed && calls === 0);
+                        }
+                    }
+                    named.remove();
+                    return checks;
+                };
+                const result = [probe(window), probe(frame.contentWindow)];
+                frame.remove();
+                return JSON.stringify(result);
+            })()
+            "#,
+        )
+        .expect("WindowProperties should not observe inherited proxy traps");
+
+    let checks: Vec<Vec<bool>> = serde_json::from_str(&result).expect("proxy trap probe results");
+    assert_eq!(checks, vec![vec![true; 14]; 2]);
+}
+
+#[test]
+fn main_and_child_window_global_prototype_chains_are_immutable() {
+    let mut vm = new_storage_test_vm("https://window-proxy-prototype.test/");
+    let script = include_str!("../../../../tests/fixtures/window-global-prototypes.js");
+    let result = vm
+        .eval(&format!("JSON.stringify({script})"))
+        .expect("Window global prototype probe should evaluate");
+    let result: serde_json::Value = serde_json::from_str(&result).unwrap();
+    assert_eq!(result["checks"], 186);
+    assert_eq!(result["failures"], serde_json::json!([]));
 }
