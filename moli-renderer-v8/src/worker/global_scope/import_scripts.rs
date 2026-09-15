@@ -1,6 +1,9 @@
 use super::*;
 use crate::content_security_policy::{
-    ContentSecurityPolicyRedirectStatus, ContentSecurityPolicyResourceKind,
+    ContentSecurityPolicyDisposition, ContentSecurityPolicyRedirectStatus,
+    ContentSecurityPolicyResourceKind, ContentSecurityPolicySourceLocation,
+    InheritedContentSecurityPolicy,
+    content_security_policy_url_violation_for_checked_url_with_redirect_status_disposition_and_reporting_endpoints,
 };
 use moli_url::WebOrigin;
 
@@ -8,7 +11,6 @@ pub(super) struct WorkerImportScriptSource {
     pub(super) final_url: Url,
     pub(super) source: String,
     pub(super) muted_errors: bool,
-    redirect_urls: Vec<Url>,
     resource: Option<crate::worker::WorkerScriptResource>,
 }
 
@@ -46,13 +48,11 @@ fn materialize_worker_import_source(
     state: &Rc<RefCell<WorkerGlobalState>>,
     script_url: &Url,
 ) -> Result<WorkerImportScriptSource, WorkerImportScriptError> {
-    check_import_script_csp(
-        scope,
-        state,
-        script_url,
-        script_url,
-        ContentSecurityPolicyRedirectStatus::NoRedirect,
-    )?;
+    let csp = WorkerImportScriptCsp::capture(scope, state, script_url);
+    if let Some(csp) = &csp {
+        csp.check_url(script_url, ContentSecurityPolicyRedirectStatus::NoRedirect)
+            .map_err(WorkerImportScriptError::network)?;
+    }
     match script_url.scheme() {
         "data" => {
             let source =
@@ -69,7 +69,6 @@ fn materialize_worker_import_source(
                 final_url: script_url.clone(),
                 source,
                 muted_errors: false,
-                redirect_urls: Vec::new(),
                 resource: None,
             })
         }
@@ -86,7 +85,6 @@ fn materialize_worker_import_source(
                 final_url: script_url.clone(),
                 source: body,
                 muted_errors: false,
-                redirect_urls: Vec::new(),
                 resource: None,
             })
         }
@@ -108,17 +106,16 @@ fn materialize_worker_import_source(
                 referrer_policy,
                 network_partition_key,
                 policy_context,
+                csp.map(|csp| {
+                    moli_fetch::RequestRedirectCheck::new(move |checked_url| {
+                        csp.check_url(
+                            checked_url,
+                            ContentSecurityPolicyRedirectStatus::FollowedRedirect,
+                        )
+                    })
+                }),
             )
             .map_err(WorkerImportScriptError::network)?;
-            for checked_url in &source.redirect_urls {
-                check_import_script_csp(
-                    scope,
-                    state,
-                    script_url,
-                    checked_url,
-                    ContentSecurityPolicyRedirectStatus::FollowedRedirect,
-                )?;
-            }
             if let Some(resource) = source.resource.clone() {
                 report_service_worker_imported_script_loaded(state, resource);
             }
@@ -130,37 +127,88 @@ fn materialize_worker_import_source(
     }
 }
 
-fn check_import_script_csp(
-    scope: &mut v8::PinScope<'_, '_>,
-    state: &Rc<RefCell<WorkerGlobalState>>,
-    request_url: &Url,
-    checked_url: &Url,
-    redirect_status: ContentSecurityPolicyRedirectStatus,
-) -> Result<(), WorkerImportScriptError> {
-    let (report, enforce) = {
-        let state = state.borrow();
-        let Some(protected_url) = state.current_script_url.as_ref() else {
-            return Ok(());
+// Redirect checks run on the network thread. Keep the caller's location and
+// an owned policy snapshot, and send violations back to the Worker's task queue.
+struct WorkerImportScriptCsp {
+    policy: InheritedContentSecurityPolicy,
+    protected_url: Url,
+    request_url: Url,
+    location: ContentSecurityPolicySourceLocation,
+    wake_tx: tokio::sync::mpsc::UnboundedSender<WorkerMessage>,
+}
+
+impl WorkerImportScriptCsp {
+    fn capture(
+        scope: &mut v8::PinScope<'_, '_>,
+        state: &Rc<RefCell<WorkerGlobalState>>,
+        request_url: &Url,
+    ) -> Option<Self> {
+        let (policy, protected_url, wake_tx) = {
+            let state = state.borrow();
+            (
+                content_security_policy::worker_policy_snapshot(&state),
+                state.current_script_url.clone()?,
+                state.worker_wake_tx.clone(),
+            )
         };
-        (
-            worker_content_security_policy_report_only_violation_for_checked_url_with_redirect_status(
-                &state, protected_url, checked_url, request_url, ContentSecurityPolicyResourceKind::WorkerScript, redirect_status,
-            ),
-            worker_content_security_policy_violation_for_checked_url_with_redirect_status(
-                &state, protected_url, checked_url, request_url, ContentSecurityPolicyResourceKind::WorkerScript, redirect_status,
-            ),
-        )
-    };
-    if let Some(violation) = report {
-        dispatch_worker_content_security_policy_violation_event_for_state(scope, state, &violation);
+        if policy.header_policies.is_empty()
+            && policy.meta_policies.is_empty()
+            && policy.report_only_policies.is_empty()
+        {
+            return None;
+        }
+        Some(Self {
+            policy,
+            protected_url,
+            request_url: request_url.clone(),
+            location: ContentSecurityPolicySourceLocation::capture(scope),
+            wake_tx,
+        })
     }
-    if let Some(violation) = enforce {
-        dispatch_worker_content_security_policy_violation_event_for_state(scope, state, &violation);
-        return Err(WorkerImportScriptError::network(
-            worker_content_security_policy_error_message(&violation, "importScripts"),
-        ));
+
+    fn check_url(
+        &self,
+        checked_url: &Url,
+        redirect_status: ContentSecurityPolicyRedirectStatus,
+    ) -> Result<(), String> {
+        let mut failure = None;
+        for disposition in [
+            ContentSecurityPolicyDisposition::Report,
+            ContentSecurityPolicyDisposition::Enforce,
+        ] {
+            for (policy, report_uri_enabled) in self.policy.policies(disposition) {
+                let Some(violation) = content_security_policy_url_violation_for_checked_url_with_redirect_status_disposition_and_reporting_endpoints(
+                    std::slice::from_ref(policy),
+                    self.policy.self_url.as_ref().unwrap_or(&self.protected_url),
+                    checked_url,
+                    &self.request_url,
+                    ContentSecurityPolicyResourceKind::WorkerScript,
+                    redirect_status,
+                    disposition,
+                    &self.policy.reporting_endpoints,
+                ) else {
+                    continue;
+                };
+                let mut violation = content_security_policy::worker_policy_violation(
+                    &self.protected_url,
+                    report_uri_enabled,
+                    violation,
+                );
+                self.location.apply_to(&mut violation);
+                if disposition == ContentSecurityPolicyDisposition::Enforce {
+                    failure.get_or_insert_with(|| {
+                        worker_content_security_policy_error_message(&violation, "importScripts")
+                    });
+                }
+                let _ = self
+                    .wake_tx
+                    .send(WorkerMessage::DispatchContentSecurityPolicyViolation(
+                        Box::new(violation),
+                    ));
+            }
+        }
+        failure.map_or(Ok(()), Err)
     }
-    Ok(())
 }
 
 fn ensure_worker_import_script_mime_acceptable(
@@ -184,6 +232,7 @@ pub(super) fn fetch_worker_import_source_blocking(
     referrer_policy: Option<String>,
     network_partition_key: Option<String>,
     policy_context: crate::types::SubresourcePolicyContext,
+    redirect_check: Option<moli_fetch::RequestRedirectCheck>,
 ) -> Result<WorkerImportScriptSource, String> {
     let request_url = script_url.clone();
     let mut request = moli_fetch::Request::new("GET", script_url.as_str(), None, vec![])
@@ -196,6 +245,9 @@ pub(super) fn fetch_worker_import_source_blocking(
             ..moli_fetch::ScriptFetchRequestMetadata::default()
         })
         .with_network_partition_key(network_partition_key);
+    if let Some(redirect_check) = redirect_check {
+        request = request.with_redirect_check(redirect_check);
+    }
     let request_initiator_url = initiator_url.clone();
     if let Some(ref initiator_url) = request_initiator_url {
         request = request
@@ -271,11 +323,6 @@ pub(super) fn fetch_worker_import_source_blocking(
         final_url: head.final_url,
         source: body,
         muted_errors,
-        redirect_urls: head
-            .redirect_chain
-            .into_iter()
-            .map(|redirect| redirect.to_url)
-            .collect(),
         resource: Some(resource),
     })
 }
