@@ -154,8 +154,18 @@ async fn srcdoc(page: &mut HistoryPage, frame: &str, markup: &str) -> Result<()>
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn nested_history_restores_interleaved_frames_after_parent_document_replacement() -> Result<()>
-{
+async fn nested_history_restores_interleaved_frames_after_parent_document_replacement() {
+    // Traversal drives a replacement load through the protocol output projector,
+    // so use the same stack allowance as the other deep CDP tests.
+    target_8mb_stack("nested-history-interleaved", || async {
+        check_interleaved_frames_after_parent_document_replacement()
+            .await
+            .expect("interleaved frame history should survive parent document replacement");
+    })
+    .await;
+}
+
+async fn check_interleaved_frames_after_parent_document_replacement() -> Result<()> {
     let server = SmokeFixtureServer::start().await;
     let initial_url = markup_url(&server, "<!doctype html><body><p>initial</p>");
     for popup in [false, true] {
@@ -184,7 +194,9 @@ async fn nested_history_restores_interleaved_frames_after_parent_document_replac
             let away = markup_url(&server, "<!doctype html><body><p>away from parent</p>");
             let (mut page, root) = open_root(&source, popup, &server.url("/plain?opener")).await?;
             let list = frames(root);
-            let initial = snapshot(&mut page, root).await?;
+            let initial = snapshot(&mut page, root)
+                .await
+                .with_context(|| format!("popup={popup}, {layout}: initial frames"))?;
             let mut stages = vec![initial.clone()];
             for (index, text) in [
                 (0, "first historical source"),
@@ -201,7 +213,9 @@ async fn nested_history_restores_interleaved_frames_after_parent_document_replac
                     &format!("({list})[{index}].contentDocument.body.textContent === '{text}'"),
                 )
                 .await?;
-                stages.push(snapshot(&mut page, root).await?);
+                stages.push(snapshot(&mut page, root).await.with_context(|| {
+                    format!("popup={popup}, {layout}: frame {index} srcdoc loaded")
+                })?);
             }
             page.evaluate(&format!(
                 "({list})[0].contentWindow.location.hash = 'fragment'; true"
@@ -213,7 +227,9 @@ async fn nested_history_restores_interleaved_frames_after_parent_document_replac
             )
             .await?;
             page.evaluate(&format!("({list})[0].contentWindow.history.replaceState({{classic:3}}, ''); ({list})[0].contentWindow.navigation.updateCurrentEntry({{state:{{navigation:3}}}}); true")).await?;
-            let expected = snapshot(&mut page, root).await?;
+            let expected = snapshot(&mut page, root)
+                .await
+                .with_context(|| format!("popup={popup}, {layout}: fragment state updated"))?;
             assert_eq!(
                 expected["length"].as_u64(),
                 initial["length"].as_u64().map(|length| length + 3)
@@ -227,7 +243,9 @@ async fn nested_history_restores_interleaved_frames_after_parent_document_replac
             )
             .await?;
             navigate(&mut page, root, "history.back()", &source).await?;
-            let restored = snapshot(&mut page, root).await?;
+            let restored = snapshot(&mut page, root)
+                .await
+                .with_context(|| format!("popup={popup}, {layout}: parent restored"))?;
             assert_eq!(
                 restored["frames"], expected["frames"],
                 "popup={popup}, {layout}: {restored}"
@@ -245,15 +263,19 @@ async fn nested_history_restores_interleaved_frames_after_parent_document_replac
                     .iter()
                     .map(|frame| frame["url"].clone())
                     .collect::<Vec<_>>();
+                // The URL changes at commit, before the restored child document
+                // finishes parsing. Read its body only after that load completes.
                 wait(
                     &mut page,
                     &format!(
-                        "JSON.stringify(({list}).map(f=>f.contentWindow.location.href)) === {}",
+                        "({list}).every(f=>f.contentDocument?.readyState === 'complete') && JSON.stringify(({list}).map(f=>f.contentWindow.location.href)) === {}",
                         serde_json::to_string(&serde_json::to_string(&urls)?)?
                     ),
                 )
                 .await?;
-                let current = snapshot(&mut page, root).await?;
+                let current = snapshot(&mut page, root).await.with_context(|| {
+                    format!("popup={popup}, {layout}: traversed child entries {urls:?}")
+                })?;
                 for index in 0..2 {
                     assert_eq!(
                         current["frames"][index]["id"], reference["frames"][index]["id"],
@@ -263,7 +285,9 @@ async fn nested_history_restores_interleaved_frames_after_parent_document_replac
             }
             navigate(&mut page, root, "history.go(4)", &away).await?;
             navigate(&mut page, root, "history.go(-3)", &source).await?;
-            let restored = snapshot(&mut page, root).await?;
+            let restored = snapshot(&mut page, root)
+                .await
+                .with_context(|| format!("popup={popup}, {layout}: parent restored by delta"))?;
             for index in 0..2 {
                 assert_eq!(
                     restored["frames"][index]["id"], stages[1]["frames"][index]["id"],
@@ -349,7 +373,16 @@ async fn nested_history_retains_children_of_a_script_created_parent_navigable() 
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn nested_history_restores_grandchildren_with_their_parent_document_identity() -> Result<()> {
+async fn nested_history_restores_grandchildren_with_their_parent_document_identity() {
+    target_8mb_stack("nested-history-grandchildren", || async {
+        check_grandchildren_with_their_parent_document_identity()
+            .await
+            .expect("grandchild history should keep its parent document identity");
+    })
+    .await;
+}
+
+async fn check_grandchildren_with_their_parent_document_identity() -> Result<()> {
     let server = SmokeFixtureServer::start().await;
     let leaf = markup_url(&server, "<!doctype html><body><p>initial</p>");
     let parent = markup_url(
