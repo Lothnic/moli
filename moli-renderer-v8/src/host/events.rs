@@ -96,10 +96,19 @@ impl EventListenerRegistration {
 }
 
 #[derive(Clone, Copy)]
-enum EventHandlerPropertyState {
+pub(crate) enum EventHandlerPropertyState {
     Uncompiled(DomHandle),
     Callback(crate::native_bridge::EventCallbackId),
     Null,
+}
+
+impl EventHandlerPropertyState {
+    pub(crate) fn callback_id(self) -> Option<crate::native_bridge::EventCallbackId> {
+        match self {
+            Self::Callback(callback_id) => Some(callback_id),
+            Self::Uncompiled(_) | Self::Null => None,
+        }
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -111,10 +120,7 @@ struct EventHandlerPropertyEntry {
 fn event_handler_callback_id(
     entry: EventHandlerPropertyEntry,
 ) -> Option<crate::native_bridge::EventCallbackId> {
-    match entry.state {
-        EventHandlerPropertyState::Callback(callback_id) => Some(callback_id),
-        EventHandlerPropertyState::Uncompiled(_) | EventHandlerPropertyState::Null => None,
-    }
+    entry.state.callback_id()
 }
 
 enum EventHandlerPropertyValue {
@@ -263,17 +269,9 @@ fn invoke_prepared_event_callback_with_receiver<'s>(
     arguments: &[v8::Local<'s, v8::Value>],
 ) -> Option<v8::Global<v8::Value>> {
     let relevant_identity = callback.relevant_identity();
-    let invocation = CallbackInvocation::new(
-        callback.callback(scope),
-        receiver,
-        callback.relevant_context(scope),
-        callback.incumbent_context(scope),
-        callback.is_callable(),
-        "handleEvent",
-        arguments,
-        current_event,
-    )
-    .with_execution_context_currentness(host_ptr, relevant_identity);
+    let invocation = callback
+        .invocation(scope, receiver, arguments, current_event)
+        .with_execution_context_currentness(host_ptr, relevant_identity);
     CallbackInvoker::invoke_event_and_then(
         scope,
         "event listener",
@@ -315,17 +313,14 @@ pub(crate) fn invoke_prepared_before_unload_event_handler<'s>(
         .schedule_dom_debugger_event_listener_pause_for_target(event_type, target);
     let relevant_identity = callback.relevant_identity();
     let arguments = [event.into()];
-    let invocation = CallbackInvocation::new(
-        callback.callback(scope),
-        receiver,
-        callback.relevant_context(scope),
-        callback.incumbent_context(scope),
-        callback.is_callable(),
-        "handleEvent",
-        &arguments,
-        (!invocation_target_in_shadow_tree).then_some(event),
-    )
-    .with_execution_context_currentness(host_ptr, relevant_identity);
+    let invocation = callback
+        .invocation(
+            scope,
+            receiver,
+            &arguments,
+            (!invocation_target_in_shadow_tree).then_some(event),
+        )
+        .with_execution_context_currentness(host_ptr, relevant_identity);
     CallbackInvoker::invoke_event_and_then(
         scope,
         "event listener",
@@ -422,9 +417,14 @@ fn invoke_event_handler_property<'s>(
             let Some(key) = v8_string(scope, &handler_name) else {
                 return;
             };
-            let handler = target_object
+            let Some(handler) = target_object
                 .get(scope, key.into())
-                .and_then(|value| v8::Local::<v8::Function>::try_from(value).ok());
+                .and_then(|value| v8::Local::<v8::Function>::try_from(value).ok())
+            else {
+                // A failed compilation returns null for this invocation even
+                // if error reporting installs a replacement in the registry.
+                return;
+            };
             if let Some(value) = registry.event_handler_property_value(target, event_type) {
                 match value {
                     EventHandlerPropertyValue::Callback(callback_id) => {
@@ -442,10 +442,6 @@ fn invoke_event_handler_property<'s>(
                     EventHandlerPropertyValue::Null => return,
                 }
             }
-            let handler = match handler {
-                Some(handler) => handler,
-                None => return,
-            };
             let callback = v8::Local::<v8::Object>::from(handler);
             let relevant_context = callback
                 .get_creation_context(scope)
@@ -453,7 +449,7 @@ fn invoke_event_handler_property<'s>(
             let incumbent_context = scope
                 .get_incumbent_context()
                 .unwrap_or_else(|| scope.get_current_context());
-            let callback_id = unsafe { &mut *host_ptr }.register_event_callback(
+            let callback_id = unsafe { &mut *host_ptr }.register_event_handler_callback(
                 scope,
                 callback,
                 relevant_context,
