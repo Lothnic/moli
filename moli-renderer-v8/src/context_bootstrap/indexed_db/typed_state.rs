@@ -1,7 +1,14 @@
 use super::*;
 use crate::util::RealmValueHandle;
 use moli_storage_service::StorageBucketIdentity;
-use std::{cell::RefCell, collections::BTreeMap, rc::Rc};
+use std::{
+    cell::RefCell,
+    collections::{BTreeMap, BTreeSet},
+    rc::Rc,
+};
+
+mod upgrade;
+pub(super) use upgrade::*;
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub(super) struct IndexedDbObjectId(u64);
@@ -33,6 +40,7 @@ pub(super) enum IndexedDbTaskKind {
     RequestSuccess,
     RequestError,
     Open,
+    OpenSuccess,
     OpenBlocked,
     DeleteBlocked,
     VersionChange,
@@ -186,6 +194,7 @@ impl IndexedDbTaskState {
             IndexedDbTaskKind::RequestSuccess
             | IndexedDbTaskKind::RequestError
             | IndexedDbTaskKind::Open
+            | IndexedDbTaskKind::OpenSuccess
             | IndexedDbTaskKind::OpenBlocked
             | IndexedDbTaskKind::DeleteBlocked
             | IndexedDbTaskKind::VersionChange
@@ -272,6 +281,10 @@ struct IndexedDbBlockedTaskPayload {
     old_version: u64,
     new_version: Option<u64>,
     notifications_pending: bool,
+    notifications_started: bool,
+    blocked_event_required: Option<bool>,
+    recheck_after_checkpoint: bool,
+    version_change_batch: Option<moli_indexeddb::VersionChangeBatch>,
 }
 
 impl IndexedDbBlockedTaskPayload {
@@ -293,6 +306,10 @@ impl IndexedDbBlockedTaskPayload {
             old_version,
             new_version,
             notifications_pending: false,
+            notifications_started: false,
+            blocked_event_required: None,
+            recheck_after_checkpoint: false,
+            version_change_batch: None,
         }
     }
 }
@@ -305,6 +322,9 @@ pub(super) struct IndexedDbBlockedTaskPayloadLocals<'s> {
     pub(super) old_version: u64,
     pub(super) new_version: Option<u64>,
     pub(super) notifications_pending: bool,
+    pub(super) notifications_started: bool,
+    pub(super) blocked_event_required: Option<bool>,
+    pub(super) version_change_batch: Option<moli_indexeddb::VersionChangeBatch>,
 }
 
 struct IndexedDbVersionChangeTaskPayload {
@@ -327,6 +347,8 @@ impl IndexedDbTransactionTaskPayload {
 }
 
 struct IndexedDbRequestLifecycleState {
+    connection_request: Option<super::state::ConnectionRequestLease>,
+    awaiting_operation_result: bool,
     source: RealmValueHandle,
     transaction: RealmValueHandle,
     ready_state: String,
@@ -349,6 +371,8 @@ impl IndexedDbRequestLifecycleState {
         let result: v8::Local<'_, v8::Value> = v8::undefined(scope).into();
         let error: v8::Local<'_, v8::Value> = v8::null(scope).into();
         Self {
+            connection_request: None,
+            awaiting_operation_result: false,
             source: RealmValueHandle::new(scope, source),
             transaction: RealmValueHandle::new(scope, transaction),
             ready_state: "pending".to_owned(),
@@ -365,6 +389,8 @@ impl IndexedDbRequestLifecycleState {
 
 struct IndexedDbTransactionLifecycleState {
     mode: TransactionMode,
+    database: Option<v8::Global<v8::Object>>,
+    upgrade_open_request: Option<v8::Global<v8::Object>>,
     handle: Option<TransactionHandle>,
     active: bool,
     finished: bool,
@@ -381,6 +407,7 @@ struct IndexedDbTransactionLifecycleState {
 
 impl IndexedDbTransactionLifecycleState {
     fn new(
+        database: v8::Global<v8::Object>,
         handle: Option<TransactionHandle>,
         mode: TransactionMode,
         started: bool,
@@ -388,6 +415,8 @@ impl IndexedDbTransactionLifecycleState {
     ) -> Self {
         Self {
             mode,
+            database: Some(database),
+            upgrade_open_request: None,
             handle,
             active: true,
             finished: false,
@@ -408,6 +437,8 @@ impl IndexedDbTransactionLifecycleState {
 pub(super) struct IndexedDbObjectStoreMetadata {
     info: ObjectStoreInfo,
     indexes: BTreeMap<String, IndexInfo>,
+    created_in_upgrade: bool,
+    created_indexes: BTreeSet<String>,
 }
 
 impl IndexedDbObjectStoreMetadata {
@@ -416,7 +447,12 @@ impl IndexedDbObjectStoreMetadata {
             .into_iter()
             .map(|index| (index.name.clone(), index))
             .collect();
-        Self { info, indexes }
+        Self {
+            info,
+            indexes,
+            created_in_upgrade: false,
+            created_indexes: BTreeSet::new(),
+        }
     }
 
     pub(super) fn info(&self) -> &ObjectStoreInfo {
@@ -436,6 +472,7 @@ impl IndexedDbObjectStoreMetadata {
     }
 
     fn set_index(&mut self, info: IndexInfo) {
+        self.created_indexes.insert(info.name.clone());
         if !self.info.index_names.iter().any(|name| name == &info.name) {
             self.info.index_names.push(info.name.clone());
         }
@@ -449,12 +486,14 @@ impl IndexedDbObjectStoreMetadata {
 }
 
 struct IndexedDbDatabaseLifecycleState {
+    manager: Option<WeakIndexedDbManager>,
     handle: DatabaseHandle,
     database_key: String,
     storage_scope: IndexedDbStorageScope,
     closed: bool,
     metadata: BTreeMap<String, IndexedDbObjectStoreMetadata>,
     upgrade_transaction: Option<RealmValueHandle>,
+    upgrade_metadata: Option<IndexedDbUpgradeMetadata>,
 }
 
 impl IndexedDbDatabaseLifecycleState {
@@ -464,12 +503,14 @@ impl IndexedDbDatabaseLifecycleState {
         storage_scope: IndexedDbStorageScope,
     ) -> Self {
         Self {
+            manager: None,
             handle,
             database_key,
             storage_scope,
             closed: false,
             metadata: BTreeMap::new(),
             upgrade_transaction: None,
+            upgrade_metadata: None,
         }
     }
 }
@@ -501,25 +542,30 @@ impl IndexedDbCursorLifecycleState {
 }
 
 struct IndexedDbObjectStoreLifecycleState {
+    wrapper: v8::Weak<v8::Object>,
     transaction: RealmValueHandle,
     database: RealmValueHandle,
     name: String,
     metadata: IndexedDbObjectStoreMetadata,
+    deleted: bool,
 }
 
 impl IndexedDbObjectStoreLifecycleState {
     fn new(
         scope: &mut v8::PinScope<'_, '_>,
+        wrapper: v8::Local<'_, v8::Object>,
         transaction: v8::Local<'_, v8::Object>,
         database: v8::Local<'_, v8::Object>,
         metadata: IndexedDbObjectStoreMetadata,
     ) -> Self {
         let name = metadata.info.name.clone();
         Self {
+            wrapper: v8::Weak::new(scope, wrapper),
             transaction: RealmValueHandle::new(scope, v8::Local::<v8::Value>::from(transaction)),
             database: RealmValueHandle::new(scope, v8::Local::<v8::Value>::from(database)),
             name,
             metadata,
+            deleted: false,
         }
     }
 }
@@ -528,6 +574,8 @@ struct IndexedDbIndexLifecycleState {
     object_store: RealmValueHandle,
     info: IndexInfo,
     marker: bool,
+    deleted: bool,
+    created_in_upgrade: bool,
 }
 
 impl IndexedDbIndexLifecycleState {
@@ -535,11 +583,14 @@ impl IndexedDbIndexLifecycleState {
         scope: &mut v8::PinScope<'_, '_>,
         object_store: v8::Local<'_, v8::Object>,
         info: IndexInfo,
+        created_in_upgrade: bool,
     ) -> Self {
         Self {
             object_store: RealmValueHandle::new(scope, v8::Local::<v8::Value>::from(object_store)),
             info,
             marker: true,
+            deleted: false,
+            created_in_upgrade,
         }
     }
 }
@@ -603,6 +654,33 @@ impl IndexedDbRuntimeStateTable {
 
     fn task(&self, id: IndexedDbTaskId) -> Option<&IndexedDbTaskState> {
         self.tasks.get(&id)
+    }
+}
+
+impl IndexedDbRuntimeStateTable {
+    fn retire_connections(&mut self) {
+        // Database closure aborts unfinished transactions before queue leases
+        // can wake a successor in another isolate. No script runs at teardown.
+        for database in self.databases.values() {
+            if let Some(manager) = &database.manager {
+                manager.close_database_handles([database.handle]);
+            }
+        }
+        for request in self.requests.values_mut() {
+            drop(request.connection_request.take());
+        }
+    }
+}
+
+impl Drop for IndexedDbRuntimeStateTable {
+    fn drop(&mut self) {
+        self.retire_connections();
+    }
+}
+
+pub(crate) fn retire_indexed_db_context(context: v8::Local<'_, v8::Context>) {
+    if let Some(table) = context.get_slot::<RefCell<IndexedDbRuntimeStateTable>>() {
+        table.borrow_mut().retire_connections();
     }
 }
 
@@ -756,9 +834,41 @@ pub(super) fn release_indexed_db_request_dispatch_refs<'s>(
     request.pending_cursor_position = None;
 }
 
+pub(super) fn mark_indexed_db_request_awaiting_operation_result(
+    scope: &mut v8::PinScope<'_, '_>,
+    request: v8::Local<'_, v8::Object>,
+) {
+    let id = indexed_db_typed_state_id(scope, request).expect("accepted request id");
+    let table = indexed_db_runtime_state_table_for_object(scope, request);
+    let mut table = table.borrow_mut();
+    let request = table.requests.get_mut(&id).expect("accepted request state");
+    assert!(
+        !request.awaiting_operation_result,
+        "request accepted twice before its result"
+    );
+    request.awaiting_operation_result = true;
+}
+
+pub(super) fn take_indexed_db_request_awaiting_operation_result(
+    scope: &mut v8::PinScope<'_, '_>,
+    request: v8::Local<'_, v8::Object>,
+) -> bool {
+    let id = indexed_db_typed_state_id(scope, request).expect("settled request id");
+    let table = indexed_db_runtime_state_table_for_object(scope, request);
+    let mut table = table.borrow_mut();
+    std::mem::take(
+        &mut table
+            .requests
+            .get_mut(&id)
+            .expect("settled request state")
+            .awaiting_operation_result,
+    )
+}
+
 pub(super) fn register_indexed_db_transaction_lifecycle<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     transaction: v8::Local<'s, v8::Object>,
+    database: v8::Local<'s, v8::Object>,
     handle: Option<TransactionHandle>,
     mode: TransactionMode,
     started: bool,
@@ -767,7 +877,13 @@ pub(super) fn register_indexed_db_transaction_lifecycle<'s>(
     let Some(id) = indexed_db_typed_state_id(scope, transaction) else {
         return;
     };
-    let state = IndexedDbTransactionLifecycleState::new(handle, mode, started, db_key);
+    let state = IndexedDbTransactionLifecycleState::new(
+        v8::Global::new(scope, database),
+        handle,
+        mode,
+        started,
+        db_key,
+    );
     let table = indexed_db_runtime_state_table_for_object(scope, transaction);
     table.borrow_mut().transactions.insert(id, state);
 }
@@ -844,7 +960,36 @@ pub(super) fn release_indexed_db_transaction_dispatch_refs<'s>(
     let Some(transaction) = table.transactions.get_mut(&id) else {
         return;
     };
+    transaction.database = None;
+    transaction.upgrade_open_request = None;
     transaction.operations_waiting_for_start.clear();
+}
+
+pub(super) fn indexed_db_database_has_unfinished_transactions(
+    scope: &mut v8::PinScope<'_, '_>,
+    database: v8::Local<'_, v8::Object>,
+) -> bool {
+    let table = indexed_db_runtime_state_table_for_object(scope, database);
+    table.borrow().transactions.values().any(|transaction| {
+        !transaction.finished
+            && transaction
+                .database
+                .as_ref()
+                .is_some_and(|owner| v8::Local::new(scope, owner).strict_equals(database.into()))
+    })
+}
+
+pub(super) fn indexed_db_transaction_database<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    transaction: v8::Local<'s, v8::Object>,
+) -> Option<v8::Local<'s, v8::Object>> {
+    let id = indexed_db_typed_state_id(scope, transaction)?;
+    let table = indexed_db_runtime_state_table_for_object(scope, transaction);
+    let table = table.borrow();
+    Some(v8::Local::new(
+        scope,
+        table.transactions.get(&id)?.database.as_ref()?,
+    ))
 }
 
 pub(super) fn push_indexed_db_operation_waiting_for_start<'s>(
@@ -891,7 +1036,10 @@ pub(super) fn register_indexed_db_database_lifecycle<'s>(
     let Some(id) = indexed_db_typed_state_id(scope, database) else {
         return;
     };
-    let state = IndexedDbDatabaseLifecycleState::new(handle, database_key, storage_scope);
+    let mut state = IndexedDbDatabaseLifecycleState::new(handle, database_key, storage_scope);
+    state.manager = indexed_db_shared_manager(scope)
+        .ok()
+        .map(|manager| downgrade_indexed_db_manager(&manager));
     let table = indexed_db_runtime_state_table_for_object(scope, database);
     table.borrow_mut().databases.insert(id, state);
 }
@@ -922,7 +1070,8 @@ pub(super) fn register_indexed_db_object_store_lifecycle<'s>(
     let Some(id) = indexed_db_typed_state_id(scope, store) else {
         return;
     };
-    let state = IndexedDbObjectStoreLifecycleState::new(scope, transaction, database, metadata);
+    let state =
+        IndexedDbObjectStoreLifecycleState::new(scope, store, transaction, database, metadata);
     let table = indexed_db_runtime_state_table_for_object(scope, store);
     table.borrow_mut().object_stores.insert(id, state);
 }
@@ -936,10 +1085,14 @@ pub(super) fn register_indexed_db_index_lifecycle<'s>(
     let Some(id) = indexed_db_typed_state_id(scope, index) else {
         return;
     };
+    let created_in_upgrade =
+        indexed_db_object_store_metadata(scope, object_store).is_some_and(|metadata| {
+            metadata.created_in_upgrade || metadata.created_indexes.contains(&info.name)
+        });
     let table = indexed_db_runtime_state_table_for_object(scope, index);
     table.borrow_mut().indexes.insert(
         id,
-        IndexedDbIndexLifecycleState::new(scope, object_store, info),
+        IndexedDbIndexLifecycleState::new(scope, object_store, info, created_in_upgrade),
     );
 }
 
@@ -1065,7 +1218,9 @@ pub(super) fn register_indexed_db_request_dispatch_task<'s>(
 ) {
     debug_assert!(matches!(
         kind,
-        IndexedDbTaskKind::RequestSuccess | IndexedDbTaskKind::RequestError
+        IndexedDbTaskKind::RequestSuccess
+            | IndexedDbTaskKind::RequestError
+            | IndexedDbTaskKind::OpenSuccess
     ));
     let owner = indexed_db_typed_execution_owner(scope, request)
         .expect("IDB request task wrapper should have typed owner state");
@@ -1243,7 +1398,100 @@ pub(super) fn indexed_db_blocked_task_payload<'s>(
         old_version: payload.old_version,
         new_version: payload.new_version,
         notifications_pending: payload.notifications_pending,
+        notifications_started: payload.notifications_started,
+        blocked_event_required: payload.blocked_event_required,
+        version_change_batch: payload.version_change_batch.clone(),
     })
+}
+
+pub(super) fn set_indexed_db_version_change_batch(
+    scope: &mut v8::PinScope<'_, '_>,
+    task: v8::Local<'_, v8::Object>,
+    batch: moli_indexeddb::VersionChangeBatch,
+) {
+    let id = indexed_db_typed_task_id(scope, task).expect("connection request task id");
+    let table = indexed_db_runtime_state_table_for_object(scope, task);
+    table
+        .borrow_mut()
+        .blocked_tasks
+        .get_mut(&id)
+        .expect("connection request payload")
+        .version_change_batch = Some(batch);
+}
+
+pub(super) fn start_indexed_db_connection_notifications(
+    scope: &mut v8::PinScope<'_, '_>,
+    task: v8::Local<'_, v8::Object>,
+    old_version: u64,
+    new_version: Option<u64>,
+) {
+    let id = indexed_db_typed_task_id(scope, task).expect("connection request task id");
+    let table = indexed_db_runtime_state_table_for_object(scope, task);
+    let mut table = table.borrow_mut();
+    let payload = table
+        .blocked_tasks
+        .get_mut(&id)
+        .expect("connection request payload");
+    payload.old_version = old_version;
+    payload.new_version = new_version;
+    payload.notifications_started = true;
+}
+
+pub(super) fn set_indexed_db_connection_request(
+    scope: &mut v8::PinScope<'_, '_>,
+    request: v8::Local<'_, v8::Object>,
+    lease: super::state::ConnectionRequestLease,
+) {
+    let id = indexed_db_typed_state_id(scope, request).expect("connection request id");
+    let table = indexed_db_runtime_state_table_for_object(scope, request);
+    table
+        .borrow_mut()
+        .requests
+        .get_mut(&id)
+        .expect("request lifecycle")
+        .connection_request = Some(lease);
+}
+
+pub(super) fn indexed_db_connection_request_is_head(
+    scope: &mut v8::PinScope<'_, '_>,
+    request: v8::Local<'_, v8::Object>,
+) -> bool {
+    let Some(id) = indexed_db_typed_state_id(scope, request) else {
+        return false;
+    };
+    let table = indexed_db_runtime_state_table_for_object(scope, request);
+    table
+        .borrow()
+        .requests
+        .get(&id)
+        .and_then(|state| state.connection_request.as_ref())
+        .is_some_and(|lease| lease.handle().is_head())
+}
+
+pub(super) fn finish_indexed_db_connection_request<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    request: v8::Local<'s, v8::Object>,
+) {
+    let Some(id) = indexed_db_typed_state_id(scope, request) else {
+        return;
+    };
+    let table = indexed_db_runtime_state_table_for_object(scope, request);
+    let lease = table
+        .borrow_mut()
+        .requests
+        .get_mut(&id)
+        .and_then(|state| state.connection_request.take());
+    let Some(lease) = lease else { return };
+    if let Some(host_ptr) = context_host_ptr_from_global_bridge(scope) {
+        let owner = indexed_db_typed_execution_owner(scope, request)
+            .and_then(IndexedDbExecutionOwner::execution_context)
+            .expect("Page connection request owner");
+        unsafe { &*host_ptr }.unregister_indexed_db_connection_request(owner, lease.handle().id());
+    }
+    drop(lease);
+    if context_host_ptr_from_global_bridge(scope).is_none() {
+        enqueue_drain_blocked_open_requests_task(scope);
+    }
 }
 
 pub(super) fn set_indexed_db_blocked_notifications_pending<'s>(
@@ -1258,6 +1506,36 @@ pub(super) fn set_indexed_db_blocked_notifications_pending<'s>(
     if let Some(payload) = table.borrow_mut().blocked_tasks.get_mut(&id) {
         payload.notifications_pending = pending;
     }
+}
+
+pub(super) fn defer_indexed_db_blocked_recheck_to_checkpoint(
+    scope: &mut v8::PinScope<'_, '_>,
+    blocked_task: v8::Local<'_, v8::Object>,
+) {
+    let Some(id) = indexed_db_typed_task_id(scope, blocked_task) else {
+        return;
+    };
+    let table = indexed_db_runtime_state_table_for_object(scope, blocked_task);
+    if let Some(payload) = table.borrow_mut().blocked_tasks.get_mut(&id) {
+        payload.recheck_after_checkpoint = true;
+    }
+}
+
+/// Records the decision and returns whether an early recheck needs another task.
+pub(super) fn set_indexed_db_blocked_event_required(
+    scope: &mut v8::PinScope<'_, '_>,
+    blocked_task: v8::Local<'_, v8::Object>,
+    required: bool,
+) -> bool {
+    let Some(id) = indexed_db_typed_task_id(scope, blocked_task) else {
+        return false;
+    };
+    let table = indexed_db_runtime_state_table_for_object(scope, blocked_task);
+    if let Some(payload) = table.borrow_mut().blocked_tasks.get_mut(&id) {
+        payload.blocked_event_required = Some(required);
+        return std::mem::take(&mut payload.recheck_after_checkpoint);
+    }
+    false
 }
 
 pub(super) fn register_indexed_db_version_change_task<'s>(
@@ -1429,12 +1707,13 @@ pub(super) fn indexed_db_database_store_metadata<'s>(
 pub(super) fn set_indexed_db_database_store_metadata<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     database: v8::Local<'s, v8::Object>,
-    metadata: IndexedDbObjectStoreMetadata,
+    mut metadata: IndexedDbObjectStoreMetadata,
 ) -> Option<()> {
     let id = indexed_db_typed_state_id(scope, database)?;
     let table = indexed_db_runtime_state_table_for_object(scope, database);
     let mut table = table.borrow_mut();
     let database = table.databases.get_mut(&id)?;
+    metadata.created_in_upgrade = database.upgrade_metadata.is_some();
     database
         .metadata
         .insert(metadata.info.name.clone(), metadata);
@@ -1981,6 +2260,7 @@ fn set_indexed_db_typed_database_slot_value(
         INDEXED_DB_DATABASE_METADATA_SLOT => true,
         INDEXED_DB_DATABASE_UPGRADE_TRANSACTION_SLOT => {
             database.upgrade_transaction = if value.is_null_or_undefined() {
+                database.upgrade_metadata = None;
                 None
             } else {
                 Some(RealmValueHandle::new(scope, value))
@@ -2141,10 +2421,8 @@ mod tests {
     #[test]
     #[should_panic(expected = "IndexedDB runtime task id space exhausted")]
     fn runtime_task_ids_never_saturate() {
-        let mut table = IndexedDbRuntimeStateTable {
-            next_id: u64::MAX,
-            ..IndexedDbRuntimeStateTable::default()
-        };
+        let mut table = IndexedDbRuntimeStateTable::default();
+        table.next_id = u64::MAX;
 
         let _ = table.upsert_task(
             None,
