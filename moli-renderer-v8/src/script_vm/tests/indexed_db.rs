@@ -1,3 +1,51 @@
+#[test]
+fn indexed_db_roundtrips_image_data_with_graph_identity() {
+    let mut vm = new_storage_page_task_executor_test_vm("https://indexeddb-image-data.test/");
+    vm.eval(
+        r#"
+(() => {
+  globalThis.imageDataStorageResult = 'pending';
+  const open = indexedDB.open(`image-data-${Math.random()}`, 1);
+  const fail = event => { imageDataStorageResult = 'error:' + event.target.error?.name; };
+  open.onerror = fail;
+  open.onupgradeneeded = () => open.result.createObjectStore('values');
+  open.onsuccess = () => {
+    const image = new ImageData(new Uint8ClampedArray([1,2,3,4,5,6,7,8]), 2, 1,
+                               {colorSpace: 'display-p3'});
+    image.expando = 'do not serialize';
+    const write = open.result.transaction('values', 'readwrite');
+    write.onerror = fail;
+    write.objectStore('values').put({image, alias: image}, 'value');
+    image.data[0] = 99;
+    write.oncomplete = () => {
+      const read = open.result.transaction('values').objectStore('values').get('value');
+      read.onerror = fail;
+      read.onsuccess = () => {
+        const row = read.result;
+        imageDataStorageResult = JSON.stringify([
+          Object.getPrototypeOf(row.image) === ImageData.prototype,
+          row.image !== image, row.image === row.alias,
+          row.image.width, row.image.height, row.image.colorSpace,
+          Array.from(row.image.data), row.image.data !== image.data,
+          row.image.expando === undefined
+        ]);
+        open.result.close();
+      };
+    };
+  };
+})()
+"#,
+    )
+    .expect("ImageData storage should schedule");
+    let result = vm
+        .eval_after_selected_page_tasks("String(imageDataStorageResult)")
+        .expect("ImageData storage result should be readable");
+    assert_eq!(
+        result,
+        r#"[true,true,true,2,1,"display-p3",[1,2,3,4,5,6,7,8],true,true]"#
+    );
+}
+
 use super::*;
 use moli_url::origin_ascii_serialization;
 
@@ -5493,6 +5541,177 @@ fn indexed_db_aborted_upgrade_closes_provisional_connection_before_reopen_and_de
 }
 
 #[test]
+fn indexed_db_initial_upgrade_abort_restores_metadata_synchronously() {
+    let mut vm = new_storage_page_task_executor_test_vm("https://indexeddb-initial-rollback.test/");
+    vm.eval(r#"
+globalThis.rollback = [];
+const open = indexedDB.open('initial-rollback', 7);
+let db, tx, store, index;
+function snapshot() {
+  return [db.version, Array.from(db.objectStoreNames),
+          Array.from(tx.objectStoreNames), Array.from(store.indexNames)];
+}
+open.onupgradeneeded = () => {
+  db = open.result;
+  tx = open.transaction;
+  store = db.createObjectStore('records');
+  index = store.createIndex('by-value', 'value');
+  for (const name of ['\uE000', '\u{10000}', 'z', 'a']) {
+    db.createObjectStore(name);
+    store.createIndex(name, 'value');
+  }
+  rollback.push(snapshot());
+  tx.onabort = () => rollback.push(['abort', open.transaction === tx, snapshot()]);
+  Object.defineProperty(tx, 'db', {get() { throw new Error('author db getter'); }});
+  tx.abort();
+  rollback.push(snapshot());
+  for (const source of [store, index]) {
+    for (const method of ['get', 'getKey', 'getAll', 'getAllKeys', 'count', 'openCursor', 'openKeyCursor']) {
+      try { source[method](1); rollback.push(method + ':accepted'); }
+      catch (error) { rollback.push(error.name); }
+    }
+  }
+  for (const method of ['add', 'put', 'delete', 'clear']) {
+    try { store[method](1, 1); rollback.push(method + ':accepted'); }
+    catch (error) { rollback.push(error.name); }
+  }
+};
+open.onerror = () => rollback.push(['error', open.error.name, open.result === undefined,
+                                  open.transaction === null, snapshot()]);
+"#).expect("initial upgrade rollback should schedule");
+    let result = vm
+        .eval_after_selected_page_tasks("JSON.stringify(rollback)")
+        .expect("initial upgrade rollback should run");
+    let result: serde_json::Value = serde_json::from_str(&result).unwrap();
+    let entries = result.as_array().unwrap();
+    assert_eq!(
+        entries[0],
+        serde_json::json!([
+            7,
+            ["a", "records", "z", "\u{10000}", "\u{e000}"],
+            ["a", "records", "z", "\u{10000}", "\u{e000}"],
+            ["a", "by-value", "z", "\u{10000}", "\u{e000}"]
+        ])
+    );
+    assert_eq!(entries[1], serde_json::json!([0, [], [], []]));
+    assert_eq!(
+        &entries[2..20],
+        vec![serde_json::json!("InvalidStateError"); 18]
+    );
+    assert!(entries.contains(&serde_json::json!([
+        "error",
+        "AbortError",
+        true,
+        true,
+        [0, [], [], []]
+    ])));
+    assert_eq!(
+        entries[20],
+        serde_json::json!(["abort", true, [0, [], [], []]])
+    );
+    assert_eq!(entries[21][0], "error");
+    assert_eq!(entries.len(), 22);
+}
+
+#[test]
+fn indexed_db_upgrade_abort_restores_existing_handles_without_reviving_replacements() {
+    let mut vm = new_storage_page_task_executor_test_vm("https://indexeddb-upgrade-rollback.test/");
+    vm.eval(r#"
+globalThis.rollback = [];
+const initial = indexedDB.open('upgrade-rollback', 9);
+initial.onupgradeneeded = () => {
+  const store = initial.result.createObjectStore('records');
+  store.createIndex('by-value', 'value');
+  store.put({value: 'original'}, 1);
+};
+function failure(operation) {
+  try { operation(); return 'accepted'; } catch (error) { return error.name; }
+}
+initial.onsuccess = () => {
+  initial.result.close();
+  const open = indexedDB.open('upgrade-rollback', 10);
+  let db, tx, store, alias, index, replacement, replacementIndex;
+  function snapshot() {
+    return [db.version, Array.from(db.objectStoreNames), Array.from(tx.objectStoreNames),
+            Array.from(store.indexNames), Array.from(alias.indexNames), Array.from(replacement.indexNames),
+            failure(() => store.get(1)), failure(() => index.get(1)),
+            failure(() => replacement.get(1)), failure(() => replacementIndex.get(1))];
+  }
+  open.onupgradeneeded = () => {
+    db = open.result;
+    tx = open.transaction;
+    store = tx.objectStore('records');
+    alias = tx.objectStore('records');
+    index = store.index('by-value');
+    store.put({value: 'changed'}, 1);
+    store.createIndex('aa-transient', 'value');
+    rollback.push([db.version, Array.from(alias.indexNames)]);
+    store.deleteIndex('by-value');
+    const newIndex = alias.createIndex('by-value', 'other');
+    rollback.push(failure(() => index.get(1)));
+    db.deleteObjectStore('records');
+    rollback.push([Array.from(store.indexNames), Array.from(alias.indexNames), failure(() => store.get(1))]);
+    replacement = db.createObjectStore('records', {keyPath: 'id', autoIncrement: true});
+    replacementIndex = replacement.createIndex('by-value', 'other');
+    db.createObjectStore('temporary');
+    tx.abort();
+    rollback.push(snapshot());
+    rollback.push(failure(() => newIndex.get(1)));
+    tx.onabort = () => rollback.push(['abort', snapshot()]);
+  };
+  open.onerror = () => {
+    rollback.push(['error', snapshot()]);
+    const reopen = indexedDB.open('upgrade-rollback');
+    reopen.onsuccess = () => {
+      const reopened = reopen.result;
+      const st = reopened.transaction('records').objectStore('records');
+      rollback.push([reopened.version, Array.from(reopened.objectStoreNames), st.keyPath,
+                     st.autoIncrement, Array.from(st.indexNames)]);
+      const get = st.get(1);
+      get.onsuccess = () => { rollback.push(get.result); reopened.close(); };
+    };
+  };
+};
+"#).expect("upgrade rollback should schedule");
+    let result = vm
+        .eval_after_selected_page_tasks("JSON.stringify(rollback)")
+        .expect("upgrade rollback should run");
+    let result: serde_json::Value = serde_json::from_str(&result).unwrap();
+    let entries = result.as_array().unwrap();
+    let restored = serde_json::json!([
+        9,
+        ["records"],
+        ["records"],
+        ["by-value"],
+        ["by-value"],
+        [],
+        "TransactionInactiveError",
+        "TransactionInactiveError",
+        "InvalidStateError",
+        "InvalidStateError"
+    ]);
+    assert_eq!(
+        entries[0],
+        serde_json::json!([10, ["aa-transient", "by-value"]])
+    );
+    assert_eq!(entries[1], "InvalidStateError");
+    assert_eq!(entries[2], serde_json::json!([[], [], "InvalidStateError"]));
+    assert_eq!(entries[3], restored);
+    assert_eq!(entries[4], "InvalidStateError");
+    assert!(entries.contains(&serde_json::json!(["error", restored])));
+    assert!(entries.contains(&serde_json::json!(["abort", restored])));
+    assert!(entries.contains(&serde_json::json!([
+        9,
+        ["records"],
+        null,
+        false,
+        ["by-value"]
+    ])));
+    assert!(entries.contains(&serde_json::json!({"value": "original"})));
+    assert_eq!(entries.len(), 9);
+}
+
+#[test]
 fn indexed_db_upgrade_open_dispatches_versionchange_and_blocked_until_close() {
     let mut vm = new_storage_page_task_executor_test_vm("https://indexeddb-open-blocked.test/");
 
@@ -6159,50 +6378,190 @@ fn indexed_db_key_path_reads_iterator_once() {
 }
 
 #[test]
-fn indexed_db_roundtrips_image_data_with_graph_identity() {
-    let mut vm = new_storage_page_task_executor_test_vm("https://indexeddb-image-data.test/");
+fn indexed_db_upgrade_waits_for_requests_and_callback_microtasks() {
+    let mut vm = new_storage_page_task_executor_test_vm("https://indexeddb-upgrade-lifetime.test/");
     vm.eval(
         r#"
-(() => {
-  globalThis.imageDataStorageResult = 'pending';
-  const open = indexedDB.open(`image-data-${Math.random()}`, 1);
-  const fail = event => { imageDataStorageResult = 'error:' + event.target.error?.name; };
-  open.onerror = fail;
-  open.onupgradeneeded = () => open.result.createObjectStore('values');
-  open.onsuccess = () => {
-    const image = new ImageData(new Uint8ClampedArray([1,2,3,4,5,6,7,8]), 2, 1,
-                               {colorSpace: 'display-p3'});
-    image.expando = 'do not serialize';
-    const write = open.result.transaction('values', 'readwrite');
-    write.onerror = fail;
-    write.objectStore('values').put({image, alias: image}, 'value');
-    image.data[0] = 99;
-    write.oncomplete = () => {
-      const read = open.result.transaction('values').objectStore('values').get('value');
-      read.onerror = fail;
-      read.onsuccess = () => {
-        const row = read.result;
-        imageDataStorageResult = JSON.stringify([
-          Object.getPrototypeOf(row.image) === ImageData.prototype,
-          row.image !== image, row.image === row.alias,
-          row.image.width, row.image.height, row.image.colorSpace,
-          Array.from(row.image.data), row.image.data !== image.data,
-          row.image.expando === undefined
-        ]);
-        open.result.close();
-      };
-    };
+globalThis.upgradeEvents = [];
+globalThis.authorGetterReads = 0;
+const open = indexedDB.open('upgrade-lifetime', 1);
+open.onerror = () => upgradeEvents.push(`open-error:${open.error.name}`);
+open.onupgradeneeded = () => {
+  const db = open.result;
+  const tx = open.transaction;
+  const store = db.createObjectStore('records');
+  Object.defineProperty(tx, 'db', {get() { authorGetterReads++; throw new Error('author db getter'); }});
+  upgradeEvents.push('upgrade');
+  store.add('one', 1).onsuccess = () => {
+    upgradeEvents.push('one');
+    Promise.resolve().then(() => {
+      upgradeEvents.push('one-microtask');
+      store.add('three', 3).onsuccess = () => upgradeEvents.push('three');
+    });
   };
-})()
+  Promise.resolve().then(() => {
+    upgradeEvents.push('upgrade-microtask');
+    store.add('two', 2).onsuccess = () => upgradeEvents.push('two');
+  });
+  tx.oncomplete = () => {
+    upgradeEvents.push(`complete:${open.transaction === tx}`);
+    Promise.resolve().then(() => upgradeEvents.push('complete-microtask'));
+  };
+};
+open.onsuccess = () => {
+  upgradeEvents.push(`open-success:${open.transaction === null}`);
+  const db = open.result;
+  const count = db.transaction('records').objectStore('records').count();
+  count.onsuccess = () => {
+    upgradeEvents.push(`count:${count.result}`);
+    db.close();
+  };
+};
 "#,
     )
-    .expect("ImageData storage should schedule");
+    .expect("upgrade requests should be scheduled");
     let result = vm
-        .eval_after_selected_page_tasks("String(imageDataStorageResult)")
-        .expect("ImageData storage result should be readable");
+        .eval_after_selected_page_tasks("JSON.stringify(upgradeEvents)")
+        .expect("upgrade tasks should finish");
+    assert_eq!(vm.eval("String(authorGetterReads)").unwrap(), "0");
     assert_eq!(
         result,
-        r#"[true,true,true,2,1,"display-p3",[1,2,3,4,5,6,7,8],true,true]"#
+        r#"["upgrade","upgrade-microtask","one","one-microtask","two","three","complete:true","complete-microtask","open-success:true","count:3"]"#
+    );
+}
+
+#[test]
+fn indexed_db_upgrade_can_abort_from_a_request_callback() {
+    let mut vm =
+        new_storage_page_task_executor_test_vm("https://indexeddb-upgrade-callback-abort.test/");
+    vm.eval(r#"
+globalThis.upgradeEvents = [];
+globalThis.authorGetterReads = 0;
+const open = indexedDB.open('upgrade-callback-abort', 1);
+open.onupgradeneeded = () => {
+  const db = open.result;
+  const tx = open.transaction;
+  const store = db.createObjectStore('records');
+  store.add('one', 1).onsuccess = () => {
+    upgradeEvents.push('one');
+    tx.abort();
+    upgradeEvents.push(`restored:${db.version}:${db.objectStoreNames.length}`);
+  };
+  const second = store.add('two', 2);
+  second.onsuccess = () => upgradeEvents.push('unexpected-second-success');
+  second.onerror = event => {
+    event.preventDefault();
+    upgradeEvents.push(`two:${second.error.name}`);
+  };
+  tx.onabort = () => upgradeEvents.push(`abort:${open.transaction === tx}`);
+  tx.oncomplete = () => upgradeEvents.push('unexpected-complete');
+  Object.defineProperty(open, 'result', {get() { authorGetterReads++; throw new Error('author result getter'); }});
+};
+open.onsuccess = () => upgradeEvents.push('unexpected-open-success');
+open.onerror = event => {
+  event.preventDefault();
+  upgradeEvents.push(`open-error:${open.error.name}:${open.transaction === null}`);
+  const retry = indexedDB.open('upgrade-callback-abort', 1);
+  retry.onupgradeneeded = event => upgradeEvents.push(`retry:${event.oldVersion}:${retry.result.objectStoreNames.length}`);
+  retry.onsuccess = () => retry.result.close();
+};
+"#).expect("upgrade abort should be scheduled");
+    let result = vm
+        .eval_after_selected_page_tasks("JSON.stringify(upgradeEvents)")
+        .expect("upgrade abort tasks should finish");
+    assert_eq!(vm.eval("String(authorGetterReads)").unwrap(), "0");
+    assert_eq!(
+        result,
+        r#"["one","restored:0:0","two:AbortError","abort:true","open-error:AbortError:true","retry:0:0"]"#
+    );
+}
+
+#[test]
+fn indexed_db_closed_upgrade_commits_before_open_error() {
+    for close_at in ["upgrade", "request", "complete-microtask"] {
+        let mut vm =
+            new_storage_page_task_executor_test_vm("https://indexeddb-upgrade-close.test/");
+        vm.eval(&format!("globalThis.closeAt = {close_at:?};"))
+            .expect("close phase should be set");
+        vm.eval(
+            r#"
+globalThis.upgradeEvents = [];
+const open = indexedDB.open(`upgrade-close-${closeAt}`, 1);
+open.onupgradeneeded = () => {
+  const db = open.result;
+  const tx = open.transaction;
+  const store = db.createObjectStore('records');
+  store.add('saved', 1).onsuccess = () => {
+    upgradeEvents.push('request');
+    if (closeAt === 'request') db.close();
+  };
+  if (closeAt === 'upgrade') db.close();
+  tx.oncomplete = () => {
+    upgradeEvents.push('complete');
+    if (closeAt === 'complete-microtask') Promise.resolve().then(() => db.close());
+  };
+  tx.onabort = () => upgradeEvents.push('unexpected-abort');
+};
+open.onsuccess = () => upgradeEvents.push('unexpected-open-success');
+open.onerror = event => {
+  event.preventDefault();
+  upgradeEvents.push(`open-error:${open.error.name}:${open.transaction === null}`);
+  const retry = indexedDB.open(`upgrade-close-${closeAt}`);
+  retry.onupgradeneeded = () => upgradeEvents.push('unexpected-upgrade');
+  retry.onsuccess = () => {
+    const db = retry.result;
+    const request = db.transaction('records').objectStore('records').get(1);
+    request.onsuccess = () => {
+      upgradeEvents.push(`reopen:${db.version}:${request.result}`);
+      db.close();
+    };
+  };
+};
+"#,
+        )
+        .expect("closing upgrade should be scheduled");
+        let result = vm
+            .eval_after_selected_page_tasks("JSON.stringify(upgradeEvents)")
+            .expect("closing upgrade tasks should finish");
+        assert_eq!(
+            result, r#"["request","complete","open-error:AbortError:true","reopen:1:saved"]"#,
+            "close during {close_at}"
+        );
+    }
+}
+
+#[test]
+fn indexed_db_upgrade_commit_failure_aborts_and_restores_metadata() {
+    let mut vm = new_storage_page_task_executor_test_vm("https://indexeddb-upgrade-quota.test/");
+    vm.eval(r#"
+globalThis.upgradeEvents = [];
+navigator.storageBuckets.open('limited', {quota: 16}).then(bucket => {
+  const open = bucket.indexedDB.open('commit-failure', 1);
+  open.onupgradeneeded = () => {
+    const db = open.result;
+    const tx = open.transaction;
+    db.createObjectStore('large-schema-name'.repeat(64));
+    tx.oncomplete = () => upgradeEvents.push('unexpected-complete');
+    tx.onerror = () => upgradeEvents.push('unexpected-transaction-error');
+    tx.onabort = () => upgradeEvents.push(
+      `abort:${tx.error.name}:${db.version}:${db.objectStoreNames.length}:${open.transaction === tx}`);
+  };
+  open.onsuccess = () => upgradeEvents.push('unexpected-success');
+  open.onerror = event => {
+    event.preventDefault();
+    upgradeEvents.push(`open-error:${open.error.name}:${open.transaction === null}`);
+    const deletion = bucket.indexedDB.deleteDatabase('commit-failure');
+    deletion.onblocked = () => upgradeEvents.push('unexpected-blocked');
+    deletion.onsuccess = () => upgradeEvents.push('deleted');
+  };
+});
+"#).expect("upgrade commit failure should be scheduled");
+    let result = vm
+        .eval_after_selected_page_tasks("JSON.stringify(upgradeEvents)")
+        .expect("failed upgrade should finish aborting");
+    assert_eq!(
+        result,
+        r#"["abort:QuotaExceededError:0:0:true","open-error:AbortError:true","deleted"]"#
     );
 }
 
@@ -6305,4 +6664,624 @@ first.onsuccess = () => {
         };
         assert_eq!(result, expected, "{operation} must skip closed connections");
     }
+}
+
+#[test]
+fn indexed_db_connection_queue_waits_for_upgrade_requests_and_resolves_versions_at_head() {
+    let mut vm = new_storage_page_task_executor_test_vm("https://indexeddb-connection-fifo.test/");
+    vm.eval(r#"
+globalThis.connectionEvents = [];
+const name = 'connection-fifo';
+const first = indexedDB.open(name, 3);
+first.onupgradeneeded = () => {
+  const store = first.result.createObjectStore('records');
+  const put = store.put('committed', 1);
+  put.onsuccess = () => queueMicrotask(() => {
+    connectionEvents.push('put-microtask');
+    store.put('also committed', 2).onsuccess = () => connectionEvents.push('second-put');
+  });
+  first.transaction.oncomplete = () => connectionEvents.push('complete');
+};
+first.onsuccess = () => {
+  connectionEvents.push('first');
+  first.result.close();
+};
+for (const version of [undefined, 3]) {
+  const request = indexedDB.open(name, version);
+  request.onupgradeneeded = () => connectionEvents.push('unexpected-upgrade');
+  request.onerror = () => connectionEvents.push(`error:${request.error.name}`);
+  request.onsuccess = () => {
+    connectionEvents.push(`open:${request.result.version}:${request.result.objectStoreNames[0]}`);
+    request.result.close();
+  };
+}
+const deletion = indexedDB.deleteDatabase(name);
+deletion.onerror = () => connectionEvents.push(`delete-error:${deletion.error.name}`);
+deletion.onsuccess = () => connectionEvents.push('delete');
+const fresh = indexedDB.open(name);
+fresh.onupgradeneeded = event => connectionEvents.push(`fresh:${event.oldVersion}:${fresh.result.version}:${fresh.result.objectStoreNames.length}`);
+fresh.onsuccess = () => { connectionEvents.push('fresh-success'); fresh.result.close(); };
+"#).expect("connection sequence should schedule");
+    assert_eq!(
+        vm.eval_after_selected_page_tasks("JSON.stringify(connectionEvents)")
+            .unwrap(),
+        r#"["put-microtask","second-put","complete","first","open:3:records","open:3:records","delete","fresh:0:1:0","fresh-success"]"#
+    );
+}
+
+#[test]
+fn indexed_db_connection_queue_advances_after_abort_and_version_error() {
+    let mut vm =
+        new_storage_page_task_executor_test_vm("https://indexeddb-connection-failure.test/");
+    vm.eval(r#"
+globalThis.connectionEvents = [];
+const name = 'connection-failure';
+const aborted = indexedDB.open(name, 4);
+aborted.onupgradeneeded = () => {
+  aborted.result.createObjectStore('rolled-back');
+  queueMicrotask(() => aborted.transaction.abort());
+};
+aborted.onerror = () => connectionEvents.push(`aborted:${aborted.error.name}`);
+const retry = indexedDB.open(name, 2);
+retry.onupgradeneeded = event => connectionEvents.push(`retry:${event.oldVersion}:${retry.result.objectStoreNames.length}`);
+retry.onsuccess = () => { connectionEvents.push('retry-success'); retry.result.close(); };
+const outdated = indexedDB.open(name, 1);
+outdated.onsuccess = () => { connectionEvents.push('unexpected-outdated-success'); outdated.result.close(); };
+outdated.onerror = () => connectionEvents.push(`outdated:${outdated.error.name}`);
+const final = indexedDB.open(name);
+final.onupgradeneeded = () => connectionEvents.push('unexpected-final-upgrade');
+final.onsuccess = () => { connectionEvents.push(`final:${final.result.version}`); final.result.close(); };
+"#).expect("failing connection sequence should schedule");
+    assert_eq!(
+        vm.eval_after_selected_page_tasks("JSON.stringify(connectionEvents)")
+            .unwrap(),
+        r#"["aborted:AbortError","retry:0:0","retry-success","outdated:VersionError","final:2"]"#
+    );
+}
+
+#[test]
+fn indexed_db_connection_queue_notifies_each_successive_connection_without_blocking_other_names() {
+    let mut vm =
+        new_storage_page_task_executor_test_vm("https://indexeddb-connection-notifications.test/");
+    vm.eval(r#"
+globalThis.connectionEvents = [];
+const connections = [];
+const name = 'connection-notifications';
+function open(version) {
+  const request = indexedDB.open(name, version);
+  request.onsuccess = () => {
+    const db = request.result;
+    connections.push(db);
+    connectionEvents.push(`open:${db.version}`);
+    db.onversionchange = event => connectionEvents.push(`versionchange:${event.oldVersion}:${event.newVersion}`);
+  };
+}
+function remove() {
+  const request = indexedDB.deleteDatabase(name);
+  request.onblocked = () => {
+    connectionEvents.push('blocked');
+    connections.shift().close();
+  };
+  request.onsuccess = () => connectionEvents.push('delete');
+  request.onerror = () => connectionEvents.push(`error:${request.error.name}`);
+}
+open(1);
+remove();
+open(2);
+remove();
+const other = indexedDB.open('independent');
+other.onsuccess = () => { globalThis.independentFinished = true; other.result.close(); };
+"#).expect("repeated connection notifications should schedule");
+    assert_eq!(
+        vm.eval_after_selected_page_tasks("JSON.stringify(connectionEvents)")
+            .unwrap(),
+        r#"["open:1","versionchange:1:null","blocked","delete","open:2","versionchange:2:null","blocked","delete"]"#
+    );
+    assert_eq!(vm.eval("independentFinished").unwrap(), "true");
+}
+
+#[tokio::test]
+async fn indexed_db_close_waits_for_accepted_transactions_before_a_remote_upgrade() {
+    let loader = ResourceRequestClient::new(&moli_fetch::FetchConfig::default()).expect("loader");
+    for borrowed in [false, true] {
+        let mut vm = new_storage_page_task_executor_test_vm_with_loader(
+            &format!("https://indexeddb-close-pending-transactions-{borrowed}.test/"),
+            &loader,
+        );
+        vm.eval(&format!("globalThis.borrowedMethods = {borrowed};"))
+            .unwrap();
+        vm.eval(
+            r#"
+globalThis.closeResult = 'pending';
+globalThis.closeEvents = [];
+let releaseFirst = false;
+const first = indexedDB.open('pending-transactions', 1);
+first.onerror = () => { closeResult = first.error.name; };
+first.onupgradeneeded = () => first.result.createObjectStore('records');
+first.onsuccess = () => {
+  const database = first.result;
+  let transaction = database.transaction;
+  let closeDatabase = database.close;
+  let exceptionConstructor = DOMException;
+  let typeErrorConstructor = TypeError;
+  if (globalThis.borrowedMethods) {
+    const frame = document.createElement('iframe');
+    document.body.appendChild(frame);
+    transaction = frame.contentWindow.IDBDatabase.prototype.transaction;
+    closeDatabase = frame.contentWindow.IDBDatabase.prototype.close;
+    exceptionConstructor = frame.contentWindow.DOMException;
+    typeErrorConstructor = frame.contentWindow.TypeError;
+    frame.remove();
+  }
+  try { transaction.call(database); closeResult = 'missing-argument-accepted'; return; }
+  catch (error) {
+    if (!(error instanceof typeErrorConstructor)) { closeResult = 'wrong-typeerror-realm'; return; }
+  }
+  database.onversionchange = () => closeEvents.push('unexpected-versionchange');
+  const active = transaction.call(database, 'records', 'readwrite');
+  const store = active.objectStore('records');
+  store.put(1, 1);
+  function keepAlive() {
+    store.get(0).onsuccess = () => { if (!releaseFirst) keepAlive(); };
+  }
+  keepAlive();
+  const waiting = transaction.call(database, 'records', 'readwrite');
+  if (!(waiting instanceof IDBTransaction)) { closeResult = 'wrong-transaction-realm'; return; }
+  waiting.objectStore('records').put(2, 2);
+  active.oncomplete = () => closeEvents.push('first-complete');
+  waiting.oncomplete = () => closeEvents.push('second-complete');
+  waiting.onabort = () => { closeResult = `aborted:${waiting.error.name}`; };
+  closeDatabase.call(database);
+  for (const mode of ['readonly', 'readwrite']) {
+    try {
+      transaction.call(database, 'records', mode);
+      closeResult = `accepted-after-close:${mode}`;
+      return;
+    } catch (error) {
+      if (error.name !== 'InvalidStateError' || !(error instanceof exceptionConstructor)) {
+        closeResult = 'wrong-close-error:' + error.name;
+        return;
+      }
+    }
+  }
+  const source = `
+    const request = indexedDB.open('pending-transactions', 2);
+    request.onblocked = () => postMessage('blocked');
+    request.onerror = () => postMessage({error:request.error.name});
+    request.onsuccess = () => {
+      const database = request.result;
+      const read = database.transaction('records').objectStore('records').getAll();
+      read.onsuccess = () => postMessage({values:read.result});
+      database.close();
+    };
+  `;
+  const url = URL.createObjectURL(new Blob([source]));
+  const worker = new Worker(url);
+  worker.onmessage = event => {
+    if (event.data === 'blocked') { releaseFirst = true; closeEvents.push('blocked'); return; }
+    closeResult = JSON.stringify(event.data);
+    worker.terminate();
+    URL.revokeObjectURL(url);
+  };
+};
+"#,
+        )
+        .unwrap();
+        advance_page_task_executor_until_eval_equals(
+            &mut vm,
+            &loader,
+            "String(closeResult !== 'pending')",
+            "true",
+            "closing connections must finish accepted transactions before a remote upgrade",
+        )
+        .await;
+        assert_eq!(vm.eval("closeResult").unwrap(), r#"{"values":[1,2]}"#);
+        assert_eq!(
+            vm.eval("JSON.stringify(closeEvents)").unwrap(),
+            r#"["blocked","first-complete","second-complete"]"#
+        );
+    }
+}
+
+#[tokio::test]
+async fn indexed_db_retiring_worker_connections_unblocks_remote_requests_and_aborts_writes() {
+    let loader = ResourceRequestClient::new(&moli_fetch::FetchConfig::default()).expect("loader");
+    for shutdown in ["close", "terminate", "before-notification"] {
+        for operation in ["upgrade", "delete"] {
+            let mut vm = new_storage_page_task_executor_test_vm_with_loader(
+                "https://indexeddb-retired-worker-connections.test/",
+                &loader,
+            );
+            let config = serde_json::json!({"shutdown":shutdown,"operation":operation});
+            vm.eval(&format!("globalThis.retirementConfig = {config};"))
+                .unwrap();
+            vm.eval(r#"
+globalThis.retirementResult = 'pending';
+globalThis.retirementEvents = [];
+const config = retirementConfig;
+const name = `retired-${config.shutdown}-${config.operation}`;
+const source = `
+  const name = ${JSON.stringify(name)};
+  const shutdown = ${JSON.stringify(config.shutdown)};
+  const request = indexedDB.open(name, 1);
+  request.onupgradeneeded = () => request.result.createObjectStore('records');
+  request.onsuccess = () => {
+    const database = request.result;
+    const transaction = database.transaction('records', 'readwrite');
+    const store = transaction.objectStore('records');
+    const write = store.put('uncommitted', 1);
+    function keepAlive() { store.get(0).onsuccess = keepAlive; }
+    keepAlive();
+    database.onversionchange = () => {
+      postMessage('notified');
+      if (shutdown === 'close') self.close();
+    };
+    write.onsuccess = () => {
+      postMessage('ready');
+      if (shutdown === 'before-notification') while (true) {}
+    };
+  };
+`;
+const url = URL.createObjectURL(new Blob([source]));
+const worker = new Worker(url);
+let notified = false;
+let workerStopped = false;
+let operationResult;
+function finish(result) {
+  if (result === 'pass' && config.shutdown !== 'before-notification' && !notified) {
+    operationResult = result;
+    return;
+  }
+  retirementResult = result;
+  worker.terminate();
+  URL.revokeObjectURL(url);
+}
+worker.onmessage = event => {
+  retirementEvents.push(event.data);
+  if (event.data === 'notified') {
+    notified = true;
+    if (config.shutdown === 'terminate') worker.terminate();
+    if (operationResult) finish(operationResult);
+    return;
+  }
+  if (event.data !== 'ready') return;
+  const request = config.operation === 'upgrade' ? indexedDB.open(name, 2) : indexedDB.deleteDatabase(name);
+  request.onblocked = () => retirementEvents.push('blocked');
+  request.onerror = () => finish(`error:${request.error.name}`);
+  request.onsuccess = () => {
+    if (config.shutdown === 'before-notification' && !workerStopped) { finish('early-success'); return; }
+    if (config.operation === 'delete') { finish('pass'); return; }
+    const database = request.result;
+    const read = database.transaction('records').objectStore('records').get(1);
+    read.onsuccess = () => { database.close(); finish(read.result === undefined ? 'pass' : 'leaked-write'); };
+  };
+  if (config.shutdown === 'before-notification') setTimeout(() => {
+    workerStopped = true;
+    worker.terminate();
+  }, 20);
+};
+"#).unwrap();
+            advance_page_task_executor_until_eval_equals(
+                &mut vm,
+                &loader,
+                "String(retirementResult !== 'pending')",
+                "true",
+                "retiring the worker connection must wake the remote request",
+            )
+            .await;
+            assert_eq!(vm.eval("retirementResult").unwrap(), "pass", "{config}");
+            assert_eq!(
+                vm.eval(
+                    "String(retirementEvents.filter(event => event === 'blocked').length <= 1)"
+                )
+                .unwrap(),
+                "true",
+                "{config}"
+            );
+            if shutdown == "before-notification" {
+                assert_eq!(
+                    vm.eval("String(retirementEvents.includes('notified'))")
+                        .unwrap(),
+                    "false"
+                );
+            } else {
+                assert_eq!(
+                    vm.eval(
+                        "String(retirementEvents.filter(event => event === 'notified').length)"
+                    )
+                    .unwrap(),
+                    "1"
+                );
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn indexed_db_retiring_a_blocked_worker_request_releases_the_next_request() {
+    let loader = ResourceRequestClient::new(&moli_fetch::FetchConfig::default()).expect("loader");
+    for shutdown in ["close", "terminate"] {
+        let mut vm = new_storage_page_task_executor_test_vm_with_loader(
+            &format!("https://indexeddb-retired-requester-{shutdown}.test/"),
+            &loader,
+        );
+        vm.eval(&format!("globalThis.requesterShutdown = {shutdown:?};"))
+            .unwrap();
+        vm.eval(r#"
+globalThis.requesterResult = 'pending';
+globalThis.requesterEvents = [];
+const initial = indexedDB.open('retiring-requester', 1);
+initial.onerror = () => { requesterResult = initial.error.name; };
+initial.onsuccess = () => {
+  const database = initial.result;
+  database.onversionchange = event => {
+    requesterEvents.push(event.newVersion);
+  };
+  const source = [
+    'const shutdown = ' + JSON.stringify(requesterShutdown) + ';',
+    "const request = indexedDB.open('retiring-requester', 2);",
+    "request.onblocked = () => { postMessage('blocked'); if (shutdown === 'close') self.close(); };",
+    "request.onsuccess = () => postMessage('unexpected-success');",
+    "request.onerror = () => postMessage('error:' + request.error.name);"
+  ].join('\n');
+  const url = URL.createObjectURL(new Blob([source]));
+  const worker = new Worker(url);
+  worker.onmessage = event => {
+    if (event.data !== 'blocked') { requesterResult = event.data; worker.terminate(); return; }
+    requesterEvents.push('blocked');
+    if (requesterShutdown === 'terminate') worker.terminate();
+    database.close();
+    const next = indexedDB.open('retiring-requester', 3);
+    next.onupgradeneeded = event => requesterEvents.push('upgrade:' + event.oldVersion);
+    next.onerror = () => { requesterResult = next.error.name; };
+    next.onsuccess = () => {
+      requesterEvents.push('success');
+      requesterResult = next.result.version === 3 ? 'pass' : 'wrong-version';
+      next.result.close();
+      worker.terminate();
+      URL.revokeObjectURL(url);
+    };
+  };
+};
+"#).unwrap();
+        advance_page_task_executor_until_eval_equals(
+            &mut vm,
+            &loader,
+            "String(requesterResult !== 'pending')",
+            "true",
+            "retiring a blocked requester must release its queue position",
+        )
+        .await;
+        assert_eq!(vm.eval("requesterResult").unwrap(), "pass", "{shutdown}");
+        assert_eq!(
+            vm.eval("JSON.stringify(requesterEvents)").unwrap(),
+            r#"[2,"blocked","upgrade:1","success"]"#
+        );
+    }
+}
+
+#[tokio::test]
+async fn indexed_db_versionchange_coordinates_window_worker_and_two_worker_connections() {
+    let loader = ResourceRequestClient::new(&moli_fetch::FetchConfig::default()).expect("loader");
+    for (holder, requester) in [
+        ("worker", "window"),
+        ("window", "worker"),
+        ("worker", "worker"),
+    ] {
+        for operation in ["upgrade", "delete"] {
+            for close_mode in ["microtask", "timer", "blocked"] {
+                let mut vm = new_storage_page_task_executor_test_vm_with_loader(
+                    "https://indexeddb-cross-agent-connections.test/",
+                    &loader,
+                );
+                let config = serde_json::json!({"holder":holder,"requester":requester,"operation":operation,"closeMode":close_mode});
+                vm.eval(&format!("globalThis.connectionConfig = {config};"))
+                    .unwrap();
+                vm.eval(include_str!(
+                    "../../../tests/fixtures/indexeddb-cross-agent-connections.js"
+                ))
+                .unwrap();
+                advance_page_task_executor_until_eval_equals(
+                    &mut vm,
+                    &loader,
+                    "String(connectionProbe.state !== 'pending')",
+                    "true",
+                    "cross-agent connection notification should finish",
+                )
+                .await;
+                assert_eq!(
+                    vm.eval("connectionProbe.state").unwrap(),
+                    "pass",
+                    "{config}: {}",
+                    vm.eval("JSON.stringify(connectionProbe)").unwrap()
+                );
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn indexed_db_connection_queue_preserves_blocked_when_a_timer_closes_the_connection() {
+    let loader = ResourceRequestClient::new(&moli_fetch::FetchConfig::default()).expect("loader");
+    for close_in_timer in [true, false] {
+        let mut vm = new_storage_page_task_executor_test_vm_with_loader(
+            "https://indexeddb-connection-timer.test/",
+            &loader,
+        );
+        vm.eval(&format!("globalThis.closeInTimer = {close_in_timer};"))
+            .unwrap();
+        vm.eval(
+            r#"
+globalThis.connectionEvents = [];
+globalThis.connectionDone = false;
+const name = 'connection-timer';
+const initial = indexedDB.open(name, 1);
+initial.onsuccess = () => {
+  function open(version) {
+    const request = indexedDB.open(name, version);
+    request.onerror = () => connectionEvents.push(`error:${request.error.name}`);
+    request.onsuccess = () => {
+      const db = request.result;
+      connectionEvents.push(`open:${version}`);
+      db.onversionchange = () => {
+        connectionEvents.push(`versionchange:${version}`);
+        if (closeInTimer) setTimeout(() => db.close(), 0);
+        else Promise.resolve().then(() => queueMicrotask(() => db.close()));
+      };
+    };
+  }
+  function remove(last) {
+    const request = indexedDB.deleteDatabase(name);
+    request.onblocked = () => connectionEvents.push('blocked');
+    request.onerror = () => connectionEvents.push(`error:${request.error.name}`);
+    request.onsuccess = () => {
+      connectionEvents.push('delete');
+      if (last) connectionDone = true;
+    };
+  }
+  open(2);
+  remove(false);
+  open(3);
+  remove(true);
+  initial.result.close();
+};
+"#,
+        )
+        .expect("connection timer sequence should schedule");
+        // Use normal source arbitration so timers can run between IndexedDB
+        // tasks. Selecting only IndexedDB tasks would hide the lost event.
+        advance_page_task_executor_until_eval_equals(
+            &mut vm,
+            &loader,
+            "String(connectionDone)",
+            "true",
+            "connection queue should complete with timer and microtask closes",
+        )
+        .await;
+        let expected = if close_in_timer {
+            r#"["open:2","versionchange:2","blocked","delete","open:3","versionchange:3","blocked","delete"]"#
+        } else {
+            r#"["open:2","versionchange:2","delete","open:3","versionchange:3","delete"]"#
+        };
+        assert_eq!(
+            vm.eval("JSON.stringify(connectionEvents)").unwrap(),
+            expected,
+            "close in timer: {close_in_timer}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn indexed_db_connection_queue_wakes_window_and_worker_after_the_other_finishes_upgrade() {
+    let loader = ResourceRequestClient::new(&moli_fetch::FetchConfig::default()).expect("loader");
+    let mut vm = new_storage_page_task_executor_test_vm_with_loader(
+        "https://indexeddb-connection-worker.test/",
+        &loader,
+    );
+    vm.eval(r#"
+globalThis.connectionResult = 'pending';
+let releaseWindowUpgrade = false;
+const source = `
+  let releaseUpgrade = false;
+  onmessage = event => {
+    if (event.data === 'release') { releaseUpgrade = true; return; }
+    if (event.data === 'open-window') {
+      const open = indexedDB.open('window-upgrade');
+      open.onupgradeneeded = () => postMessage('error:worker-overtook-window');
+      open.onerror = () => postMessage('error:' + open.error.name);
+      open.onsuccess = () => {
+        postMessage('worker:' + open.result.version + ':' + open.result.objectStoreNames[0]);
+        open.result.close();
+      };
+      postMessage('queued-window');
+    }
+  };
+  const first = indexedDB.open('worker-upgrade', 3);
+  first.onerror = () => postMessage('error:' + first.error.name);
+  first.onupgradeneeded = () => {
+    const store = first.result.createObjectStore('from-worker');
+    function keepAlive() {
+      store.get(1).onsuccess = () => { if (!releaseUpgrade) keepAlive(); };
+    }
+    keepAlive();
+    postMessage('upgrading-worker');
+  };
+  first.onsuccess = () => first.result.close();
+`;
+const url = URL.createObjectURL(new Blob([source], {type:'text/javascript'}));
+const worker = new Worker(url);
+worker.onerror = event => { connectionResult = 'worker-error:' + event.message; };
+worker.onmessage = event => {
+  if (String(event.data).startsWith('error:')) { connectionResult = event.data; return; }
+  if (event.data === 'upgrading-worker') {
+    const open = indexedDB.open('worker-upgrade');
+    open.onupgradeneeded = () => { connectionResult = 'error:window-overtook-worker'; };
+    open.onerror = () => { connectionResult = 'error:' + open.error.name; };
+    open.onsuccess = () => {
+      globalThis.windowConnection = 'window:' + open.result.version + ':' + open.result.objectStoreNames[0];
+      open.result.close();
+      const next = indexedDB.open('window-upgrade', 5);
+      next.onupgradeneeded = () => {
+        const store = next.result.createObjectStore('from-window');
+        function keepAlive() {
+          store.get(1).onsuccess = () => { if (!releaseWindowUpgrade) keepAlive(); };
+        }
+        keepAlive();
+        worker.postMessage('open-window');
+      };
+      next.onsuccess = () => next.result.close();
+    };
+    worker.postMessage('release');
+  } else if (event.data === 'queued-window') {
+    releaseWindowUpgrade = true;
+  } else if (String(event.data).startsWith('worker:')) {
+    connectionResult = windowConnection + '|' + event.data;
+    worker.terminate();
+    URL.revokeObjectURL(url);
+  }
+};
+"#).expect("window and worker queue workflow should schedule");
+    advance_page_task_executor_until_eval_equals(
+        &mut vm,
+        &loader,
+        "String(connectionResult !== 'pending')",
+        "true",
+        "window and worker connection queues should wake their accepting event loops",
+    )
+    .await;
+    assert_eq!(
+        vm.eval("connectionResult").unwrap(),
+        "window:3:from-worker|worker:5:from-window"
+    );
+}
+
+#[test]
+fn indexed_db_connection_queue_waits_for_close_during_upgrade_completion_microtasks() {
+    let mut vm = new_storage_page_task_executor_test_vm("https://indexeddb-connection-close.test/");
+    vm.eval(
+        r#"
+globalThis.connectionEvents = [];
+const first = indexedDB.open('connection-close', 4);
+first.onupgradeneeded = () => {
+  first.result.createObjectStore('records');
+  first.transaction.oncomplete = () => {
+    connectionEvents.push('complete');
+    queueMicrotask(() => { connectionEvents.push('close-microtask'); first.result.close(); });
+  };
+};
+first.onsuccess = () => connectionEvents.push('unexpected-success');
+first.onerror = () => connectionEvents.push(`error:${first.error.name}`);
+const second = indexedDB.open('connection-close');
+second.onsuccess = () => {
+  connectionEvents.push(`success:${second.result.version}:${second.result.objectStoreNames[0]}`);
+  second.result.close();
+};
+"#,
+    )
+    .expect("close during upgrade completion should schedule");
+    assert_eq!(
+        vm.eval_after_selected_page_tasks("JSON.stringify(connectionEvents)")
+            .unwrap(),
+        r#"["complete","close-microtask","error:AbortError","success:4:records"]"#
+    );
 }
