@@ -1,4 +1,7 @@
 use super::IndexedDbManager;
+pub(crate) use moli_indexeddb::{
+    ConnectionRequestHandle, ConnectionRequestLease, ConnectionRequestWake,
+};
 use parking_lot::Mutex;
 use std::{
     fmt,
@@ -28,7 +31,7 @@ impl WeakIndexedDbManager {
         let mut manager = manager.lock();
         handles
             .into_iter()
-            .filter(|handle| manager.close_database(*handle).is_ok())
+            .filter(|handle| manager.force_close_database(*handle).is_ok())
             .count()
     }
 }
