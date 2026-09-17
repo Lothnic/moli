@@ -8,7 +8,7 @@ use moli_crypto::sha256_hex;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    IndexedDbError, IndexedDbExternalObject, IndexedDbValue, Key, KeyPath,
+    IndexedDbError, IndexedDbExternalObject, IndexedDbName, IndexedDbValue, Key, KeyPath,
     state::{DatabaseData, IndexData, IndexedDbManager, ObjectStoreData, OriginState},
 };
 
@@ -23,6 +23,15 @@ struct PersistentOrigin {
 struct PersistentDatabase {
     version: u64,
     stores: BTreeMap<String, PersistentObjectStore>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    stores_utf16: Vec<PersistentNamedObjectStore>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct PersistentNamedObjectStore {
+    name: Vec<u16>,
+    #[serde(flatten)]
+    store: PersistentObjectStore,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -32,6 +41,10 @@ struct PersistentObjectStore {
     auto_increment_counter: u64,
     #[serde(default)]
     indexes: BTreeMap<String, PersistentIndex>,
+    // JSON strings cannot represent unpaired UTF-16 surrogates. Keep the
+    // existing map format for Unicode names and store only other names here.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    indexes_utf16: Vec<PersistentNamedIndex>,
     records: Vec<PersistentRecord>,
 }
 
@@ -40,6 +53,13 @@ struct PersistentIndex {
     key_path: KeyPath,
     unique: bool,
     multi_entry: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct PersistentNamedIndex {
+    name: Vec<u16>,
+    #[serde(flatten)]
+    index: PersistentIndex,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -313,7 +333,17 @@ fn origin_state_from_persistent(persistent: PersistentOrigin) -> OriginState {
     let mut databases = BTreeMap::new();
     for (name, database) in persistent.databases {
         let mut stores = BTreeMap::new();
-        for (store_name, store) in database.stores {
+        for (store_name, store) in database
+            .stores
+            .into_iter()
+            .map(|(name, store)| (IndexedDbName::from(name), store))
+            .chain(
+                database
+                    .stores_utf16
+                    .into_iter()
+                    .map(|named| (IndexedDbName::from_utf16(named.name), named.store)),
+            )
+        {
             let records = store
                 .records
                 .into_iter()
@@ -333,6 +363,13 @@ fn origin_state_from_persistent(persistent: PersistentOrigin) -> OriginState {
                     indexes: store
                         .indexes
                         .into_iter()
+                        .map(|(name, index)| (IndexedDbName::from(name), index))
+                        .chain(
+                            store
+                                .indexes_utf16
+                                .into_iter()
+                                .map(|named| (IndexedDbName::from_utf16(named.name), named.index)),
+                        )
                         .map(|(name, index)| {
                             (
                                 name,
@@ -363,44 +400,58 @@ fn persistent_origin_from_state(origin: &str, state: &OriginState) -> Persistent
     let mut databases = BTreeMap::new();
     for (name, database) in &state.databases {
         let mut stores = BTreeMap::new();
+        let mut stores_utf16 = Vec::new();
         for (store_name, store) in &database.stores {
-            stores.insert(
-                store_name.clone(),
-                PersistentObjectStore {
-                    key_path: store.key_path.clone(),
-                    auto_increment: store.auto_increment,
-                    auto_increment_counter: store.auto_increment_counter,
-                    indexes: store
-                        .indexes
-                        .iter()
-                        .map(|(name, index)| {
-                            (
-                                name.clone(),
-                                PersistentIndex {
-                                    key_path: index.key_path.clone(),
-                                    unique: index.unique,
-                                    multi_entry: index.multi_entry,
-                                },
-                            )
-                        })
-                        .collect(),
-                    records: store
-                        .records
-                        .iter()
-                        .map(|(key, value)| PersistentRecord {
-                            key: key.clone(),
-                            value: value.wire_bytes.clone(),
-                            external_objects: value.external_objects.clone(),
-                        })
-                        .collect(),
-                },
-            );
+            let mut indexes = BTreeMap::new();
+            let mut indexes_utf16 = Vec::new();
+            for (name, index) in &store.indexes {
+                let index = PersistentIndex {
+                    key_path: index.key_path.clone(),
+                    unique: index.unique,
+                    multi_entry: index.multi_entry,
+                };
+                match String::from_utf16(name.as_utf16()) {
+                    Ok(name) => {
+                        indexes.insert(name, index);
+                    }
+                    Err(_) => indexes_utf16.push(PersistentNamedIndex {
+                        name: name.as_utf16().to_vec(),
+                        index,
+                    }),
+                }
+            }
+            let store = PersistentObjectStore {
+                key_path: store.key_path.clone(),
+                auto_increment: store.auto_increment,
+                auto_increment_counter: store.auto_increment_counter,
+                indexes,
+                indexes_utf16,
+                records: store
+                    .records
+                    .iter()
+                    .map(|(key, value)| PersistentRecord {
+                        key: key.clone(),
+                        value: value.wire_bytes.clone(),
+                        external_objects: value.external_objects.clone(),
+                    })
+                    .collect(),
+            };
+            match String::from_utf16(store_name.as_utf16()) {
+                Ok(name) => {
+                    stores.insert(name, store);
+                }
+                Err(_) => stores_utf16.push(PersistentNamedObjectStore {
+                    name: store_name.as_utf16().to_vec(),
+                    store,
+                }),
+            }
         }
         databases.insert(
             name.clone(),
             PersistentDatabase {
                 version: database.version,
                 stores,
+                stores_utf16,
             },
         );
     }
