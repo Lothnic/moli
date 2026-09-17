@@ -7,8 +7,8 @@ use std::{
 
 use crate::{
     DatabaseHandle, DatabaseInfo, DatabaseNameAndVersion, IndexInfo, IndexOptions, IndexedDbError,
-    IndexedDbQuotaCheck, IndexedDbValue, Key, ObjectStoreInfo, ObjectStoreOptions, OpenDisposition,
-    OpenOptions, OpenResult, RequestOutcome, TransactionHandle, TransactionMode,
+    IndexedDbName, IndexedDbQuotaCheck, IndexedDbValue, Key, ObjectStoreInfo, ObjectStoreOptions,
+    OpenDisposition, OpenOptions, OpenResult, RequestOutcome, TransactionHandle, TransactionMode,
     persistence::IndexedDbPersistenceBackend,
     state::{
         DatabaseData, DatabaseHandleState, IndexData, IndexedDbManager, ObjectStoreData,
@@ -379,8 +379,9 @@ impl IndexedDbManager {
     pub fn object_store_info(
         &self,
         database: DatabaseHandle,
-        store_name: &str,
+        store_name: impl Into<IndexedDbName>,
     ) -> Result<ObjectStoreInfo, IndexedDbError> {
+        let store_name: &IndexedDbName = &store_name.into();
         let db = self.database_state(database)?;
         if db.closed {
             return Err(IndexedDbError::InvalidState(
@@ -405,7 +406,7 @@ impl IndexedDbManager {
     pub fn queue_transaction_start(
         &self,
         database: DatabaseHandle,
-        store_names: &[String],
+        store_names: &[IndexedDbName],
         mode: TransactionMode,
         wake: crate::ConnectionRequestWake,
     ) -> Result<crate::TransactionRequestLease, IndexedDbError> {
@@ -441,7 +442,7 @@ impl IndexedDbManager {
     pub fn begin_transaction(
         &mut self,
         database: DatabaseHandle,
-        store_names: &[String],
+        store_names: &[IndexedDbName],
         mode: TransactionMode,
     ) -> Result<TransactionHandle, IndexedDbError> {
         if mode == TransactionMode::VersionChange {
@@ -492,9 +493,10 @@ impl IndexedDbManager {
     pub fn create_object_store(
         &mut self,
         transaction: TransactionHandle,
-        name: &str,
+        name: impl Into<IndexedDbName>,
         options: ObjectStoreOptions,
     ) -> Result<(), IndexedDbError> {
+        let name: &IndexedDbName = &name.into();
         let tx = self.active_transaction_mut(transaction)?;
         if tx.mode != TransactionMode::VersionChange {
             return Err(IndexedDbError::InvalidState(
@@ -541,8 +543,9 @@ impl IndexedDbManager {
     pub fn delete_object_store(
         &mut self,
         transaction: TransactionHandle,
-        name: &str,
+        name: impl Into<IndexedDbName>,
     ) -> Result<(), IndexedDbError> {
+        let name: &IndexedDbName = &name.into();
         let tx = self.active_transaction_mut(transaction)?;
         if tx.mode != TransactionMode::VersionChange {
             return Err(IndexedDbError::InvalidState(
@@ -558,13 +561,53 @@ impl IndexedDbManager {
         Ok(())
     }
 
+    /// Move the entire store within the upgrade working copy. Records, indexes,
+    /// the key generator, and cursor record revisions retain their identity.
+    pub fn rename_object_store(
+        &mut self,
+        transaction: TransactionHandle,
+        old_name: &IndexedDbName,
+        new_name: IndexedDbName,
+    ) -> Result<(), IndexedDbError> {
+        let tx = self.active_transaction_mut(transaction)?;
+        if tx.mode != TransactionMode::VersionChange {
+            return Err(IndexedDbError::InvalidState(
+                "rename_object_store requires a versionchange transaction".to_owned(),
+            ));
+        }
+        if !tx.working_copy.stores.contains_key(old_name) {
+            return Err(IndexedDbError::NotFound(format!(
+                "object store `{old_name}` was not found"
+            )));
+        }
+        if old_name == &new_name {
+            return Ok(());
+        }
+        if tx.working_copy.stores.contains_key(&new_name) {
+            return Err(IndexedDbError::Constraint(format!(
+                "object store `{new_name}` already exists"
+            )));
+        }
+        let store = tx
+            .working_copy
+            .stores
+            .remove(old_name)
+            .expect("existing store");
+        tx.stores.remove(old_name);
+        tx.stores.insert(new_name.clone());
+        tx.working_copy.stores.insert(new_name, store);
+        Ok(())
+    }
+
     pub fn create_index(
         &mut self,
         transaction: TransactionHandle,
-        store_name: &str,
-        index_name: &str,
+        store_name: impl Into<IndexedDbName>,
+        index_name: impl Into<IndexedDbName>,
         options: IndexOptions,
     ) -> Result<IndexInfo, IndexedDbError> {
+        let store_name: &IndexedDbName = &store_name.into();
+        let index_name = index_name.into();
         let tx = self.active_transaction_mut(transaction)?;
         if tx.mode != TransactionMode::VersionChange {
             return Err(IndexedDbError::InvalidState(
@@ -572,7 +615,7 @@ impl IndexedDbManager {
             ));
         }
         let store = transaction_store_mut(tx, store_name)?;
-        if store.indexes.contains_key(index_name) {
+        if store.indexes.contains_key(&index_name) {
             return Err(IndexedDbError::Constraint(format!(
                 "index `{index_name}` already exists"
             )));
@@ -607,9 +650,11 @@ impl IndexedDbManager {
     pub fn delete_index(
         &mut self,
         transaction: TransactionHandle,
-        store_name: &str,
-        index_name: &str,
+        store_name: impl Into<IndexedDbName>,
+        index_name: impl Into<IndexedDbName>,
     ) -> Result<(), IndexedDbError> {
+        let store_name: &IndexedDbName = &store_name.into();
+        let index_name = index_name.into();
         let tx = self.active_transaction_mut(transaction)?;
         if tx.mode != TransactionMode::VersionChange {
             return Err(IndexedDbError::InvalidState(
@@ -617,7 +662,7 @@ impl IndexedDbManager {
             ));
         }
         let store = transaction_store_mut(tx, store_name)?;
-        if store.indexes.remove(index_name).is_none() {
+        if store.indexes.remove(&index_name).is_none() {
             return Err(IndexedDbError::NotFound(format!(
                 "index `{index_name}` was not found"
             )));
@@ -625,12 +670,48 @@ impl IndexedDbManager {
         Ok(())
     }
 
+    /// Rename the existing index atomically within the upgrade's working copy.
+    pub fn rename_index(
+        &mut self,
+        transaction: TransactionHandle,
+        store_name: impl Into<IndexedDbName>,
+        old_name: &IndexedDbName,
+        new_name: IndexedDbName,
+    ) -> Result<(), IndexedDbError> {
+        let store_name: &IndexedDbName = &store_name.into();
+        let tx = self.active_transaction_mut(transaction)?;
+        if tx.mode != TransactionMode::VersionChange {
+            return Err(IndexedDbError::InvalidState(
+                "rename_index requires a versionchange transaction".to_owned(),
+            ));
+        }
+        let store = transaction_store_mut(tx, store_name)?;
+        if !store.indexes.contains_key(old_name) {
+            return Err(IndexedDbError::NotFound(format!(
+                "index `{old_name}` was not found"
+            )));
+        }
+        if old_name == &new_name {
+            return Ok(());
+        }
+        if store.indexes.contains_key(&new_name) {
+            return Err(IndexedDbError::Constraint(format!(
+                "index `{new_name}` already exists"
+            )));
+        }
+        let index = store.indexes.remove(old_name).expect("existing index");
+        store.indexes.insert(new_name, index);
+        Ok(())
+    }
+
     pub fn index_info(
         &self,
         database: DatabaseHandle,
-        store_name: &str,
-        index_name: &str,
+        store_name: impl Into<IndexedDbName>,
+        index_name: impl Into<IndexedDbName>,
     ) -> Result<IndexInfo, IndexedDbError> {
+        let store_name: &IndexedDbName = &store_name.into();
+        let index_name = index_name.into();
         let db = self.database_state(database)?;
         if db.closed {
             return Err(IndexedDbError::InvalidState(
@@ -644,7 +725,7 @@ impl IndexedDbManager {
             .ok_or_else(|| {
                 IndexedDbError::NotFound(format!("object store `{store_name}` was not found"))
             })?;
-        let index = store.indexes.get(index_name).ok_or_else(|| {
+        let index = store.indexes.get(&index_name).ok_or_else(|| {
             IndexedDbError::NotFound(format!("index `{index_name}` was not found"))
         })?;
         Ok(IndexInfo {
@@ -658,9 +739,10 @@ impl IndexedDbManager {
     pub fn get(
         &mut self,
         transaction: TransactionHandle,
-        store_name: &str,
+        store_name: impl Into<IndexedDbName>,
         key: &Key,
     ) -> Result<RequestOutcome, IndexedDbError> {
+        let store_name: &IndexedDbName = &store_name.into();
         let tx = self.active_transaction_mut(transaction)?;
         let store = transaction_store(tx, store_name)?;
         Ok(RequestOutcome::Value(store.records.get(key).cloned()))
@@ -669,8 +751,9 @@ impl IndexedDbManager {
     pub fn get_all(
         &mut self,
         transaction: TransactionHandle,
-        store_name: &str,
+        store_name: impl Into<IndexedDbName>,
     ) -> Result<RequestOutcome, IndexedDbError> {
+        let store_name: &IndexedDbName = &store_name.into();
         let tx = self.active_transaction_mut(transaction)?;
         let store = transaction_store(tx, store_name)?;
         Ok(RequestOutcome::Values(
@@ -681,9 +764,10 @@ impl IndexedDbManager {
     pub fn get_key(
         &mut self,
         transaction: TransactionHandle,
-        store_name: &str,
+        store_name: impl Into<IndexedDbName>,
         key: &Key,
     ) -> Result<RequestOutcome, IndexedDbError> {
+        let store_name: &IndexedDbName = &store_name.into();
         let tx = self.active_transaction_mut(transaction)?;
         let store = transaction_store(tx, store_name)?;
         Ok(RequestOutcome::Key(
@@ -694,8 +778,9 @@ impl IndexedDbManager {
     pub fn get_all_keys(
         &mut self,
         transaction: TransactionHandle,
-        store_name: &str,
+        store_name: impl Into<IndexedDbName>,
     ) -> Result<RequestOutcome, IndexedDbError> {
+        let store_name: &IndexedDbName = &store_name.into();
         let tx = self.active_transaction_mut(transaction)?;
         let store = transaction_store(tx, store_name)?;
         Ok(RequestOutcome::Keys(
@@ -706,8 +791,9 @@ impl IndexedDbManager {
     pub fn count(
         &mut self,
         transaction: TransactionHandle,
-        store_name: &str,
+        store_name: impl Into<IndexedDbName>,
     ) -> Result<RequestOutcome, IndexedDbError> {
+        let store_name: &IndexedDbName = &store_name.into();
         let tx = self.active_transaction_mut(transaction)?;
         let store = transaction_store(tx, store_name)?;
         Ok(RequestOutcome::Count(store.records.len() as u64))
@@ -716,8 +802,9 @@ impl IndexedDbManager {
     pub fn entries(
         &mut self,
         transaction: TransactionHandle,
-        store_name: &str,
+        store_name: impl Into<IndexedDbName>,
     ) -> Result<Vec<(Key, IndexedDbValue)>, IndexedDbError> {
+        let store_name: &IndexedDbName = &store_name.into();
         let tx = self.active_transaction_mut(transaction)?;
         let store = transaction_store(tx, store_name)?;
         Ok(store
@@ -742,8 +829,9 @@ impl IndexedDbManager {
     pub fn next_generated_key(
         &mut self,
         transaction: TransactionHandle,
-        store_name: &str,
+        store_name: impl Into<IndexedDbName>,
     ) -> Result<Key, IndexedDbError> {
+        let store_name: &IndexedDbName = &store_name.into();
         let tx = self.active_transaction_mut(transaction)?;
         ensure_writeable(tx)?;
         next_generated_key(transaction_store(tx, store_name)?)
@@ -752,8 +840,9 @@ impl IndexedDbManager {
     pub fn generate_key(
         &mut self,
         transaction: TransactionHandle,
-        store_name: &str,
+        store_name: impl Into<IndexedDbName>,
     ) -> Result<Key, IndexedDbError> {
+        let store_name: &IndexedDbName = &store_name.into();
         let tx = self.active_transaction_mut(transaction)?;
         ensure_writeable(tx)?;
         let store = transaction_store_mut(tx, store_name)?;
@@ -763,21 +852,23 @@ impl IndexedDbManager {
     pub fn put(
         &mut self,
         transaction: TransactionHandle,
-        store_name: &str,
+        store_name: impl Into<IndexedDbName>,
         key: Option<Key>,
         value: impl Into<IndexedDbValue>,
     ) -> Result<Key, IndexedDbError> {
+        let store_name: &IndexedDbName = &store_name.into();
         self.write_record(transaction, store_name, key, value.into(), false, None)
     }
 
     pub fn put_with_quota(
         &mut self,
         transaction: TransactionHandle,
-        store_name: &str,
+        store_name: impl Into<IndexedDbName>,
         key: Option<Key>,
         value: impl Into<IndexedDbValue>,
         quota: IndexedDbQuotaCheck,
     ) -> Result<Key, IndexedDbError> {
+        let store_name: &IndexedDbName = &store_name.into();
         self.write_record(
             transaction,
             store_name,
@@ -791,21 +882,23 @@ impl IndexedDbManager {
     pub fn add(
         &mut self,
         transaction: TransactionHandle,
-        store_name: &str,
+        store_name: impl Into<IndexedDbName>,
         key: Option<Key>,
         value: impl Into<IndexedDbValue>,
     ) -> Result<Key, IndexedDbError> {
+        let store_name: &IndexedDbName = &store_name.into();
         self.write_record(transaction, store_name, key, value.into(), true, None)
     }
 
     pub fn add_with_quota(
         &mut self,
         transaction: TransactionHandle,
-        store_name: &str,
+        store_name: impl Into<IndexedDbName>,
         key: Option<Key>,
         value: impl Into<IndexedDbValue>,
         quota: IndexedDbQuotaCheck,
     ) -> Result<Key, IndexedDbError> {
+        let store_name: &IndexedDbName = &store_name.into();
         self.write_record(
             transaction,
             store_name,
@@ -819,7 +912,7 @@ impl IndexedDbManager {
     fn write_record(
         &mut self,
         transaction: TransactionHandle,
-        store_name: &str,
+        store_name: &IndexedDbName,
         key: Option<Key>,
         value: IndexedDbValue,
         add_only: bool,
@@ -871,9 +964,10 @@ impl IndexedDbManager {
     pub fn delete(
         &mut self,
         transaction: TransactionHandle,
-        store_name: &str,
+        store_name: impl Into<IndexedDbName>,
         key: &Key,
     ) -> Result<(), IndexedDbError> {
+        let store_name: &IndexedDbName = &store_name.into();
         let tx = self.active_transaction_mut(transaction)?;
         ensure_writeable(tx)?;
         let store = transaction_store_mut(tx, store_name)?;
@@ -886,8 +980,9 @@ impl IndexedDbManager {
     pub fn clear(
         &mut self,
         transaction: TransactionHandle,
-        store_name: &str,
+        store_name: impl Into<IndexedDbName>,
     ) -> Result<(), IndexedDbError> {
+        let store_name: &IndexedDbName = &store_name.into();
         let tx = self.active_transaction_mut(transaction)?;
         ensure_writeable(tx)?;
         let store = transaction_store_mut(tx, store_name)?;
@@ -1096,7 +1191,7 @@ impl IndexedDbManager {
     pub(crate) fn ensure_store_names_exist(
         &self,
         database: &DatabaseData,
-        store_names: &BTreeSet<String>,
+        store_names: &BTreeSet<IndexedDbName>,
     ) -> Result<(), IndexedDbError> {
         for store_name in store_names {
             if !database.stores.contains_key(store_name) {
