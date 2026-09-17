@@ -22,20 +22,61 @@ async fn indexed_db_key_ranges_protect_bounds_and_validate_receivers() -> Result
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn indexed_db_version_change_events_preserve_native_attributes_and_dictionary_semantics()
--> Result<()> {
+async fn indexed_db_keys_preserve_types_order_and_binary_snapshots() -> Result<()> {
     let server = FixtureServer::spawn().await?;
     let browser = Browser::new(AppConfig::default())?;
-    let fixture = include_str!("fixtures/indexeddb-version-change.js");
+    let fixture = include_str!("fixtures/indexeddb-key-model.js");
     for target in ["window", "child", "worker"] {
         let source = format!(
-            "{fixture}\nversionChangeProbe('version-change-{target}').then(finish, error => finish({{state: 'error', error: String(error), checks: versionChangeChecks}}));"
+            "{fixture}\nkeyModelProbe('key-model-{target}').then(finish, error => finish({{state: 'error', error: String(error), checks: keyChecks}}));"
         );
         let result = run_probe(&browser, &server, target, &source).await?;
         assert_eq!(result["state"], "pass", "{target}: {result}");
         assert_eq!(
             result["checks"].as_array().unwrap().len(),
-            if target == "worker" { 128 } else { 384 },
+            259,
+            "{target}: {result}"
+        );
+    }
+    server.shutdown().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn indexed_db_writes_clone_before_key_paths_and_snapshot_queued_values() -> Result<()> {
+    let server = FixtureServer::spawn().await?;
+    let browser = Browser::new(AppConfig::default())?;
+    let fixture = include_str!("fixtures/indexeddb-write-clone.js");
+    for target in ["window", "child", "worker"] {
+        let source = format!(
+            "{fixture}\nwriteCloneProbe('write-clone-{target}').then(finish, error => finish({{state: 'error', error: String(error), checks: writeChecks}}));"
+        );
+        let result = run_probe(&browser, &server, target, &source).await?;
+        assert_eq!(result["state"], "pass", "{target}: {result}");
+        assert_eq!(
+            result["checks"].as_array().unwrap().len(),
+            165,
+            "{target}: {result}"
+        );
+    }
+    server.shutdown().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn indexed_db_schema_validation_preserves_key_paths_conversion_and_exception_order()
+-> Result<()> {
+    let server = FixtureServer::spawn().await?;
+    let browser = Browser::new(AppConfig::default())?;
+    let fixture = include_str!("fixtures/indexeddb-schema-validation.js");
+    for target in ["window", "child", "worker"] {
+        let source = format!(
+            "{fixture}\nschemaValidationProbe('schema-validation-{target}').then(finish, error => finish({{state: 'error', error: String(error), checks: schemaChecks}}));"
+        );
+        let result = run_probe(&browser, &server, target, &source).await?;
+        assert_eq!(result["state"], "pass", "{target}: {result}");
+        assert!(
+            result["checks"].as_array().unwrap().len() >= 160,
             "{target}: {result}"
         );
     }
@@ -103,7 +144,7 @@ async fn indexed_db_queries_snapshot_arguments_and_delete_key_ranges() -> Result
         assert_eq!(result["state"], "pass", "{target}: {result}");
         assert_eq!(
             result["checks"].as_array().unwrap().len(),
-            308,
+            548,
             "{target}: {result}"
         );
     }
@@ -188,3 +229,24 @@ async fn indexed_db_factory_checks_native_receivers_and_rejects_promises_in_call
     Ok(())
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn indexed_db_version_change_events_preserve_native_attributes_and_dictionary_semantics()
+-> Result<()> {
+    let server = FixtureServer::spawn().await?;
+    let browser = Browser::new(AppConfig::default())?;
+    let fixture = include_str!("fixtures/indexeddb-version-change.js");
+    for target in ["window", "child", "worker"] {
+        let source = format!(
+            "{fixture}\nversionChangeProbe('version-change-{target}').then(finish, error => finish({{state: 'error', error: String(error), checks: versionChangeChecks}}));"
+        );
+        let result = run_probe(&browser, &server, target, &source).await?;
+        assert_eq!(result["state"], "pass", "{target}: {result}");
+        assert_eq!(
+            result["checks"].as_array().unwrap().len(),
+            if target == "worker" { 128 } else { 384 },
+            "{target}: {result}"
+        );
+    }
+    server.shutdown().await;
+    Ok(())
+}
