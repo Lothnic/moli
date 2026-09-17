@@ -5,6 +5,14 @@ use moli_webapi_declare::WebApiFunctionTemplate;
 #[derive(WebApiFunctionTemplate)]
 #[webapi(interface = web_api_interfaces::IDBObjectStore, enumerable, receiver)]
 struct IdbObjectStorePrototypeDeclaration {
+    #[webapi(accessor_property, getter = idb_object_store_key_path_getter)]
+    key_path: (),
+    #[webapi(accessor_property, getter = idb_object_store_auto_increment_getter)]
+    auto_increment: (),
+    #[webapi(accessor_property, getter = idb_object_store_index_names_getter)]
+    index_names: (),
+    #[webapi(accessor_property, getter = idb_object_store_transaction_getter)]
+    transaction: (),
     #[webapi(accessor_property, getter = idb_object_store_name_getter, setter = idb_object_store_name_setter)]
     name: (),
     #[webapi(method, length = 1, callback = idb_object_store_get_callback)]
@@ -17,11 +25,11 @@ struct IdbObjectStorePrototypeDeclaration {
     get_all_keys: (),
     #[webapi(method, length = 0, callback = idb_object_store_get_all_records_callback, receiver = web_api_interfaces::IDBObjectStore::is_instance)]
     get_all_records: (),
-    #[webapi(method, length = 1, callback = idb_object_store_count_callback)]
+    #[webapi(method, length = 0, callback = idb_object_store_count_callback)]
     count: (),
-    #[webapi(method, length = 2, callback = idb_object_store_put_callback)]
+    #[webapi(method, length = 1, callback = idb_object_store_put_callback)]
     put: (),
-    #[webapi(method, length = 2, callback = idb_object_store_add_callback)]
+    #[webapi(method, length = 1, callback = idb_object_store_add_callback)]
     add: (),
     #[webapi(method = "delete", length = 1, callback = idb_object_store_delete_callback)]
     _delete: (),
@@ -33,9 +41,9 @@ struct IdbObjectStorePrototypeDeclaration {
     index: (),
     #[webapi(method, length = 1, callback = idb_object_store_delete_index_callback)]
     delete_index: (),
-    #[webapi(method, length = 2, callback = idb_object_store_open_cursor_callback)]
+    #[webapi(method, length = 0, callback = idb_object_store_open_cursor_callback)]
     open_cursor: (),
-    #[webapi(method, length = 2, callback = idb_object_store_open_key_cursor_callback)]
+    #[webapi(method, length = 0, callback = idb_object_store_open_key_cursor_callback)]
     open_key_cursor: (),
 }
 
