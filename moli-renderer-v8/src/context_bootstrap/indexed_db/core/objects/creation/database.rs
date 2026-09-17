@@ -1,20 +1,19 @@
 use super::*;
-use crate::context_bootstrap::indexed_db::initialize_indexed_db_event_target;
+use crate::context_bootstrap::indexed_db::{
+    DATABASE_NAME_SLOT, DATABASE_VERSION_SLOT, initialize_indexed_db_event_target,
+};
 use crate::web_api_interfaces;
 use moli_webapi_declare::WebApiObject;
 
 #[derive(WebApiObject)]
-#[webapi(
-    interface = web_api_interfaces::IDBDatabase,
-    require_prototype,
-    data_properties,
-    enumerable
-)]
-struct IdbDatabaseObjectDeclaration {
+#[webapi(interface = web_api_interfaces::IDBDatabase, require_prototype)]
+struct IdbDatabaseObjectDeclaration<'scope> {
     #[webapi(slot = INDEXED_DB_EVENT_LISTENERS_SLOT, init = "null_object")]
     event_listeners: (),
 
-    name: String,
+    #[webapi(slot = DATABASE_NAME_SLOT)]
+    name: v8::Local<'scope, v8::String>,
+    #[webapi(slot = DATABASE_VERSION_SLOT)]
     version: f64,
 }
 
@@ -27,7 +26,8 @@ pub(in crate::context_bootstrap::indexed_db) fn create_database_object<'s>(
 ) -> Option<v8::Local<'s, v8::Object>> {
     let storage_key = storage_scope.storage_key().to_owned();
     let database_key = database_registry_key(&storage_key, &info.name);
-    let database = IdbDatabaseObjectDeclaration::new(info.name.clone(), info.version as f64)
+    let name = idb_name_to_v8(scope, &info.name);
+    let database = IdbDatabaseObjectDeclaration::new(name, info.version as f64)
         .bind(scope)
         .ok()?;
     register_indexed_db_wrapper_with_owner(

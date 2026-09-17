@@ -22,6 +22,72 @@ async fn indexed_db_key_ranges_protect_bounds_and_validate_receivers() -> Result
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn indexed_db_database_names_preserve_utf16_identity_across_realms_and_queues() -> Result<()>
+{
+    let server = FixtureServer::spawn().await?;
+    let browser = Browser::new(AppConfig::default())?;
+    let fixture = include_str!("fixtures/indexeddb-database-names.js");
+    for target in ["window", "child", "worker"] {
+        let source = format!(
+            "{fixture}\ndatabaseNamesProbe('database-names-{target}').then(finish, error => finish({{state: 'error', error: String(error), checks: databaseNameChecks}}));"
+        );
+        let result = run_probe(&browser, &server, target, &source).await?;
+        assert_eq!(result["state"], "pass", "{target}: {result}");
+        assert_eq!(
+            result["checks"].as_array().unwrap().len(),
+            if target == "worker" { 100 } else { 303 },
+            "{target}: {result}"
+        );
+    }
+    server.shutdown().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn indexed_db_database_attributes_preserve_connection_state_across_upgrade_and_close()
+-> Result<()> {
+    let server = FixtureServer::spawn().await?;
+    let browser = Browser::new(AppConfig::default())?;
+    let fixture = include_str!("fixtures/indexeddb-database-attributes.js");
+    for target in ["window", "child", "worker"] {
+        let source = format!(
+            "{fixture}\ndatabaseAttributesProbe('database-attributes-{target}').then(finish, error => finish({{state: 'error', error: String(error), checks: databaseAttributeChecks}}));"
+        );
+        let result = run_probe(&browser, &server, target, &source).await?;
+        assert_eq!(result["state"], "pass", "{target}: {result}");
+        assert_eq!(
+            result["checks"].as_array().unwrap().len(),
+            if target == "worker" { 234 } else { 770 },
+            "{target}: {result}"
+        );
+    }
+    server.shutdown().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn indexed_db_transaction_attributes_preserve_native_state_receivers_and_lifetime()
+-> Result<()> {
+    let server = FixtureServer::spawn().await?;
+    let browser = Browser::new(AppConfig::default())?;
+    let fixture = include_str!("fixtures/indexeddb-transaction-attributes.js");
+    for target in ["window", "child", "worker"] {
+        let source = format!(
+            "{fixture}\ntransactionAttributesProbe('transaction-attributes-{target}').then(finish, error => finish({{state: 'error', error: String(error), checks: transactionAttributeChecks}}));"
+        );
+        let result = run_probe(&browser, &server, target, &source).await?;
+        assert_eq!(result["state"], "pass", "{target}: {result}");
+        assert_eq!(
+            result["checks"].as_array().unwrap().len(),
+            if target == "worker" { 198 } else { 668 },
+            "{target}: {result}"
+        );
+    }
+    server.shutdown().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn indexed_db_transaction_durability_preserves_options_realms_and_lifecycle() -> Result<()> {
     let server = FixtureServer::spawn().await?;
     let browser = Browser::new(AppConfig::default())?;
