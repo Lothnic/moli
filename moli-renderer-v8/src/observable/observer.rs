@@ -2,7 +2,8 @@
 //! while script callbacks keep their typed Web IDL invocation boundary.
 
 use super::{
-    callbacks, collect, consume, first, inspect, invoke_and_report, state::*, transform, until,
+    callbacks, catch, collect, consume, finally, first, flat_map, inspect, invoke_and_report,
+    state::*, switch_map, transform, until,
 };
 use crate::util::{get_private_value, set_private_value};
 
@@ -22,6 +23,13 @@ pub(super) const DROP: i32 = 12;
 pub(super) const UNTIL_SOURCE: i32 = 13;
 pub(super) const UNTIL_NOTIFIER: i32 = 14;
 pub(super) const INSPECT: i32 = 15;
+pub(super) const FINALLY: i32 = 16;
+pub(super) const FLAT_MAP_SOURCE: i32 = 17;
+pub(super) const FLAT_MAP_INNER: i32 = 18;
+pub(super) const SWITCH_MAP_SOURCE: i32 = 19;
+pub(super) const SWITCH_MAP_INNER: i32 = 20;
+pub(super) const CATCH_SOURCE: i32 = 21;
+pub(super) const CATCH_INNER: i32 = 22;
 pub(super) const SUBSCRIBER: &str = "__moliObservableNativeSubscriber";
 const INDEX: &str = "__moliObservableCallbackIndex";
 
@@ -90,6 +98,14 @@ pub(super) fn notify<'s>(
                 }
                 UNTIL_SOURCE | UNTIL_NOTIFIER => until::notify(scope, observer, notification, kind),
                 INSPECT => inspect::notify(scope, observer, notification),
+                FINALLY => finally::notify(scope, observer, notification),
+                FLAT_MAP_SOURCE | FLAT_MAP_INNER => {
+                    flat_map::notify(scope, observer, notification, kind)
+                }
+                SWITCH_MAP_SOURCE | SWITCH_MAP_INNER => {
+                    switch_map::notify(scope, observer, notification, kind)
+                }
+                CATCH_SOURCE | CATCH_INNER => catch::notify(scope, observer, notification, kind),
                 _ => unreachable!("unknown native Observable observer"),
             }
             let exception = scope.exception();

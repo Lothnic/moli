@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::{cell::RefCell, rc::Rc};
 
-use crate::abort_signal_route::{AbortAlgorithm, invoke_abort_algorithm};
+use crate::abort_signal_route::{AbortAlgorithm, invoke_abort_algorithms};
 use crate::util::{get_private_value, set_private_value, v8str};
 use crate::webidl;
 
@@ -282,10 +282,28 @@ fn abort_worker_signal<'s>(
         }
         signals_to_abort
     };
+    // Complete the dependency snapshot even if a source's IteratorClose
+    // throws. Dependents were already marked aborted and cannot be retried.
+    let mut first_error = None;
     for (signal_id, signal) in signals_to_abort {
-        if !run_worker_abort_steps(store, scope, signal, signal_id, reason) {
-            return;
+        let error = {
+            v8::tc_scope!(let scope, scope);
+            if run_worker_abort_steps(store, scope, signal, signal_id, reason) {
+                None
+            } else {
+                let Some(error) = scope.exception() else {
+                    return;
+                };
+                scope.reset();
+                Some(error)
+            }
+        };
+        if first_error.is_none() {
+            first_error = error;
         }
+    }
+    if let Some(error) = first_error {
+        scope.throw_exception(error);
     }
 }
 
@@ -304,34 +322,17 @@ fn run_worker_abort_steps<'s>(
         std::mem::take(&mut state.abort_algorithms)
     };
     reject_worker_fetches_for_signal(scope, signal_id, reason);
-    if !invoke_worker_abort_algorithms(scope, signal, reason, abort_algorithms) {
+    if !invoke_abort_algorithms(
+        scope,
+        "Worker AbortSignal abort algorithm",
+        signal,
+        reason,
+        abort_algorithms,
+    ) {
         return false;
     }
     // Dispatch reads the shared listener registry after all abort algorithms.
     abort_signal_events::dispatch_abort(scope, signal);
-    true
-}
-
-fn invoke_worker_abort_algorithms<'s>(
-    scope: &mut v8::PinScope<'s, '_>,
-    signal: v8::Local<'s, v8::Object>,
-    reason: v8::Local<'s, v8::Value>,
-    abort_algorithms: Vec<AbortAlgorithm>,
-) -> bool {
-    for algorithm in abort_algorithms {
-        let Some(algorithm) = algorithm.prepare(scope) else {
-            continue;
-        };
-        if !invoke_abort_algorithm(
-            scope,
-            "Worker AbortSignal abort algorithm",
-            algorithm,
-            signal,
-            reason,
-        ) {
-            return false;
-        }
-    }
     true
 }
 
