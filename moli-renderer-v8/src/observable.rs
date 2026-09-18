@@ -4,15 +4,19 @@
 //! Window/worker owners.
 
 mod callbacks;
+mod catch;
 mod collect;
 mod consume;
 mod event_target;
+mod finally;
 mod first;
+mod flat_map;
 mod from;
 mod inspect;
 mod observer;
 mod promise;
 mod state;
+mod switch_map;
 mod transform;
 mod until;
 
@@ -33,6 +37,10 @@ struct ObservablePrototype {
     subscribe: (),
     #[webapi(method, length = 1, callback = transform::map)]
     map: (),
+    #[webapi(method = "flatMap", length = 1, callback = flat_map::flat_map)]
+    flat_map: (),
+    #[webapi(method = "switchMap", length = 1, callback = switch_map::switch_map)]
+    switch_map: (),
     #[webapi(method, length = 1, callback = transform::filter)]
     filter: (),
     #[webapi(method, length = 1, callback = transform::take)]
@@ -43,6 +51,10 @@ struct ObservablePrototype {
     take_until: (),
     #[webapi(method, length = 0, callback = inspect::inspect)]
     inspect: (),
+    #[webapi(method, length = 1, callback = finally::finally)]
+    finally: (),
+    #[webapi(method, length = 1, callback = catch::catch)]
+    catch: (),
     #[webapi(method, length = 0, returns_promise, callback = first::first)]
     first: (),
     #[webapi(method, length = 0, returns_promise, callback = collect::last)]
@@ -314,6 +326,10 @@ fn subscribe_internal<'s>(
             && !transform::subscribe(scope, observable, subscriber)
             && !until::subscribe(scope, observable, subscriber)
             && !inspect::subscribe(scope, observable, subscriber)
+            && !finally::subscribe(scope, observable, subscriber)
+            && !flat_map::subscribe(scope, observable, subscriber)
+            && !switch_map::subscribe(scope, observable, subscriber)
+            && !catch::subscribe(scope, observable, subscriber)
         {
             event_target::subscribe(scope, observable, subscriber);
         }
@@ -519,11 +535,18 @@ fn add_teardown<'s>(
     let Some(parsed) = webidl::parse_args::<TeardownArgs>(scope, &args) else {
         return;
     };
-    let subscriber = args.this();
+    let callback = callbacks::trace(scope, parsed.callback);
+    subscriber_add_teardown(scope, args.this(), callback);
+}
+
+fn subscriber_add_teardown<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    subscriber: v8::Local<'s, v8::Object>,
+    callback: v8::Local<'s, v8::Object>,
+) {
     if !is_current(scope, subscriber) {
         return;
     }
-    let callback = callbacks::trace(scope, parsed.callback);
     if active(scope, subscriber) {
         let mut teardowns = list(scope, subscriber, TEARDOWNS);
         teardowns.push(callback);
