@@ -31,6 +31,18 @@ mod module_document_write;
 #[path = "scripts/document_close.rs"]
 mod document_close;
 
+#[path = "scripts/document_open_url.rs"]
+mod document_open_url;
+
+#[path = "scripts/document_write_insertion.rs"]
+mod document_write_insertion;
+
+#[path = "scripts/document_write_errors.rs"]
+mod document_write_errors;
+
+#[path = "scripts/document_write_stylesheets.rs"]
+mod document_write_stylesheets;
+
 #[path = "scripts/parser_cleanup.rs"]
 mod parser_cleanup;
 
