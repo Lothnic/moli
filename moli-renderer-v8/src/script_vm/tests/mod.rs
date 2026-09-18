@@ -2290,7 +2290,6 @@ mod window_execution_context;
 mod window_getter_consolidation;
 mod worklet_interfaces;
 
-mod string_timers;
 
 mod history_replace_forward;
 
