@@ -294,6 +294,10 @@ impl ParserConnectedScriptBridge {
         self.parser_control.enter_parser_script_nesting()
     }
 
+    pub(crate) fn parser_script_nesting_level(&self) -> usize {
+        self.parser_control.parser_script_nesting_level()
+    }
+
     pub(crate) fn run_state(&self) -> DocumentParserRunState {
         self.parser_control.run_state()
     }
@@ -752,6 +756,7 @@ pub(super) struct DocumentRuntime {
     destructive_write_counters: destructive_writes::DocumentWriteCounters,
     document_unload_counters: destructive_writes::DocumentWriteCounters,
     root_document_parser: Option<DocumentParserSession>,
+    windowless_document_parsers: HashMap<DomHandle, document_write::WindowlessDocumentParserState>,
     post_parse_schedule_invalidated: bool,
     stylesheet_lifecycle: StylesheetLifecycleState,
     main_parser_continuation: main_parser_continuation::MainParserContinuationState,

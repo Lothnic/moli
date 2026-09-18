@@ -1305,6 +1305,19 @@ impl JsContextHost {
             .is_some_and(|owner| self.child_document_parsers.contains(owner))
     }
 
+    pub(crate) fn enter_child_parser_script_input_context(
+        &self,
+        child_handle: DomHandle,
+        owner: FrameDocumentTaskOwner,
+    ) -> Option<moli_parser::ParserInputContext> {
+        if self.current_child_document_task_owner(child_handle) != Some(owner) {
+            return None;
+        }
+        self.child_document_parsers
+            .insertion_handle(owner.document_owner())
+            .map(|insertion| insertion.enter_script_input_context())
+    }
+
     pub(in crate::native_bridge::context_host) fn pump_child_document_write_parser(
         &mut self,
         scope: &mut v8::PinScope<'_, '_>,
@@ -1358,7 +1371,7 @@ impl JsContextHost {
             } else if ready || parser_insertion_only && !executing_parser_script {
                 insertion.enqueue_script_input_html(chunk);
             } else if executing_parser_script {
-                if !insertion.append_to_current_inserted_input(&chunk) {
+                if !insertion.append_to_current_script_input(&chunk) {
                     insertion.enqueue_script_input_html(chunk);
                 }
             } else {
@@ -1693,6 +1706,7 @@ impl JsContextHost {
         let ParserScriptHandoff::BlockingClassic {
             node_id,
             start_line,
+            blocking_signatures_before,
             script,
             ..
         } = handoff
@@ -1703,6 +1717,19 @@ impl JsContextHost {
             (ScriptKind::Classic, ScriptSource::Inline(source)) => source.clone(),
             _ => return false,
         };
+        // Only nested inline parser scripts bypass blocking stylesheets. A direct
+        // document.write() into a script-created parser must wait for them.
+        if !self.child_document_is_executing_parser_script(document_handle)
+            && self
+                .frame_owner_store
+                .current_child_document_owner(child_handle)
+                .is_some_and(|owner| {
+                    self.frame_document_blocking_stylesheets
+                        .blocks_signatures(owner, blocking_signatures_before.iter())
+                })
+        {
+            return false;
+        }
         let Some(mut job) = self.frame_owner_child_parser_classic_script_job(
             child_handle,
             Some(*node_id),
@@ -1750,6 +1777,9 @@ impl JsContextHost {
             .and_then(|owner| self.child_document_parsers.insertion_handle(owner))
             .map(|insertion| insertion.control_handle().enter_parser_script_nesting());
         let result = {
+            let _input_context = parser_script_owner.and_then(|owner| {
+                self.enter_child_parser_script_input_context(child_handle, owner)
+            });
             let script_scope = &mut v8::ContextScope::new(scope, script_context);
             crate::script_vm::execute_source_text_on_current_stack(
                 script_scope,
@@ -1787,6 +1817,8 @@ impl JsContextHost {
         let document_handle = self
             .dom_host_mut()
             .create_detached_html_document_with_url(document_url);
+        self.dom_host_mut()
+            .set_document_allow_declarative_shadow_roots_for_handle(document_handle, true);
         if let Some(content_type) = content_type {
             let _ = self.set_dom_document_content_type_for_handle(document_handle, content_type);
         }
