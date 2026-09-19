@@ -5,6 +5,7 @@ use super::location_navigation::{
 use super::navigation_callbacks::{document_location_getter, document_location_setter};
 use super::*;
 
+mod access;
 mod helpers;
 mod install;
 mod methods;
@@ -12,10 +13,12 @@ mod navigation;
 mod slots;
 mod surface;
 
+pub(in crate::context_bootstrap) use access::{location_target, wrap_location_object};
+
 pub(super) use install::{
     build_location_constructor_template, build_location_runtime_object,
     install_location_runtime_state, location_belongs_to_current_local_window,
-    location_owner_has_current_realm,
+    location_has_relevant_document, location_owner_has_current_realm,
 };
 pub(super) use navigation::{
     is_same_document_fragment_navigation, resolve_location_navigation_target,

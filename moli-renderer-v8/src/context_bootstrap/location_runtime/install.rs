@@ -40,7 +40,7 @@ enum LocationAttribute {
 }
 
 #[derive(Default, WebApiObject)]
-#[webapi(interface = web_api_interfaces::Location)]
+#[webapi(interface = web_api_interfaces::Location, receiver)]
 struct LocationOwnSurfaceDeclaration {
     #[webapi(
         accessor_property,
@@ -209,6 +209,7 @@ fn configure_location_instance_template(
             .flags(v8::PropertyHandlerFlags::ONLY_INTERCEPT_STRINGS),
     );
     template.set_immutable_proto();
+    super::access::install_access_check(template);
 }
 
 pub(in crate::context_bootstrap) fn build_location_runtime_object<'s>(
@@ -231,6 +232,7 @@ pub(in crate::context_bootstrap) fn install_location_runtime_state<'s>(
     location: v8::Local<'s, v8::Object>,
     href: &str,
 ) -> Result<()> {
+    let location = super::access::location_target(scope, location);
     sync_location_object_fields(scope, location, href);
     // Location's legacy-unforgeable own properties are non-configurable.
     // Window resets refresh the backing slots on the existing object without
@@ -343,6 +345,37 @@ pub(in crate::context_bootstrap) fn location_belongs_to_current_local_window<'s>
     })
 }
 
+pub(in crate::context_bootstrap) fn location_has_relevant_document<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    location: v8::Local<'s, v8::Object>,
+) -> bool {
+    let owner = runtime_window_owner(scope, location);
+    let Some(dispatch_scope) = runtime_window_dispatch_scope(scope, owner) else {
+        return false;
+    };
+    let Some(host_ptr) = context_host_ptr_from_global_bridge(scope) else {
+        return false;
+    };
+    let host = unsafe { &*host_ptr };
+    match dispatch_scope {
+        crate::native_bridge::OwnerDispatchScope::Top => owner
+            .get_creation_context(scope)
+            .and_then(|context| host.window_execution_context_identity_for_access_check(context))
+            .is_some_and(|identity| host.window_execution_context_identity_is_current(identity)),
+        crate::native_bridge::OwnerDispatchScope::Child(_) => {
+            // The same iframe element can acquire a different LocalWindow.
+            // A Location retained from the old Window must remain inactive.
+            location_belongs_to_current_local_window(scope, location)
+        }
+        crate::native_bridge::OwnerDispatchScope::LightweightPopup(popup_id) => {
+            // Popup shells share the opener realm. Their own document record,
+            // rather than that realm, determines when close destroys them.
+            host.current_lightweight_popup_document_owner(popup_id)
+                .is_some()
+        }
+    }
+}
+
 pub(in crate::context_bootstrap) fn location_owner_has_current_realm<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     owner: v8::Local<'s, v8::Object>,
@@ -439,7 +472,12 @@ fn location_attribute_getter<'s>(
     attribute: LocationAttribute,
     rv: &mut v8::ReturnValue<'_, v8::Value>,
 ) {
-    let Some(current_href) = require_location_href_slot(scope, holder) else {
+    if !super::access::require_same_origin(scope, holder)
+        || !super::access::require_entry_origin(scope, holder)
+    {
+        return;
+    }
+    let Some(current_href) = super::helpers::location_url(scope, holder) else {
         return;
     };
     match attribute {
@@ -464,8 +502,8 @@ fn location_attribute_getter<'s>(
             set_return_string(scope, rv, &search);
         }
         LocationAttribute::Pathname => {
-            let pathname = location_href_slot(scope, holder)
-                .and_then(|href| url::Url::parse(&href).ok())
+            let pathname = url::Url::parse(&current_href)
+                .ok()
                 .map(|url| url.path().to_owned())
                 .unwrap_or_default();
             set_return_string(scope, rv, &pathname);
@@ -522,10 +560,25 @@ fn location_writable_attribute_setter_callback<'s>(
         rv.set_undefined();
         return;
     };
+    let holder = args.this();
+    if !matches!(attribute, LocationAttribute::Href)
+        && !super::access::require_same_origin(scope, holder)
+    {
+        return;
+    }
     let Some(value) = v8_value_to_string(scope, args.get(0)) else {
         return;
     };
-    let holder = args.this();
+    // Conversion can itself remove the iframe, so check the relevant Document
+    // afterwards and before component parsing or navigation side effects.
+    if !location_has_relevant_document(scope, holder) {
+        return;
+    }
+    if !matches!(attribute, LocationAttribute::Href)
+        && !super::access::require_entry_origin(scope, holder)
+    {
+        return;
+    }
     if require_location_href_slot(scope, holder).is_none() {
         return;
     }
