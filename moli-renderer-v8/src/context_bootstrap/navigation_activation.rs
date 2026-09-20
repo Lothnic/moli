@@ -14,6 +14,9 @@ use crate::util::{get_private_value, set_private_value};
 use crate::web_api_interfaces;
 use moli_webapi_declare::WebApiObject;
 
+pub(super) const NAVIGATE_EVENT_PRECOMMIT_TRANSITION_RESOLVER_SLOT: &str =
+    "__lmNavigateEventPrecommitTransitionResolver";
+
 #[derive(WebApiObject)]
 #[webapi(
     interface = web_api_interfaces::NavigationActivation,
@@ -68,6 +71,9 @@ struct NavigationTransitionSettleDataDeclaration<'scope> {
 
     #[webapi(slot = NAVIGATION_TRANSITION_SETTLE_ERROR_SLOT)]
     error: Option<v8::Local<'scope, v8::Value>>,
+
+    #[webapi(slot = NAVIGATION_TRANSITION_SETTLE_REJECTED_SLOT)]
+    rejected: bool,
 }
 
 pub(super) fn install_navigation_activation_template_bindings<'s>(
@@ -236,16 +242,23 @@ pub(super) fn install_navigation_transition<'s>(
 pub(super) fn resolve_navigation_transition_committed<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     navigation: v8::Local<'s, v8::Object>,
-    value: v8::Local<'s, v8::Value>,
 ) {
     if let Some(resolver) = take_navigation_transition_committed_resolver(scope, navigation) {
-        let context = resolver
-            .get_promise(scope)
-            .get_creation_context(scope)
-            .unwrap_or_else(|| scope.get_current_context());
-        let value = entry_wrappers::value_in_realm(scope, value, context);
-        let _ = resolver.resolve(scope, value);
+        let _ = resolver.resolve(scope, v8::undefined(scope).into());
     }
+}
+
+pub(super) fn precommit_transition_resolver_from_event<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    event: v8::Local<'s, v8::Object>,
+) -> Option<v8::Local<'s, v8::PromiseResolver>> {
+    event_private_value(
+        scope,
+        event,
+        NAVIGATE_EVENT_PRECOMMIT_TRANSITION_RESOLVER_SLOT,
+    )
+    .and_then(|value| v8::Local::<v8::Object>::try_from(value).ok())
+    .map(|object| unsafe { v8::Local::<v8::PromiseResolver>::cast_unchecked(object) })
 }
 
 pub(super) fn reject_navigation_transition_committed<'s>(
@@ -269,10 +282,11 @@ const NAVIGATION_TRANSITION_SETTLE_NAVIGATION_SLOT: &str =
     "__lmNavigationTransitionSettleNavigation";
 const NAVIGATION_TRANSITION_SETTLE_RESOLVER_SLOT: &str = "__lmNavigationTransitionSettleResolver";
 const NAVIGATION_TRANSITION_SETTLE_ERROR_SLOT: &str = "__lmNavigationTransitionSettleError";
+const NAVIGATION_TRANSITION_SETTLE_REJECTED_SLOT: &str = "__lmNavigationTransitionSettleRejected";
 const NAVIGATION_TRANSITION_COMMITTED_RESOLVER_SLOT: &str =
     "__lmNavigationTransitionCommittedResolver";
 
-fn take_navigation_transition_committed_resolver<'s>(
+pub(super) fn take_navigation_transition_committed_resolver<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     navigation: v8::Local<'s, v8::Object>,
 ) -> Option<v8::Local<'s, v8::PromiseResolver>> {
@@ -303,6 +317,7 @@ pub(super) fn schedule_settle_navigation_transition<'s>(
         navigation,
         resolver,
         error,
+        rejected: error.is_some(),
     }
     .bind(scope)
     .expect("navigation transition settle data should bind");
@@ -310,7 +325,9 @@ pub(super) fn schedule_settle_navigation_transition<'s>(
         .data(data.into())
         .build(scope)
     else {
-        clear_navigation_transition(scope, navigation);
+        if navigation_transition_matches_resolver(scope, navigation, resolver) {
+            clear_navigation_transition(scope, navigation);
+        }
         return;
     };
     enqueue_navigation_lifecycle_microtask(scope, callback);
@@ -339,9 +356,11 @@ fn settle_navigation_transition_callback<'s>(
     if navigation_transition_matches_resolver(scope, navigation, resolver) {
         clear_navigation_transition(scope, navigation);
     }
-    if let Some(error) = get_private_value(scope, data, NAVIGATION_TRANSITION_SETTLE_ERROR_SLOT)
-        .filter(|value| !value.is_undefined())
+    if get_private_value(scope, data, NAVIGATION_TRANSITION_SETTLE_REJECTED_SLOT)
+        .is_some_and(|value| value.is_true())
     {
+        let error = get_private_value(scope, data, NAVIGATION_TRANSITION_SETTLE_ERROR_SLOT)
+            .unwrap_or_else(|| v8::undefined(scope).into());
         let _ = resolver.reject(scope, error);
     } else {
         let _ = resolver.resolve(scope, v8::undefined(scope).into());
@@ -465,13 +484,13 @@ mod tests {
                     .unwrap()
                     .strict_equals(from.into())
             );
-            resolve_navigation_transition_committed(scope, navigation, from.into());
+            resolve_navigation_transition_committed(scope, navigation);
             let committed = transition
                 .get(scope, v8str(scope, "committed").into())
                 .unwrap();
             let committed = v8::Local::<v8::Promise>::try_from(committed).unwrap();
             assert_eq!(committed.state(), v8::PromiseState::Fulfilled);
-            assert!(committed.result(scope).strict_equals(from.into()));
+            assert!(committed.result(scope).is_undefined());
         }
     }
 }
