@@ -2216,6 +2216,9 @@ mod child_dynamic_inline_scripts;
 mod close_watchers;
 mod credential_interface_exposure_interfaces;
 mod credential_interfaces;
+mod cross_origin_symbol_fallback;
+mod cross_origin_window_indexes;
+mod cross_origin_window_names;
 mod device_events;
 
 mod gamepad_interfaces;
@@ -2230,6 +2233,7 @@ mod event_receivers;
 mod fetch_integrity;
 mod fetch_referrer;
 mod fetch_request_guard;
+mod frame_element_security;
 mod geometry_point_conversion_order;
 mod headers_list;
 mod http_fixture;
