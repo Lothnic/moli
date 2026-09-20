@@ -10,7 +10,7 @@ use super::navigation_entry::{
     new_navigation_entry_key, set_navigation_entry_document_id,
     sync_navigation_current_entry_from_history_entry,
 };
-use super::navigation_entry_state::{copy_entry_serialized_states, set_navigation_entry_state};
+use super::navigation_entry_state::{copy_navigation_entry_serialized_state, set_navigation_entry_state};
 use super::navigation_events::{
     dispatch_navigation_currententrychange, dispatch_navigation_entry_dispose,
     refresh_navigation_destination_indexes,
@@ -31,7 +31,9 @@ mod document_front;
 mod local;
 mod same_document;
 
-pub(super) use document_front::sync_local_document_front_from_window;
+pub(super) use document_front::{
+    sync_local_document_front_from_window, sync_same_document_navigation_commit,
+};
 pub(crate) use local::apply_local_window_location_navigation;
 pub(super) use same_document::{
     apply_navigation_navigate_same_document, update_navigation_current_entry_for_same_document,
