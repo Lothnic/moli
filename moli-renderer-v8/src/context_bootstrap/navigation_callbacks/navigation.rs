@@ -13,8 +13,8 @@ use super::super::navigation_lifecycle::{
     settle_navigation_finished_resolved_immediately, settle_navigation_transition_finished_local,
 };
 use super::super::navigation_window::{
-    navigation_document_can_update_current_entry, navigation_document_is_active,
-    navigation_unload_event_active,
+    navigation_document_can_update_current_entry, navigation_document_has_disabled_entries,
+    navigation_document_is_active, navigation_unload_event_active,
 };
 use super::*;
 use crate::util::{get_private_value, set_private_value};
@@ -55,9 +55,7 @@ pub(in crate::context_bootstrap) fn navigation_entries_callback<'s>(
         rv.set(v8::Array::new(scope, 0).into());
         return;
     }
-    if navigation_document_has_opaque_origin(scope, owner)
-        || super::super::navigation_window::navigation_document_is_initial_empty(scope, owner)
-    {
+    if navigation_document_has_disabled_entries(scope, owner) {
         rv.set(v8::Array::new(scope, 0).into());
         return;
     }
@@ -395,9 +393,6 @@ pub(in crate::context_bootstrap) fn navigation_navigate_callback<'s>(
             rv.set(pending.object.into());
             return;
         }
-        let intercepted = navigate_outcome
-            .as_ref()
-            .is_some_and(|outcome| outcome.intercepted);
         let transition_from = navigate_outcome
             .as_ref()
             .is_some_and(|outcome| outcome.intercepted)
@@ -424,6 +419,9 @@ pub(in crate::context_bootstrap) fn navigation_navigate_callback<'s>(
             } else {
                 None
             };
+        let intercepted = navigate_outcome
+            .as_ref()
+            .is_some_and(|outcome| outcome.intercepted);
         let resolved_value = commit_navigation_navigate_same_document(
             scope,
             owner,
@@ -431,6 +429,7 @@ pub(in crate::context_bootstrap) fn navigation_navigate_callback<'s>(
             &effective_href,
             effective_kind,
             effective_state,
+            intercepted,
         );
         let result = if intercepted {
             let Some(pending) = navigation_current_entry_result_with_pending_finished(scope, owner)
@@ -612,6 +611,7 @@ pub(in crate::context_bootstrap) fn navigation_navigate_callback<'s>(
                 &effective_href,
                 effective_kind,
                 effective_state,
+                true,
             );
             let Some(pending) = navigation_current_entry_result_with_pending_finished(scope, owner)
             else {
@@ -682,6 +682,7 @@ fn commit_navigation_navigate_same_document<'s>(
     effective_href: &str,
     effective_kind: LocationNavigationKind,
     effective_state: Option<v8::Local<'s, v8::Value>>,
+    intercepted: bool,
 ) -> v8::Local<'s, v8::Value> {
     if matches!(effective_kind, LocationNavigationKind::Reload) {
         if let Some(state) = effective_state {
@@ -697,29 +698,14 @@ fn commit_navigation_navigate_same_document<'s>(
         effective_href,
         effective_kind,
         effective_state,
+        if intercepted { "other" } else { "fragment" },
     );
     if let Some(host_ptr) = context_host_ptr_from_global_bridge(scope) {
         let popstate_state = navigation_current_entry(scope, owner)
             .and_then(|entry| clone_navigation_entry_state(scope, entry))
             .unwrap_or_else(|| v8::null(scope).into());
-        let child_handle = (!runtime_window_is_global(scope, owner))
-            .then(|| {
-                super::super::navigation_window::child_browsing_context_handle_for_runtime_owner(
-                    scope, owner,
-                )
-            })
-            .flatten();
-        dispatch_popstate_event(scope, host_ptr, child_handle, popstate_state);
+        dispatch_popstate_event(scope, host_ptr, owner, popstate_state);
         queue_hash_change_for_runtime_owner(scope, owner, Some(current_href), effective_href);
-        if runtime_window_is_global(scope, owner) {
-            if let Ok(effective_url) = url::Url::parse(effective_href) {
-                unsafe { &mut *host_ptr }.set_document_url(effective_url);
-            }
-        } else {
-            sync_local_document_front_from_window(scope, owner);
-        }
-    } else if !runtime_window_is_global(scope, owner) {
-        sync_local_document_front_from_window(scope, owner);
     }
     navigation_current_entry(scope, owner)
         .map(v8::Local::<v8::Value>::from)
@@ -1190,6 +1176,7 @@ fn precommit_commit_fulfilled_callback<'s>(
         &data.effective_href,
         data.effective_kind,
         data.effective_state,
+        true,
     );
     if matches!(data.effective_kind, LocationNavigationKind::Reload) {
         let current_entry = navigation_current_entry(scope, data.owner);
