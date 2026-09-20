@@ -27,9 +27,9 @@ use super::navigation_lifecycle::{
 use super::navigation_result::navigation_dom_exception;
 use super::navigation_window::{
     child_browsing_context_handle_for_runtime_owner, navigation_document_is_active,
-    runtime_window_dispatch_scope, runtime_window_is_global, runtime_window_owner,
-    set_navigation_unload_event_active, should_dispatch_hash_change, window_location_for_holder,
-    window_navigation_for_holder, window_task_target_for_runtime_owner,
+    replace_navigation_unload_event_active, runtime_window_dispatch_scope,
+    runtime_window_is_global, runtime_window_owner, should_dispatch_hash_change,
+    window_location_for_holder, window_navigation_for_holder, window_task_target_for_runtime_owner,
 };
 use super::*;
 use crate::context_bootstrap::navigation_entry::wrappers as entry_wrappers;
@@ -699,7 +699,7 @@ fn dispatch_unload_lifecycle_event_for_runtime_owner<'s>(
         super::window_accessors::window_document_handle(scope, owner, host)
             .map(|document| host.enter_document_unload(document))
     });
-    set_navigation_unload_event_active(scope, owner, true);
+    let previous_unload = replace_navigation_unload_event_active(scope, owner, true);
     if runtime_window_is_global(scope, owner) {
         if let Some(host_ptr) = context_host_ptr_from_global_bridge(scope) {
             let host = unsafe { &mut *host_ptr };
@@ -721,8 +721,14 @@ fn dispatch_unload_lifecycle_event_for_runtime_owner<'s>(
             event,
             matches!(event_type, "pagehide" | "unload"),
         );
+    } else if let Some(popup_id) =
+        crate::native_bridge::lightweight_popup_id_from_window(scope, owner)
+        && let Some(host_ptr) = context_host_ptr_from_global_bridge(scope)
+    {
+        unsafe { &mut *host_ptr }
+            .dispatch_lightweight_popup_window_event(scope, popup_id, event_type, event);
     }
-    set_navigation_unload_event_active(scope, owner, false);
+    replace_navigation_unload_event_active(scope, owner, previous_unload);
 }
 
 pub(super) fn queue_hash_change_for_runtime_owner<'s>(
@@ -1337,12 +1343,14 @@ pub(super) fn dispatch_navigation_traverse_event_with_outcome<'s>(
     let current_href = window_location_for_holder(scope, owner)
         .and_then(|location| location_href_slot(scope, location))
         .unwrap_or_default();
-    let hash_change = should_dispatch_hash_change(&current_href, &target_href);
     let destination_same_document =
         object_bool_property(scope, destination, "sameDocument").unwrap_or(true);
+    let hash_change =
+        destination_same_document && should_dispatch_hash_change(&current_href, &target_href);
     let signal = create_navigation_abort_signal(scope);
     let signal_object = v8::Local::<v8::Object>::try_from(signal).ok();
-    let cancelable = runtime_window_is_global(scope, owner);
+    let cancelable = destination_same_document
+        && child_browsing_context_handle_for_runtime_owner(scope, owner).is_none();
     let init = NavigateEventInitDeclaration {
         navigation_type: v8str(scope, "traverse").into(),
         destination,
