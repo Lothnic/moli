@@ -7,7 +7,10 @@ use super::location_history_storage::{
 };
 use super::location_runtime::{is_same_document_fragment_navigation, location_href_slot};
 use super::media_queries::dispatch_simple_event_target_event;
-use super::navigation_callbacks::cancel_active_intercepted_same_document_navigation;
+use super::navigation_activation::{
+    navigation_transition_matches_resolver, precommit_transition_resolver_from_event,
+    take_navigation_transition_committed_resolver,
+};
 use super::navigation_entry::{
     history_entries, navigation_current_entry, navigation_entries_share_document,
     navigation_entry_id_value, navigation_entry_key_value, navigation_entry_url_value,
@@ -18,7 +21,9 @@ use super::navigation_handler_callbacks::{
     NAVIGATE_EVENT_ADDED_HANDLERS_SLOT, NAVIGATE_EVENT_DEFERRED_HANDLERS_SLOT,
     run_navigation_handler_arrays,
 };
-use super::navigation_lifecycle::finish_navigation_error_events;
+use super::navigation_lifecycle::{
+    finish_navigation_error_events, settle_navigation_transition_finished_local,
+};
 use super::navigation_result::navigation_dom_exception;
 use super::navigation_window::{
     child_browsing_context_handle_for_runtime_owner, navigation_document_is_active,
@@ -44,6 +49,8 @@ const NAVIGATION_ERROR_EVENT_ACTIVE_SLOT: &str = "__lmNavigationErrorEventActive
 const NAVIGATE_EVENT_INTERCEPT_ERROR_SLOT: &str = "__lmNavigateEventInterceptError";
 const NAVIGATE_EVENT_INTERCEPT_RESULT_SLOT: &str = "__lmNavigateEventInterceptResult";
 const NAVIGATE_EVENT_PRECOMMIT_SEEN_SLOT: &str = "__lmNavigateEventPrecommitSeen";
+pub(super) const NAVIGATE_EVENT_PRECOMMIT_CONTROLLER_SLOT: &str =
+    "__lmNavigateEventPrecommitController";
 const NAVIGATE_EVENT_REDIRECTED_SLOT: &str = "__lmNavigateEventRedirected";
 const NAVIGATE_EVENT_REDIRECT_HISTORY_SLOT: &str = "__lmNavigateEventRedirectHistory";
 const NAVIGATE_EVENT_ABORT_ERROR_SLOT: &str = "__lmNavigateEventAbortError";
@@ -570,16 +577,26 @@ pub(super) fn cancel_active_navigation_event<'s>(
         );
     }
     let error = navigation_dom_exception(scope, "Navigation was canceled", "AbortError");
-    crate::context_bootstrap::set_event_private_value(
-        scope,
-        event,
-        NAVIGATE_EVENT_ABORT_ERROR_SLOT,
-        error,
-    );
+    set_event_private_value(scope, event, NAVIGATE_EVENT_ABORT_ERROR_SLOT, error);
+    let transition_resolver = precommit_transition_resolver_from_event(scope, event);
+    // Abort/error listeners can start another navigation before this cancellation
+    // returns. Retain the old committed resolver before that navigation commits.
+    let committed_resolver = transition_resolver
+        .filter(|resolver| navigation_transition_matches_resolver(scope, navigation, *resolver))
+        .and_then(|_| take_navigation_transition_committed_resolver(scope, navigation));
     if let Some(signal) = signal {
         crate::native_bridge::abort::abort_signal(scope, signal, error);
     }
     finish_navigation_error_events(scope, navigation, error, &href);
+    if let Some(resolver) = committed_resolver {
+        let _ = resolver.reject(scope, error);
+    }
+    settle_navigation_transition_finished_local(
+        scope,
+        navigation,
+        transition_resolver,
+        Some(error),
+    );
     Some(error)
 }
 
@@ -1011,28 +1028,8 @@ pub(super) fn dispatch_navigation_navigate_event_with_form_data_and_outcome<'s>(
             .flatten(),
     );
     set_navigation_scroll_state(scope, navigation, event, href, intercepted);
-    let redirected =
-        navigate_event_private_bool(scope, event, NAVIGATE_EVENT_REDIRECTED_SLOT, false);
-    let redirected_url = redirected.then(|| {
-        destination
-            .get(scope, v8str(scope, "url").into())
-            .and_then(|value| value.to_string(scope))
-            .map(|value| value.to_rust_string_lossy(scope))
-            .unwrap_or_else(|| href.to_owned())
-    });
-    let redirected_history = if redirected {
-        navigate_event_private_value(scope, event, NAVIGATE_EVENT_REDIRECT_HISTORY_SLOT)
-            .and_then(|value| value.to_string(scope))
-            .map(|value| value.to_rust_string_lossy(scope))
-            .filter(|value| matches!(value.as_str(), "push" | "replace"))
-    } else {
-        None
-    };
-    let redirected_state = if redirected {
-        navigation_destination_state(scope, destination)
-    } else {
-        None
-    };
+    let (redirected_url, redirected_history, redirected_state) =
+        navigation_precommit_redirect(scope, event);
     let intercept_error =
         navigate_event_private_value(scope, event, NAVIGATE_EVENT_INTERCEPT_ERROR_SLOT);
     let intercept_result =
@@ -1053,6 +1050,56 @@ pub(super) fn dispatch_navigation_navigate_event_with_form_data_and_outcome<'s>(
         intercept_result,
         abort_error,
     }
+}
+
+pub(super) fn finish_navigation_precommit<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    event: v8::Local<'s, v8::Object>,
+) {
+    if let Some(controller) =
+        get_private_value(scope, event, NAVIGATE_EVENT_PRECOMMIT_CONTROLLER_SLOT)
+            .and_then(|value| v8::Local::<v8::Object>::try_from(value).ok())
+    {
+        set_private_value(
+            scope,
+            controller,
+            "__lmPrecommitControllerActive",
+            v8::Boolean::new(scope, false).into(),
+        );
+        set_private_value(
+            scope,
+            event,
+            NAVIGATE_EVENT_PRECOMMIT_CONTROLLER_SLOT,
+            v8::undefined(scope).into(),
+        );
+    }
+}
+
+pub(super) fn navigation_precommit_redirect<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    event: v8::Local<'s, v8::Object>,
+) -> (
+    Option<String>,
+    Option<String>,
+    Option<v8::Local<'s, v8::Value>>,
+) {
+    if !navigate_event_private_bool(scope, event, NAVIGATE_EVENT_REDIRECTED_SLOT, false) {
+        return (None, None, None);
+    }
+    let destination = event
+        .get(scope, v8str(scope, "destination").into())
+        .and_then(|value| v8::Local::<v8::Object>::try_from(value).ok());
+    let url = destination
+        .and_then(|destination| destination.get(scope, v8str(scope, "url").into()))
+        .and_then(|value| value.to_string(scope))
+        .map(|value| value.to_rust_string_lossy(scope));
+    let history = navigate_event_private_value(scope, event, NAVIGATE_EVENT_REDIRECT_HISTORY_SLOT)
+        .and_then(|value| value.to_string(scope))
+        .map(|value| value.to_rust_string_lossy(scope))
+        .filter(|value| matches!(value.as_str(), "push" | "replace"));
+    let state =
+        destination.and_then(|destination| navigation_destination_state(scope, destination));
+    (url, history, state)
 }
 
 pub(super) fn run_navigation_precommit_deferred_handlers<'s>(
@@ -1154,6 +1201,16 @@ fn dispatch_cross_document_navigation_navigate_event_for_window_with_type_form_d
     form_data: Option<v8::Local<'s, v8::Value>>,
     can_intercept: bool,
 ) -> bool {
+    if let Some(filename) = download_request {
+        return super::navigation_download::dispatch_download_navigation_event(
+            scope,
+            owner,
+            href,
+            source_element,
+            user_initiated,
+            filename,
+        );
+    }
     let Some(navigation) = window_navigation_for_holder(scope, owner) else {
         return true;
     };
@@ -1161,10 +1218,6 @@ fn dispatch_cross_document_navigation_navigate_event_for_window_with_type_form_d
         .get_creation_context(scope)
         .unwrap_or_else(|| scope.get_current_context());
     let scope = &mut v8::ContextScope::new(scope, context);
-    if download_request.is_some() {
-        let _ = cancel_active_navigation_event(scope, navigation);
-        cancel_active_intercepted_same_document_navigation(scope, navigation);
-    }
     let Ok(event_ctor) =
         super::exposed_interfaces::ensure_intrinsic_interface_constructor(scope, "NavigateEvent")
     else {

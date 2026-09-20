@@ -1,6 +1,10 @@
 //! Admit, reserve and commit complete traversal plans, including zero or one participant.
 
 use super::history_runtime::{apply, results, traversal};
+use super::navigation_activation::{
+    navigation_transition_matches_resolver, precommit_transition_resolver_from_event,
+    take_navigation_transition_committed_resolver,
+};
 use super::navigation_entry::{history_entries, history_index, navigation_current_entry};
 use super::navigation_events::{
     NavigationDispatchOutcome, dispatch_beforeunload_for_runtime_owner,
@@ -64,6 +68,7 @@ impl TraversalParticipantOutcome {
     fn capture(scope: &mut v8::PinScope<'_, '_>, outcome: &NavigationDispatchOutcome<'_>) -> Self {
         Self {
             intercepted: outcome.intercepted,
+            destination: outcome.destination.map(|value| v8::Global::new(scope, value)),
             signal: outcome.signal.map(|value| v8::Global::new(scope, value)),
             event: outcome
                 .precommit_event
@@ -80,6 +85,7 @@ impl TraversalParticipantOutcome {
     fn local<'s>(&self, scope: &mut v8::PinScope<'s, '_>) -> NavigationDispatchOutcome<'s> {
         let mut outcome = NavigationDispatchOutcome::proceed();
         outcome.intercepted = self.intercepted;
+        outcome.destination = self.destination.as_ref().map(|value| v8::Local::new(scope, value));
         outcome.signal = self
             .signal
             .as_ref()
@@ -318,17 +324,31 @@ fn settle_aborted_admission<'s>(
     error: Option<v8::Local<'s, v8::Value>>,
 ) {
     let canceled = error.is_none();
+    let _execution = crate::script_cleanup::ScriptExecutionScope::enter(scope);
     let error = error.unwrap_or_else(|| {
         navigation_dom_exception(scope, "History traversal was canceled", "AbortError")
     });
-    results::reject_pending_navigation_results(scope, &admission.results, error);
+    let mut results_rejected = false;
     for participant in &admission.participants {
+        let navigation = participant.navigation.as_ref().map(|value| v8::Local::new(scope, value));
+        let transition_resolver = participant.outcome.event.as_ref().and_then(|event| {
+            let event = v8::Local::new(scope, event);
+            precommit_transition_resolver_from_event(scope, event)
+        });
+        let committed_resolver = navigation.and_then(|navigation| {
+            transition_resolver
+                .filter(|resolver| navigation_transition_matches_resolver(scope, navigation, *resolver))
+                .and_then(|_| take_navigation_transition_committed_resolver(scope, navigation))
+        });
         if let Some(signal) = &participant.outcome.signal {
             let signal = v8::Local::new(scope, signal);
             crate::native_bridge::abort::abort_signal(scope, signal, error);
         }
-        if let Some(navigation) = &participant.navigation {
-            let navigation = v8::Local::new(scope, navigation);
+        if !results_rejected {
+            results::reject_pending_navigation_results(scope, &admission.results, error);
+            results_rejected = true;
+        }
+        if let Some(navigation) = navigation {
             let filename = if canceled {
                 let owner = super::navigation_window::runtime_window_owner(scope, navigation);
                 window_location_for_holder(scope, owner)
@@ -342,7 +362,16 @@ fn settle_aborted_admission<'s>(
             super::navigation_lifecycle::finish_navigation_error_events(
                 scope, navigation, error, &filename,
             );
+            if let Some(resolver) = committed_resolver {
+                let _ = resolver.reject(scope, error);
+            }
+            super::navigation_lifecycle::settle_navigation_transition_finished_local(
+                scope, navigation, transition_resolver, Some(error),
+            );
         }
+    }
+    if !results_rejected {
+        results::reject_pending_navigation_results(scope, &admission.results, error);
     }
 }
 
@@ -426,6 +455,12 @@ struct CrossDocumentParticipant<'s> {
 }
 
 fn commit(scope: &mut v8::PinScope<'_, '_>, admission: &PendingHistoryTraversalAdmission) {
+    for participant in &admission.participants {
+        if let Some(event) = &participant.outcome.event {
+            let event = v8::Local::new(scope, event);
+            super::navigation_events::finish_navigation_precommit(scope, event);
+        }
+    }
     let Some(targets) = validate(scope, admission) else {
         abort(scope, admission, None);
         return;
