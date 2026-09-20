@@ -892,6 +892,15 @@ pub(crate) fn window_post_message_callback<'s>(
         );
         return;
     }
+    // Reusing an iframe element does not reuse its discarded WindowProxy.
+    // A retained method called on the old Window must not target the new
+    // LocalWindow merely because both have the same DOM handle.
+    if let PendingWindowMessageEndpoint::ChildWindow(handle) = target_endpoint
+        && !host.child_window_proxy_is_current(scope, handle, args.this())
+    {
+        rv.set_undefined();
+        return;
+    }
     // Blink captures the incumbent DOMWindow at API acceptance. Lightweight
     // popups still share the top-level V8 context, so their active execution
     // scope is the one necessary override; the ambient source marker is only
@@ -2200,6 +2209,20 @@ fn window_message_endpoint_from_receiver<'s>(
         return Some(PendingWindowMessageEndpoint::ChildWindow(child_handle));
     }
 
+    // A cross-origin parent can be the real top WindowProxy. Borrowing a
+    // child's postMessage must still resolve the receiver's native identity,
+    // independently of the function's current realm.
+    let context = object.get_creation_context(scope)?;
+    if object.strict_equals(context.global(scope).into()) {
+        let host_ptr = crate::util::context_host_ptr_from_context_slot(context)?;
+        let host = unsafe { &*host_ptr };
+        let identity = host.window_execution_context_identity_for_access_check(context)?;
+        if identity.dispatch_scope() == OwnerDispatchScope::Top
+            && host.window_execution_context_identity_is_current(identity)
+        {
+            return Some(PendingWindowMessageEndpoint::TopWindow);
+        }
+    }
     None
 }
 
