@@ -19,19 +19,24 @@ use moli_page_types::{
     apply_child_browsing_context_navigation_to_entry_seed as apply_child_navigation_to_seed,
     replace_child_browsing_context_navigation_in_entry_seed as replace_child_navigation_in_seed,
 };
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 use url::Url;
 
 mod classic_scripts;
 mod discovery;
 mod lookup;
 mod module_scripts;
+mod nested_history;
 mod registry;
 mod request_scope;
+mod srcdoc_history;
 mod stylesheets;
 
 pub(in crate::native_bridge::context_host) use classic_scripts::ChildParserClassicScriptCandidate;
 pub(in crate::native_bridge::context_host) use classic_scripts::PendingChildExternalClassicDocumentScriptLoad;
+pub(super) use nested_history::ChildHistoryIdentity;
+pub(crate) use nested_history::{NestedHistoryStore};
 pub(crate) use request_scope::WebStorageScope;
 pub(in crate::native_bridge::context_host) use request_scope::{
     document_sandbox_policy_from_attribute, sandbox_attribute_forces_opaque_origin,
@@ -41,6 +46,9 @@ pub(in crate::native_bridge::context_host) use request_scope::{
 pub(super) struct ChildBrowsingContextEntry {
     frame_id: String,
     retiring: bool,
+    history_identity: Option<ChildHistoryIdentity>,
+    restored_history_positions: Option<nested_history::NavigableHistory>,
+    restoring_history: bool,
     current_document_loader_id: Option<String>,
     name: Option<String>,
     id: Option<String>,
@@ -53,6 +61,8 @@ pub(super) struct ChildBrowsingContextEntry {
     navigation_entry_seed: NavigationHistoryEntrySeed,
     committed_navigation_entry_seed: NavigationHistoryEntrySeed,
     cached_snapshot: Option<ChildBrowsingContextSnapshot>,
+    srcdoc_history:
+        HashMap<NavigationHistoryDocumentId, Arc<srcdoc_history::SrcdocHistoryResource>>,
     document_policy_container: ChildDocumentPolicyContainer,
     document_internal_ancestor_origins: Vec<WindowAccessOrigin>,
     ancestor_origins_referrer_policy_snapshot: ChildAncestorOriginsReferrerPolicy,
@@ -223,7 +233,8 @@ impl ChildBrowsingContextEntry {
             self.live_bootstrap,
             ChildBrowsingContextBootstrap::Srcdoc { .. }
         ) {
-            return child_document_url_for_bootstrap(&self.live_bootstrap);
+            return child_navigation_current_url_as_url(&self.committed_navigation_entry_seed)
+                .or_else(|| child_document_url_for_bootstrap(&self.live_bootstrap));
         }
         if self.pending_attribute_bootstrap_commit || self.has_pending_window_state() {
             return child_document_url_for_bootstrap(&self.live_bootstrap);
@@ -663,6 +674,7 @@ impl ChildBrowsingContextEntry {
 
     pub(super) fn commit_current_navigation_entry_seed(&mut self) {
         self.committed_navigation_entry_seed = self.navigation_entry_seed.clone();
+        self.prune_srcdoc_history();
     }
 
     pub(super) fn restore_navigation_entry_seed_from_committed(&mut self) {
@@ -788,6 +800,7 @@ impl ChildBrowsingContextEntry {
         }
         if same_document_update {
             self.committed_navigation_entry_seed = entry_seed;
+            self.prune_srcdoc_history();
             if !self.pending_attribute_bootstrap_commit {
                 self.pending_live_navigation_reflects_window_state = false;
             }

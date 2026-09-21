@@ -481,6 +481,8 @@ impl JsContextHost {
             pending_webcrypto_tasks: HashMap::new(),
             opfs_owner_state: None,
             history_queue: HistoryQueueState::default(),
+            popup_nested_histories: HashMap::new(),
+            claimed_child_histories: HashMap::new(),
             rendering_updates: super::rendering_updates::RenderingUpdateState::default(),
             scroll_observable_effect_batch:
                 super::interaction_batch::ScrollObservableEffectBatchState::default(),
@@ -551,6 +553,7 @@ impl JsContextHost {
             active_runtime_command_cause: None,
             active_inspector_dispatch: false,
             pending_top_level_navigation: None,
+            top_level_navigation_history: Default::default(),
             ordinary_page_turn_navigation_handoff_active: false,
             next_navigation_attempt_id: 1,
             active_navigation_attempts: HashMap::new(),

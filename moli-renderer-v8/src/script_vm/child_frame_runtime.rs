@@ -472,6 +472,10 @@ impl ScriptVm {
             .child_browsing_context_document_snapshot_by_frame_id(frame_id)
     }
 
+    pub(super) fn top_level_navigation_history(&self) -> crate::runtime::RendererNavigationHistory {
+        self._context_host.borrow().top_level_navigation_history()
+    }
+
     pub(crate) fn take_pending_location_navigation_with_seed(
         &mut self,
     ) -> Option<crate::native_bridge::PendingLocationNavigation> {
@@ -534,6 +538,9 @@ impl ScriptVm {
                     pending.request_headers,
                     pending.browser_navigation_kind,
                     runtime_command_cause.clone(),
+                )
+                .with_navigation_history(
+                    pending.entry_seed.map(|seed| self.top_level_navigation_history().request(seed)),
                 )
                 .with_web_mcp_invocation(pending.web_mcp_invocation)
                 .with_history_mutation(history_mutation)
@@ -715,14 +722,27 @@ impl ScriptVm {
         });
     }
 
+    #[cfg(test)]
     pub(crate) fn install_navigation_bootstrap_entry(
         &mut self,
         entry_seed: Option<crate::native_bridge::NavigationHistoryEntrySeed>,
     ) {
+        self.install_navigation_bootstrap_from_history(entry_seed, None);
+    }
+
+    pub(super) fn install_navigation_bootstrap_from_history(
+        &mut self,
+        entry_seed: Option<super::native_bridge::NavigationHistoryEntrySeed>,
+        source: Option<crate::runtime::RendererNavigationHistory>,
+    ) {
         let Some(entry_seed) = entry_seed else {
             return;
         };
-        let _ = self.with_default_context_scope(|scope, _runtime_ptr| {
+        let _ = self.with_default_context_scope(|scope, runtime_ptr| {
+            if let Some(source) = &source {
+                unsafe { &mut *runtime_ptr }
+                    .restore_top_level_navigation_history(source, &entry_seed);
+            }
             crate::context_bootstrap::install_navigation_bootstrap_entry(scope, &entry_seed);
             Ok(())
         });

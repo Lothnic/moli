@@ -147,6 +147,8 @@ pub(super) fn restore<'s>(
     if let Some(update) = update {
         publish(scope, owner, update);
     }
+    let root = binding.popup.map_or(OwnerDispatchScope::Top, OwnerDispatchScope::LightweightPopup);
+    unsafe { &mut *host_ptr }.remember_nested_histories(root);
 }
 
 pub(crate) fn install_session_history_position(
@@ -248,6 +250,8 @@ pub(super) fn commit<'s>(
     if let Some(update) = update {
         publish(scope, owner, update);
     }
+    let root = binding.popup.map_or(OwnerDispatchScope::Top, OwnerDispatchScope::LightweightPopup);
+    unsafe { &mut *host_ptr }.remember_nested_histories(root);
 }
 
 /// Capture the next top-level Document's history without committing a pending
@@ -343,12 +347,14 @@ pub(super) fn prune_views<'s>(
     let host = unsafe { &mut *host_ptr };
     let binding = binding(scope, host, owner);
     let model = host.session_histories.get_mut(binding.popup).clone();
-    let mut owners = vec![runtime_top_window_owner(scope, owner)];
-    if binding.popup.is_none() {
-        for handle in host.child_browsing_context_handles_in_document_order() {
-            if let Some(window) = host.child_browsing_context_window_wrapper(scope, handle) {
-                owners.push(window);
-            }
+    let top = runtime_top_window_owner(scope, owner);
+    let mut owners = vec![top];
+    let children = super::window_accessors::window_document_handle(scope, top, host)
+        .map(|document| host.child_browsing_context_handles_in_document_order_for_document(document))
+        .unwrap_or_default();
+    for handle in children {
+        if let Some(window) = host.child_browsing_context_window_wrapper(scope, handle) {
+            owners.push(window);
         }
     }
     let mut removed = Vec::new();
@@ -437,6 +443,8 @@ pub(super) fn project_traversal<'s>(
     if !entries.contains_key(&SessionHistoryContextId::ROOT) {
         return None;
     }
+    let source = super::navigation_window::window_task_target_for_runtime_owner(scope, host, owner)?.dispatch_scope();
+    let root = binding.popup.map_or(OwnerDispatchScope::Top, OwnerDispatchScope::LightweightPopup);
     let mut targets = Vec::new();
     for (&context, entry) in entries {
         let Some(owner) = owner_for_context(scope, host, context, binding.popup) else {
@@ -458,6 +466,10 @@ pub(super) fn project_traversal<'s>(
             continue;
         };
         if current_index != target_index {
+            let target = super::navigation_window::window_task_target_for_runtime_owner(scope, host, owner)?.dispatch_scope();
+            if !host.sandbox_allows_history_traversal(source, target, root) {
+                return Some(Vec::new());
+            }
             targets.push(super::navigation_traversal_execution::TraversalTarget {
                 owner,
                 history,
