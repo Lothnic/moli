@@ -35,12 +35,9 @@ pub(in crate::native_bridge) fn update_iframe_snapshot_navigation(
         // Attribute navigation replaces an incompletely loaded Document,
         // including inside its Window load/pageshow callbacks. readyState
         // alone cannot distinguish those callbacks from a completed load.
-        let replace_current = runtime
-            .child_current_document_is_initial_empty(handle)
-            || runtime
-                .child_browsing_context_document_handle(handle)
-                .and_then(|document| runtime.document_is_completely_loaded(document))
-                == Some(false);
+        let replace_current = Url::parse(&navigation_target).ok().is_none_or(|url| {
+            runtime.child_frame_attribute_navigation_replaces_current_entry(handle, &url)
+        });
         if runtime.queue_child_browsing_context_navigation_from_existing_seed(
             handle,
             &navigation_target,
@@ -82,7 +79,7 @@ pub(in crate::native_bridge::element) fn disconnected_iframe_can_materialize_det
     !runtime.dom_host().is_connected(handle) && iframe_uses_detached_content_cache(runtime, handle)
 }
 
-pub(in crate::native_bridge::element) fn iframe_uses_detached_content_cache(
+pub(in crate::native_bridge) fn iframe_uses_detached_content_cache(
     runtime: &JsContextHost,
     handle: DomHandle,
 ) -> bool {

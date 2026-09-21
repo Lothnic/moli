@@ -103,6 +103,7 @@ impl JsContextHost {
         self.retire_web_mcp_document(crate::native_bridge::WindowDocumentOwner::Frame(
             retired_owner,
         ));
+        self.claimed_child_histories.remove(&document_handle);
         let _ = self.retire_document_resource_loader(
             crate::native_bridge::WindowDocumentOwner::Frame(retired_owner),
         );
@@ -170,6 +171,17 @@ impl JsContextHost {
                 self.object_fallback_bootstraps.remove(&handle);
                 let existing = self.child_browsing_contexts.get(&handle).cloned();
                 let is_new = existing.is_none();
+                let history_identity = existing
+                    .as_ref()
+                    .and_then(|entry| entry.history_identity.clone())
+                    .or_else(|| self.child_history_identity(scope, handle));
+                let restored_history = if is_new {
+                    history_identity
+                        .as_ref()
+                        .and_then(|identity| self.child_history_for_restoration(handle, identity))
+                } else {
+                    None
+                };
                 let attribute_bootstrap_changed = existing
                     .as_ref()
                     .is_some_and(|entry| entry.attribute_bootstrap_changed(&attribute_bootstrap));
@@ -188,30 +200,69 @@ impl JsContextHost {
                     .unwrap_or_else(|| {
                         Self::child_browsing_context_initial_live_bootstrap(&attribute_bootstrap)
                     });
+                let srcdoc_attribute_changed = attribute_bootstrap_changed
+                    && matches!(
+                        attribute_bootstrap,
+                        ChildBrowsingContextBootstrap::Srcdoc { .. }
+                    );
+                let attribute_pushes_history = srcdoc_attribute_changed
+                    && Self::child_browsing_context_navigation_entry_url(&attribute_bootstrap)
+                        .is_some_and(|url| {
+                            !self.child_frame_attribute_navigation_replaces_current_entry(
+                                handle, &url,
+                            )
+                        });
                 let navigation_entry_seed = if attribute_bootstrap_changed {
                     let mut seed = existing
                         .as_ref()
-                        .map(|entry| entry.navigation_entry_seed())
+                        .map(|entry| {
+                            if srcdoc_attribute_changed {
+                                entry.committed_navigation_entry_seed()
+                            } else {
+                                entry.navigation_entry_seed()
+                            }
+                        })
                         .unwrap_or_else(|| {
                             Self::child_browsing_context_single_entry_seed(&live_bootstrap)
                         });
                     if let Some(url) =
                         Self::child_browsing_context_navigation_entry_url(&attribute_bootstrap)
                     {
-                        let appends_committed_srcdoc_navigation = matches!(
-                            attribute_bootstrap,
-                            ChildBrowsingContextBootstrap::Srcdoc { .. }
-                        ) && existing
-                            .as_ref()
-                            .is_some_and(|entry| !entry.has_uncommitted_navigation_seed());
-                        if appends_committed_srcdoc_navigation {
+                        if attribute_pushes_history {
                             Self::apply_child_browsing_context_navigation_to_entry_seed(
                                 &mut seed, &url,
                             );
                         } else {
+                            // Srcdoc inherits its creator's origin. URL-origin
+                            // comparison alone treats about:srcdoc as opaque
+                            // and would lose a same-origin replacement's key.
+                            let replacement_key = (srcdoc_attribute_changed
+                                && self.child_frame_attribute_initiator_has_same_origin(handle)
+                                && !self
+                                    .child_browsing_context_sandbox_policy_from_owner(handle)
+                                    .forces_opaque_origin)
+                                .then(|| {
+                                    seed.entries
+                                        .iter()
+                                        .find(|entry| entry.history_index == seed.current_index)
+                                        .map(|entry| entry.key.clone())
+                                })
+                                .flatten();
                             Self::replace_child_browsing_context_navigation_in_entry_seed(
                                 &mut seed, &url,
                             );
+                            if let Some(key) = replacement_key {
+                                if let Some(entry) = seed
+                                    .entries
+                                    .iter_mut()
+                                    .find(|entry| entry.history_index == seed.current_index)
+                                {
+                                    entry.key = key.clone();
+                                }
+                                if let Some(activation) = seed.activation.as_mut() {
+                                    activation.entry.key = key;
+                                }
+                            }
                         }
                     }
                     seed
@@ -336,10 +387,12 @@ impl JsContextHost {
                     });
                 }
                 let initial_about_blank_document_is_complete = is_new
+                    && restored_history.is_none()
                     && child_browsing_context_bootstrap_is_initial_about_blank(
                         &attribute_bootstrap,
                     );
                 let initial_navigation_uses_initial_empty_load = is_new
+                    && restored_history.is_none()
                     && child_browsing_context_bootstrap_uses_initial_empty_load(
                         &attribute_bootstrap,
                     );
@@ -474,6 +527,13 @@ impl JsContextHost {
                     ChildBrowsingContextEntry {
                         frame_id,
                         retiring: false,
+                        history_identity,
+                        restoring_history: existing
+                            .as_ref()
+                            .is_some_and(|entry| entry.restoring_history),
+                        restored_history_positions: existing
+                            .as_ref()
+                            .and_then(|entry| entry.restored_history_positions.clone()),
                         current_document_loader_id: existing.as_ref().and_then(|entry| {
                             entry.current_document_loader_id().map(ToOwned::to_owned)
                         }),
@@ -502,6 +562,10 @@ impl JsContextHost {
                         navigation_entry_seed,
                         committed_navigation_entry_seed,
                         cached_snapshot,
+                        srcdoc_history: existing
+                            .as_ref()
+                            .map(|entry| entry.srcdoc_history.clone())
+                            .unwrap_or_default(),
                         document_policy_container,
                         document_internal_ancestor_origins,
                         ancestor_origins_referrer_policy_snapshot,
@@ -609,6 +673,9 @@ impl JsContextHost {
                     && let Some(entry) = self.child_browsing_contexts.get_mut(&handle)
                 {
                     entry.set_document_permissions_policy(policy);
+                }
+                if let Some(restored) = restored_history {
+                    self.restore_child_history_after_initial_empty(handle, restored);
                 }
                 if attribute_bootstrap_changed {
                     self.cancel_child_meta_refresh_navigation(handle);
