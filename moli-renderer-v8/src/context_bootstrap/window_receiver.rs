@@ -17,11 +17,15 @@ pub(crate) fn is_window_receiver<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     receiver: v8::Local<'s, v8::Object>,
 ) -> bool {
-    if is_live_window_receiver(scope, receiver)
+    is_current_window_receiver(scope, receiver)
+        || is_live_window_receiver(scope, receiver)
         || get_private_value(scope, receiver, WINDOW_BRAND_SLOT).is_some()
-    {
-        return true;
-    }
+}
+
+fn is_current_window_receiver<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    receiver: v8::Local<'s, v8::Object>,
+) -> bool {
     let current_context = scope.get_current_context();
     receiver.strict_equals(current_context.global(scope).into())
         && context_host_ptr_from_context_slot(current_context).is_some()
@@ -37,12 +41,18 @@ pub(crate) fn mark_window_receiver(
     set_private_value(scope, receiver, WINDOW_BRAND_SLOT, branded.into());
 }
 
-pub(in crate::context_bootstrap) fn require_same_origin_window_receiver<'s>(
+pub(crate) fn require_same_origin_window_receiver<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     receiver: v8::Local<'s, v8::Object>,
     lenient_this: bool,
 ) -> bool {
-    // An extracted accessor bypasses WindowProxy's property access check.
+    // A retained function still identifies its own native global after V8 has
+    // detached that global proxy. Reading its private slots would throw before
+    // the operation can observe that its captured Window has retired.
+    if is_current_window_receiver(scope, receiver) {
+        return true;
+    }
+    // An extracted method or accessor bypasses WindowProxy's property access check.
     // Authorize native globals before reading slots, which can themselves
     // trigger V8's cross-origin fallback. Leniency only applies to objects
     // without the Window brand, never to a cross-origin Window.
@@ -59,7 +69,7 @@ pub(in crate::context_bootstrap) fn require_same_origin_window_receiver<'s>(
             return true;
         }
         if !lenient_this {
-            throw_type_error(scope, "Window getter called on incompatible receiver.");
+            throw_type_error(scope, "Window member called on incompatible receiver.");
         }
         return false;
     }
@@ -116,6 +126,9 @@ pub(in crate::context_bootstrap) fn bound_callback_data_item<'s>(
     items: &'static [&'static str],
     context: &'static str,
 ) -> Option<(&'static str, Option<v8::Local<'s, v8::Value>>)> {
+    if !require_same_origin_window_receiver(scope, args.this(), false) {
+        return None;
+    }
     let data = v8::Local::<v8::Array>::try_from(args.data()).ok();
     let index = data
         .and_then(|data| data.get_index(scope, 0))
