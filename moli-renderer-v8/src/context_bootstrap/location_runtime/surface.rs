@@ -304,6 +304,17 @@ fn window_location_slot_value<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     window: v8::Local<'s, v8::Object>,
 ) -> Option<v8::Local<'s, v8::Value>> {
+    if let Some(accessor) =
+        crate::native_bridge::CrossOriginWindowAccessor::for_receiver(scope, window)
+    {
+        return accessor.get(
+            scope,
+            crate::native_bridge::CrossOriginWindowProperty::Location,
+        );
+    }
+    if !super::super::window_receiver::is_window_receiver(scope, window) {
+        return None;
+    }
     window_runtime_slot_value(scope, window, WINDOW_LOCATION_SLOT)
 }
 
@@ -360,6 +371,9 @@ pub(in crate::context_bootstrap) fn window_navigation_setter<'s>(
     _rv: v8::ReturnValue<'_, v8::Value>,
 ) {
     let receiver = args.this();
+    if !super::super::window_receiver::require_same_origin_window_receiver(scope, receiver, false) {
+        return;
+    }
     let value = args.get(0);
     let _ = receiver.define_own_property(
         scope,

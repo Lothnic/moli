@@ -17,9 +17,11 @@ use super::{
         install_storage_runtime_state, window_local_storage_getter, window_session_storage_getter,
     },
     window_accessors::{
-        WINDOW_DOCUMENT_SLOT, window_document_getter_template, window_inner_width_getter,
-        window_length_getter, window_outer_height_getter,
+        WINDOW_DOCUMENT_SLOT, window_document_getter_template, window_frames_getter,
+        window_inner_width_getter, window_length_getter, window_outer_height_getter,
+        window_parent_getter, window_self_getter, window_top_getter, window_window_getter,
     },
+    window_receiver::require_same_origin_window_receiver,
     window_runtime::{build_legacy_storage_info_object, window_noop_callback},
     window_template::install_window_named_properties_object,
 };
@@ -308,21 +310,21 @@ struct WindowPublicSurfaceAccessorsDeclaration<'scope> {
 struct WindowLegacyAliasAccessorsDeclaration {
     #[webapi(
         accessor_property,
-        getter = legacy_unforgeable_self_getter,
+        getter = window_self_getter,
         setter = replaceable_self_setter
     )]
     self_: (),
     #[webapi(
         accessor_property,
-        getter = legacy_unforgeable_parent_getter,
+        getter = window_parent_getter,
         setter = replaceable_parent_setter
     )]
     parent: (),
-    #[webapi(accessor_property, dont_delete, getter = legacy_unforgeable_top_getter)]
+    #[webapi(accessor_property, dont_delete, getter = window_top_getter)]
     top: (),
     #[webapi(
         accessor_property,
-        getter = legacy_unforgeable_frames_getter,
+        getter = window_frames_getter,
         setter = replaceable_frames_setter
     )]
     frames: (),
@@ -535,32 +537,6 @@ struct WebDriverPrototypeMetadataDeclaration<'scope> {
     to_string_tag: (),
 }
 
-fn legacy_unforgeable_window_getter<'s>(
-    scope: &mut v8::PinScope<'s, '_>,
-    args: v8::FunctionCallbackArguments<'s>,
-    mut rv: v8::ReturnValue<'s, v8::Value>,
-) {
-    if let Some(value) = legacy_unforgeable_window_slot_value(scope, args.this(), WINDOW_SELF_SLOT)
-    {
-        rv.set(value);
-    }
-}
-
-fn legacy_unforgeable_window_slot_value<'s>(
-    scope: &mut v8::PinScope<'s, '_>,
-    receiver: v8::Local<'s, v8::Object>,
-    slot: &'static str,
-) -> Option<v8::Local<'s, v8::Value>> {
-    if !super::is_window_receiver(scope, receiver) {
-        throw_type_error(scope, "Window getter called on incompatible receiver.");
-        return None;
-    }
-    Some(
-        object_hidden_value(scope, receiver, slot)
-            .unwrap_or_else(|| scope.get_current_context().global(scope).into()),
-    )
-}
-
 fn document_fullscreen_enabled_getter<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     args: v8::FunctionCallbackArguments<'s>,
@@ -627,6 +603,9 @@ fn window_origin_replaceable_getter<'s>(
     args: v8::FunctionCallbackArguments<'s>,
     mut rv: v8::ReturnValue<'s, v8::Value>,
 ) {
+    if !require_same_origin_window_receiver(scope, args.this(), false) {
+        return;
+    }
     let value = get_private_value(scope, args.this(), WINDOW_ORIGIN_RUNTIME_SLOT)
         .or_else(|| {
             let global = scope.get_current_context().global(scope);
@@ -641,6 +620,9 @@ fn window_scroll_x_replaceable_getter<'s>(
     args: v8::FunctionCallbackArguments<'s>,
     mut rv: v8::ReturnValue<'s, v8::Value>,
 ) {
+    if !require_same_origin_window_receiver(scope, args.this(), false) {
+        return;
+    }
     let value = get_private_value(scope, args.this(), WINDOW_SCROLL_X_SLOT)
         .or_else(|| {
             let global = scope.get_current_context().global(scope);
@@ -656,6 +638,9 @@ fn window_screen_position_getter<'s>(
     args: v8::FunctionCallbackArguments<'s>,
     mut rv: v8::ReturnValue<'s, v8::Value>,
 ) {
+    if !require_same_origin_window_receiver(scope, args.this(), false) {
+        return;
+    }
     let Some(name) = callback_data_item(
         scope,
         &args,
@@ -682,7 +667,7 @@ fn define_legacy_unforgeable_window_property<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     object: v8::Local<'s, v8::Object>,
 ) -> Result<()> {
-    let getter = v8::Function::builder(legacy_unforgeable_window_getter)
+    let getter = v8::Function::builder(window_window_getter)
         .build(scope)
         .ok_or_else(|| anyhow!("failed to build window getter"))?;
     define_get_set_property(
@@ -696,24 +681,12 @@ fn define_legacy_unforgeable_window_property<'s>(
     )
 }
 
-fn legacy_unforgeable_self_getter<'s>(
-    scope: &mut v8::PinScope<'s, '_>,
-    args: v8::FunctionCallbackArguments<'s>,
-    mut rv: v8::ReturnValue<'s, v8::Value>,
-) {
-    if let Some(value) = legacy_unforgeable_window_slot_value(scope, args.this(), WINDOW_SELF_SLOT)
-    {
-        rv.set(value);
-    }
-}
-
 fn replaceable_window_alias_set<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     args: v8::FunctionCallbackArguments<'s>,
     name: &'static str,
 ) {
-    if !super::is_window_receiver(scope, args.this()) {
-        throw_type_error(scope, "Window setter called on incompatible receiver.");
+    if !require_same_origin_window_receiver(scope, args.this(), false) {
         return;
     }
     define_replaceable_window_property(scope, args.this(), name, args.get(0));
@@ -727,54 +700,12 @@ fn replaceable_self_setter<'s>(
     replaceable_window_alias_set(scope, args, "self");
 }
 
-fn legacy_unforgeable_parent_getter<'s>(
-    scope: &mut v8::PinScope<'s, '_>,
-    args: v8::FunctionCallbackArguments<'s>,
-    mut rv: v8::ReturnValue<'s, v8::Value>,
-) {
-    if super::window_accessors::window_has_discarded_child_browsing_context(scope, args.this()) {
-        rv.set_null();
-        return;
-    }
-    if let Some(value) =
-        legacy_unforgeable_window_slot_value(scope, args.this(), WINDOW_PARENT_SLOT)
-    {
-        rv.set(value);
-    }
-}
-
 fn replaceable_parent_setter<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     args: v8::FunctionCallbackArguments<'s>,
     _rv: v8::ReturnValue<'s, v8::Value>,
 ) {
     replaceable_window_alias_set(scope, args, "parent");
-}
-
-fn legacy_unforgeable_top_getter<'s>(
-    scope: &mut v8::PinScope<'s, '_>,
-    args: v8::FunctionCallbackArguments<'s>,
-    mut rv: v8::ReturnValue<'s, v8::Value>,
-) {
-    if super::window_accessors::window_has_discarded_child_browsing_context(scope, args.this()) {
-        rv.set_null();
-        return;
-    }
-    if let Some(value) = legacy_unforgeable_window_slot_value(scope, args.this(), WINDOW_TOP_SLOT) {
-        rv.set(value);
-    }
-}
-
-fn legacy_unforgeable_frames_getter<'s>(
-    scope: &mut v8::PinScope<'s, '_>,
-    args: v8::FunctionCallbackArguments<'s>,
-    mut rv: v8::ReturnValue<'s, v8::Value>,
-) {
-    if let Some(value) =
-        legacy_unforgeable_window_slot_value(scope, args.this(), WINDOW_FRAMES_SLOT)
-    {
-        rv.set(value);
-    }
 }
 
 fn replaceable_frames_setter<'s>(
@@ -887,8 +818,7 @@ fn window_surface_replaceable_setter<'s>(
     args: v8::FunctionCallbackArguments<'s>,
     _rv: v8::ReturnValue<'s, v8::Value>,
 ) {
-    if !super::is_window_receiver(scope, args.this()) {
-        throw_type_error(scope, "Window setter called on incompatible receiver.");
+    if !require_same_origin_window_receiver(scope, args.this(), false) {
         return;
     }
     let Some(name) = callback_data_item(
@@ -909,8 +839,7 @@ fn window_name_runtime_getter<'s>(
     mut rv: v8::ReturnValue<'s, v8::Value>,
 ) {
     let receiver = callback_this_object(scope, &args);
-    if !super::is_window_receiver(scope, receiver) {
-        throw_type_error(scope, "Window.name getter called on incompatible receiver.");
+    if !require_same_origin_window_receiver(scope, receiver, false) {
         return;
     }
     if child_context_handle_from_owner(scope, receiver).is_none()
@@ -932,15 +861,13 @@ fn window_name_runtime_setter<'s>(
     _rv: v8::ReturnValue<'s, v8::Value>,
 ) {
     let receiver = callback_this_object(scope, &args);
-    if !super::is_window_receiver(scope, receiver) {
-        throw_type_error(scope, "Window.name setter called on incompatible receiver.");
+    if !require_same_origin_window_receiver(scope, receiver, false) {
         return;
     }
-    let next = args
-        .get(0)
-        .to_string(scope)
-        .map(|value| value.to_rust_string_lossy(scope))
-        .unwrap_or_default();
+    let Some(next) = args.get(0).to_string(scope) else {
+        return;
+    };
+    let next = next.to_rust_string_lossy(scope);
     if let Some(host_ptr) = context_host_ptr_from_global_bridge(scope) {
         let host = unsafe { &mut *host_ptr };
         if let Some(handle) = child_context_handle_from_owner(scope, receiver) {
@@ -961,11 +888,7 @@ fn window_status_runtime_getter<'s>(
     mut rv: v8::ReturnValue<'s, v8::Value>,
 ) {
     let receiver = callback_this_object(scope, &args);
-    if !super::is_window_receiver(scope, receiver) {
-        throw_type_error(
-            scope,
-            "Window.status getter called on incompatible receiver.",
-        );
+    if !require_same_origin_window_receiver(scope, receiver, false) {
         return;
     }
     rv.set(
@@ -980,11 +903,7 @@ fn window_status_runtime_setter<'s>(
     _rv: v8::ReturnValue<'s, v8::Value>,
 ) {
     let receiver = callback_this_object(scope, &args);
-    if !super::is_window_receiver(scope, receiver) {
-        throw_type_error(
-            scope,
-            "Window.status setter called on incompatible receiver.",
-        );
+    if !require_same_origin_window_receiver(scope, receiver, false) {
         return;
     }
     let Some(next) = args.get(0).to_string(scope) else {
