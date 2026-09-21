@@ -24,7 +24,11 @@ impl RendererCreateStreamingRawPageRequest {
         local_executor: JsLocalExecutor,
         runtime_hooks: PageVmRuntimeHooks,
     ) -> Result<StreamingNavigationPageCreationResult> {
-        self.bootstrap_with_navigation_seed(page_id, local_executor, runtime_hooks, None)
+        let navigation_bootstrap_entry = self.navigation_history
+            .as_ref()
+            .map(|history| history.resolve(&self.final_url))
+            .transpose()?;
+        self.bootstrap_with_navigation_seed(page_id, local_executor, runtime_hooks, navigation_bootstrap_entry)
             .await
     }
 
@@ -40,6 +44,7 @@ impl RendererCreateStreamingRawPageRequest {
             document_replacement: _document_replacement,
             root_frame_id,
             main_document_commit,
+            navigation_history,
             final_url,
             response_status,
             response_headers,
@@ -108,6 +113,7 @@ impl RendererCreateStreamingRawPageRequest {
             main_document_commit,
             top_level_storage_key: None,
             navigation_bootstrap_entry,
+            navigation_history_source: navigation_history.as_ref().map(|history| history.source_history()),
             reserved_service_worker_client_id: reserved_service_worker_client
                 .map(RendererReservedServiceWorkerClient::release),
         };

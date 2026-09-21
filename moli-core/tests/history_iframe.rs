@@ -5,7 +5,116 @@ use serde_json::{Value, json};
 use tokio::time::Duration;
 use url::Url;
 
-async fn iframe_attribute_history(phase: &str, api: &str) -> Result<Value> {
+#[tokio::test(flavor = "multi_thread")]
+async fn iframe_srcdoc_traversal_reapplies_sandbox_flags_and_preserves_origin() -> Result<()> {
+    let fixture = include_str!("fixtures/iframe-srcdoc-sandbox-history.js");
+    let server = FixtureServer::spawn().await?;
+    for (before, after, scripts, accessible) in [
+        (
+            "allow-same-origin",
+            "allow-same-origin allow-scripts",
+            true,
+            true,
+        ),
+        (
+            "allow-same-origin allow-scripts",
+            "allow-same-origin",
+            false,
+            true,
+        ),
+        (
+            "allow-scripts",
+            "allow-same-origin allow-scripts",
+            true,
+            false,
+        ),
+        (
+            "allow-same-origin allow-scripts",
+            "allow-scripts",
+            true,
+            false,
+        ),
+    ] {
+        let browser = Browser::new(BrowserConfig::default())?;
+        let markup = format!(
+            r#"<!doctype html><body><script>{fixture}
+            window.finished = iframeSrcdocSandboxHistory({before:?}, {after:?}, new URL('/static?sandbox-source', location.href).href);
+            </script>"#
+        );
+        let mut url = Url::parse(&server.url("/compat/child-dynamic-markup-document"))?;
+        url.query_pairs_mut().append_pair("markup", &markup);
+        let result = tokio::time::timeout(Duration::from_secs(10), async {
+            let mut page = browser.fetch(url.as_str()).await?;
+            page.evaluate_runtime_expression_with_await_async(
+                "finished.then(value => JSON.stringify(value))",
+                true,
+            )
+            .await
+        })
+        .await??;
+        let result: Value =
+            serde_json::from_str(result["value"].as_str().expect("sandbox history result"))?;
+        let messages = if scripts {
+            json!([{"origin": if accessible { url.origin().ascii_serialization() } else { "null".to_owned() },
+                "text": "historical sandbox source"}])
+        } else {
+            json!([])
+        };
+        assert_eq!(
+            result,
+            json!({"messages": messages, "accessible": accessible}),
+            "{before} -> {after}"
+        );
+    }
+    server.shutdown().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn iframe_srcdoc_traversal_restores_each_historical_document_resource() -> Result<()> {
+    let fixture = include_str!("fixtures/iframe-srcdoc-traversal.js");
+    let server = FixtureServer::spawn().await?;
+    for mode in ["top", "popup"] {
+        for api in ["property", "setAttribute"] {
+            for route in ["fragment", "url"] {
+                let browser = Browser::new(BrowserConfig::default())?;
+                let markup = format!(
+                    r#"<!doctype html><body><script>{fixture}
+                    window.finished = (async () => {{
+                      const root = {mode:?} === 'popup' ? open('/static?traversal-popup') : window;
+                      if (root !== window) await new Promise(resolve => root.addEventListener('load', resolve, {{once:true}}));
+                      const openerLength = history.length;
+                      try {{
+                        const result = await iframeSrcdocTraversal(root, {api:?}, {route:?}, new URL('/static?traversal-original', location.href).href);
+                        if (root !== window && history.length !== openerLength) throw new Error('popup changed opener history');
+                        return result;
+                      }} finally {{ if (root !== window) root.close(); }}
+                    }})();</script>"#
+                );
+                let mut url = Url::parse(&server.url("/compat/child-dynamic-markup-document"))?;
+                url.query_pairs_mut().append_pair("markup", &markup);
+                let result = tokio::time::timeout(Duration::from_secs(10), async {
+                    let mut page = browser.fetch(url.as_str()).await?;
+                    page.evaluate_runtime_expression_with_await_async(
+                        "finished.then(value => JSON.stringify(value))",
+                        true,
+                    )
+                    .await
+                })
+                .await??;
+                assert_eq!(
+                    result["value"],
+                    json!(r#"["back-middle","back-old","forward-new","child-back-old"]"#),
+                    "{mode}/{api}/{route}: {result}"
+                );
+            }
+        }
+    }
+    server.shutdown().await;
+    Ok(())
+}
+
+async fn iframe_attribute_history(phase: &str, api: &str, attribute: &str) -> Result<Value> {
     let child = r#"<!doctype html><body><script>
       const phase = new URL(location.href).searchParams.get('phase');
       const go = () => parent.navigateFrame();
@@ -22,20 +131,22 @@ async fn iframe_attribute_history(phase: &str, api: &str) -> Result<Value> {
       window.finished = new Promise(resolve => window.finish = resolve);
       const phase = __PHASE__;
       const api = __API__;
+      const attribute = __ATTRIBUTE__;
       const initialLength = history.length;
       const frame = document.createElement('iframe');
       const destination = new URL('/compat/child-dynamic-markup-document?label=destination&markup=' +
         encodeURIComponent('<!doctype html><body>destination'), location.href).href;
       window.navigateFrame = () => {
         window.navigationReadiness = frame.contentDocument.readyState;
-        if (api === 'property') frame.src = destination;
-        else frame.setAttribute('src', destination);
+        const value = attribute === 'srcdoc' ? '<!doctype html><body>destination' : destination;
+        if (api === 'property') frame[attribute] = value;
+        else frame.setAttribute(attribute, value);
       };
       frame.onload = () => {
-        if (frame.contentWindow.location.href === destination) setTimeout(() => {
+        if (frame.contentWindow.location.href === (attribute === 'srcdoc' ? 'about:srcdoc' : destination)) setTimeout(() => {
           const win = frame.contentWindow;
           finish({delta: history.length - initialLength, readiness: navigationReadiness,
-            entries: win.navigation.entries().map(entry => new URL(entry.url).searchParams.get('label')),
+            entries: win.navigation.entries().map(entry => entry.url === 'about:srcdoc' ? 'srcdoc' : new URL(entry.url).searchParams.get('label')),
             index: win.navigation.currentEntry.index, activation: win.navigation.activation.navigationType});
         }, 0);
         else if (phase === 'owner-load') navigateFrame();
@@ -46,6 +157,7 @@ async fn iframe_attribute_history(phase: &str, api: &str) -> Result<Value> {
     </script>"#
         .replace("__PHASE__", &serde_json::to_string(phase)?)
         .replace("__API__", &serde_json::to_string(api)?)
+        .replace("__ATTRIBUTE__", &serde_json::to_string(attribute)?)
         .replace("__CHILD__", &child);
     let server = FixtureServer::spawn().await?;
     let browser = Browser::new(BrowserConfig::default())?;
@@ -75,7 +187,7 @@ async fn iframe_src_changes_replace_history_until_child_load_finishes() -> Resul
             "pageshow",
             "owner-load",
         ] {
-            let result = iframe_attribute_history(phase, api).await?;
+            let result = iframe_attribute_history(phase, api, "src").await?;
             let readiness = match phase {
                 "parser" => "loading",
                 "DOMContentLoaded" => "interactive",
@@ -96,7 +208,7 @@ async fn iframe_src_changes_replace_history_until_child_load_finishes() -> Resul
 async fn iframe_src_changes_push_history_after_load_even_when_document_is_reopened() -> Result<()> {
     for api in ["property", "setAttribute"] {
         for phase in ["after-load", "reopen"] {
-            let result = iframe_attribute_history(phase, api).await?;
+            let result = iframe_attribute_history(phase, api, "src").await?;
             assert_eq!(
                 result,
                 json!({"delta": 1, "readiness": if phase == "reopen" { "loading" } else { "complete" },
@@ -105,5 +217,140 @@ async fn iframe_src_changes_push_history_after_load_even_when_document_is_reopen
             );
         }
     }
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn iframe_srcdoc_history_uses_load_state_when_the_attribute_changes() -> Result<()> {
+    for api in ["property", "setAttribute"] {
+        for phase in [
+            "parser",
+            "DOMContentLoaded",
+            "load",
+            "pageshow",
+            "owner-load",
+            "after-load",
+            "reopen",
+        ] {
+            let result = iframe_attribute_history(phase, api, "srcdoc").await?;
+            let pushes = matches!(phase, "after-load" | "reopen");
+            let readiness = match phase {
+                "parser" | "reopen" => "loading",
+                "DOMContentLoaded" => "interactive",
+                _ => "complete",
+            };
+            assert_eq!(
+                result,
+                json!({
+                    "delta": u32::from(pushes), "readiness": readiness,
+                    "entries": if pushes { vec!["source", "srcdoc"] } else { vec!["srcdoc"] },
+                    "index": u32::from(pushes), "activation": if pushes { "push" } else { "replace" }
+                }),
+                "{phase}/{api}"
+            );
+        }
+    }
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn iframe_srcdoc_commits_share_history_with_their_top_or_popup_owner() -> Result<()> {
+    let fixture = include_str!("fixtures/iframe-srcdoc-history.js");
+    let server = FixtureServer::spawn().await?;
+    for mode in ["top", "popup"] {
+        for api in ["property", "setAttribute"] {
+            let browser = Browser::new(BrowserConfig::default())?;
+            let markup = format!(
+                r#"<!doctype html><body><script>{fixture}
+                window.finished = (async () => {{
+                  const root = {mode:?} === 'popup' ? open('/static?srcdoc-popup') : window;
+                  if (root !== window) await new Promise(resolve => root.addEventListener('load', resolve, {{once:true}}));
+                  const openerLength = history.length;
+                  try {{
+                    const result = await iframeSrcdocHistory(root, {api:?}, new URL('/static?srcdoc-original', location.href).href);
+                    if (root !== window && history.length !== openerLength) throw new Error('popup changed opener history');
+                    return result;
+                  }} finally {{ if (root !== window) root.close(); }}
+                }})();</script>"#
+            );
+            let mut url = Url::parse(&server.url("/compat/child-dynamic-markup-document"))?;
+            url.query_pairs_mut().append_pair("markup", &markup);
+            let result = tokio::time::timeout(Duration::from_secs(10), async {
+                let mut page = browser.fetch(url.as_str()).await?;
+                page.evaluate_runtime_expression_with_await_async(
+                    "finished.then(value => JSON.stringify(value))",
+                    true,
+                )
+                .await
+            })
+            .await??;
+            let result: Value =
+                serde_json::from_str(result["value"].as_str().expect("srcdoc history result"))?;
+            assert_eq!(
+                result["fragment"],
+                json!({"delta": 2, "childDelta": 2, "index": 2, "url": "about:srcdoc#part"}),
+                "{mode}/{api}: {result}"
+            );
+            let expected = [
+                (
+                    "same-url-src",
+                    0,
+                    0,
+                    "replace",
+                    true,
+                    Value::Null,
+                    vec!["ordinary"],
+                ),
+                (
+                    "first-srcdoc",
+                    1,
+                    1,
+                    "push",
+                    false,
+                    json!("one"),
+                    vec!["ordinary", "about:srcdoc"],
+                ),
+                (
+                    "same-url-srcdoc",
+                    1,
+                    1,
+                    "replace",
+                    true,
+                    json!("two"),
+                    vec!["ordinary", "about:srcdoc"],
+                ),
+                (
+                    "after-fragment",
+                    3,
+                    3,
+                    "push",
+                    false,
+                    json!("three"),
+                    vec![
+                        "ordinary",
+                        "about:srcdoc",
+                        "about:srcdoc#part",
+                        "about:srcdoc",
+                    ],
+                ),
+            ];
+            let steps = result["steps"].as_array().expect("srcdoc steps");
+            assert_eq!(steps.len(), expected.len(), "{mode}/{api}: {result}");
+            for (step, (label, delta, index, kind, same_key, text, entries)) in
+                steps.iter().zip(expected)
+            {
+                assert_eq!(
+                    step,
+                    &json!({
+                        "label": label, "delta": delta, "childDelta": delta, "index": index,
+                        "type": kind, "sameKey": same_key, "newId": true, "text": text, "entries": entries,
+                        "during": {"sameDocument": true, "sameEntry": true, "delta": 0}
+                    }),
+                    "{mode}/{api}: {result}"
+                );
+            }
+        }
+    }
+    server.shutdown().await;
     Ok(())
 }
