@@ -1,3 +1,6 @@
+mod dom_rect_factory_descriptors;
+mod webtransport_stream_interface_exposure;
+
 use super::post_parse::dynamic_script_execute_is_runnable_before_dom_content_loaded;
 use super::{
     PostParseDriverStep, PostParseLifecycleAdvance, PostParseLifecycleCompletionAction,
@@ -2254,6 +2257,7 @@ mod midi_owner_interfaces;
 mod mouse_snapshot;
 mod native_bridge_identity;
 mod native_exception_stack_capture;
+mod navigation_timing_inheritance;
 mod no_cors_header_fill;
 mod observable;
 mod observer_callbacks;
@@ -2284,30 +2288,27 @@ mod webidl_collections;
 mod webidl_fetch;
 mod webidl_receivers;
 mod webidl_trusted_types;
+mod history_replace_forward;
 mod websocket;
-mod webtransport_stream_interface_exposure;
+mod window_cross_origin_getters;
 mod window_event_receivers;
 mod window_execution_context;
 mod window_getter_consolidation;
 mod worklet_interfaces;
-
-
-mod history_replace_forward;
-
 mod extracted;
-mod navigation_timing_inheritance;
 mod payment_response_interfaces;
 
 mod body_mime_consolidation;
 mod response_blob_mime;
-
 mod intersection_target_order;
 mod observer_element_arguments;
 
 mod media_device_interfaces;
-
 mod dom_rect_factory_descriptors;
 mod dom_rect_structured_clone;
 mod domrect_receiver_consolidation;
-
 mod resize_observer_entries;
+mod window_promise_method_receivers;
+mod window_restricted_accessors;
+mod window_scheduling_receivers;
+mod window_sync_method_receivers;
