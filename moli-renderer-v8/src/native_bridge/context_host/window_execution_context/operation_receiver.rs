@@ -12,6 +12,22 @@ pub(crate) enum WindowOperationReceiverCaptureError {
     CrossOrigin,
 }
 
+impl WindowOperationReceiverCaptureError {
+    /// Ordinary operation functions report receiver errors in their own realm.
+    /// Cross-origin WindowProxy/Location access surfaces have a separate error path.
+    pub(crate) fn throw(self, scope: &mut v8::PinScope<'_, '_>) {
+        match self {
+            Self::IllegalInvocation => crate::util::throw_type_error(scope, "Illegal invocation"),
+            Self::CrossOrigin => crate::native_bridge::throw_dom_exception(
+                scope,
+                "SecurityError",
+                18,
+                "Blocked access to a cross-origin Window.",
+            ),
+        }
+    }
+}
+
 /// Window receiver frozen at the start of a WebIDL operation.
 ///
 /// Blink separates three phases in generated Window bindings:
@@ -34,6 +50,20 @@ impl WindowOperationReceiver {
         receiver: v8::Local<'s, v8::Object>,
         host: &JsContextHost,
     ) -> Result<Self, WindowOperationReceiverCaptureError> {
+        let current_context = scope.get_current_context();
+        if receiver.strict_equals(current_context.global(scope).into())
+            && is_window_receiver(scope, receiver)
+            && host
+                .window_execution_context_identity_for_access_check(current_context)
+                .is_none_or(|identity| !host.window_execution_context_identity_is_current(identity))
+        {
+            // The context registry owns this exact native global, including
+            // its retirement. Avoid private-slot reads on a detached proxy and
+            // never resolve its old child marker to a replacement Window.
+            return Ok(Self {
+                binding_at_capture: None,
+            });
+        }
         let marked_scope = marked_window_dispatch_scope(scope, receiver);
         if marked_scope.is_none() && !is_window_receiver(scope, receiver) {
             return Err(WindowOperationReceiverCaptureError::IllegalInvocation);

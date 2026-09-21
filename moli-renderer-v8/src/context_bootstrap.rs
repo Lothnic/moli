@@ -224,7 +224,9 @@ pub(crate) use window_accessors::{
 mod window_events;
 mod window_lazy_surface;
 mod window_receiver;
-pub(crate) use window_receiver::{is_window_receiver, mark_window_receiver};
+pub(crate) use window_receiver::{
+    is_window_receiver, mark_window_receiver, require_same_origin_window_receiver,
+};
 mod window_runtime;
 
 pub(crate) use form_data_runtime::{
@@ -753,9 +755,12 @@ fn worker_unsupported_constructor_callback(
 #[derive(Default, WebApiObject)]
 #[webapi(plain)]
 pub(in crate::context_bootstrap) struct GlobalCachesAccessorDeclaration {
+    window_receiver: bool,
+
     #[webapi(
         accessor_property,
         getter = global_caches_getter_callback,
+        data = self.window_receiver,
         enumerable
     )]
     caches: (),
@@ -766,13 +771,13 @@ pub(in crate::context_bootstrap) struct GlobalCachesAccessorDeclaration {
 struct WorkerBase64OperationsDeclaration {
     #[webapi(
         method,
-        callback = self::window_runtime::window_btoa_callback,
+        callback = self::window_runtime::global_btoa_callback,
         length = 1
     )]
     btoa: (),
     #[webapi(
         method,
-        callback = self::window_runtime::window_atob_callback,
+        callback = self::window_runtime::global_atob_callback,
         length = 1
     )]
     atob: (),
