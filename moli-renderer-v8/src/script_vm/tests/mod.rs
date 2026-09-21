@@ -2216,6 +2216,7 @@ mod child_dynamic_inline_scripts;
 mod close_watchers;
 mod credential_interface_exposure_interfaces;
 mod credential_interfaces;
+mod cross_origin_window_indexes;
 mod device_events;
 
 mod gamepad_interfaces;
