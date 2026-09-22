@@ -16,7 +16,7 @@ use crate::native_bridge::element::{
 use crate::{
     custom_elements,
     document_runtime::{DomHandle, EventTargetHandle},
-    dom::native::{DocumentReadyState, NativeDom, NodeData},
+    dom::native::{DocumentReadyState, NativeDom, Node, NodeData},
     parser::HtmlParser,
     util::{
         call_object_method, node_wrapper_from_handle, utf16_next_scalar_boundary,
@@ -87,7 +87,13 @@ fn node_document_write_or_writeln_callback<'s>(
         };
         let context = crate::native_bridge::node_relevant_context(scope, args.this())
             .unwrap_or_else(|| scope.get_current_context());
-        let global = context.global(scope);
+        let runtime = unsafe { &*runtime_ptr };
+        // Lightweight popup wrappers share a V8 realm with their opener, but
+        // their Window owns an independent policy container.
+        let global = runtime
+            .lightweight_popup_id_for_document_handle(handle)
+            .and_then(|popup_id| runtime.lightweight_popup_window(scope, popup_id))
+            .unwrap_or_else(|| context.global(scope));
         let requirements = unsafe { &*runtime_ptr }
             .trusted_types_for_script_requirements_for_global(scope, global);
         let Some(compliant) = crate::context_bootstrap::trusted_type_string_or_throw(
@@ -122,6 +128,28 @@ fn node_document_write_or_writeln_callback<'s>(
             11,
             "The object is in an invalid state.",
         );
+        return;
+    }
+    if unsafe { &*runtime_ptr }
+        .dom_host()
+        .node(handle)
+        .and_then(Node::as_document)
+        .is_some_and(|document| document.active_parser_was_aborted())
+    {
+        rv.set_undefined();
+        return;
+    }
+    if unsafe { &*runtime_ptr }
+        .lightweight_popup_id_for_document_handle(handle)
+        .is_some()
+    {
+        unsafe { &mut *runtime_ptr }.write_lightweight_popup_document_stream(
+            scope,
+            runtime_ptr,
+            handle,
+            &html,
+        );
+        rv.set_undefined();
         return;
     }
     if let Some(child_handle) =
@@ -267,6 +295,27 @@ pub(in crate::native_bridge) fn node_document_open_callback<'s>(
             return;
         }
         if unsafe { &*runtime_ptr }.has_document_unload_counter(handle) {
+            rv.set(args.this().into());
+            return;
+        }
+        if unsafe { &*runtime_ptr }
+            .dom_host()
+            .node(handle)
+            .and_then(Node::as_document)
+            .is_some_and(|document| document.active_parser_was_aborted())
+        {
+            rv.set(args.this().into());
+            return;
+        }
+        if unsafe { &*runtime_ptr }
+            .lightweight_popup_id_for_document_handle(handle)
+            .is_some()
+        {
+            unsafe { &mut *runtime_ptr }.open_lightweight_popup_document_stream(
+                scope,
+                runtime_ptr,
+                handle,
+            );
             rv.set(args.this().into());
             return;
         }
@@ -499,6 +548,14 @@ pub(in crate::native_bridge) fn node_document_close_callback<'s>(
             );
             return;
         }
+        if unsafe { &*runtime_ptr }
+            .lightweight_popup_id_for_document_handle(handle)
+            .is_some()
+        {
+            unsafe { &mut *runtime_ptr }.close_lightweight_popup_document_stream(scope, handle);
+            rv.set_undefined();
+            return;
+        }
         if let Some(child_handle) =
             unsafe { &*runtime_ptr }.child_browsing_context_host_for_document_handle(handle)
         {
@@ -570,55 +627,6 @@ fn close_windowless_document<'s>(
         }
     }
     unsafe { &mut *runtime_ptr }.release_finished_windowless_document_parser(handle, &token);
-}
-
-fn detached_html_document_body_handle(
-    runtime: &JsContextHost,
-    document_handle: DomHandle,
-) -> Option<DomHandle> {
-    let dom = runtime.dom_host().dom();
-    dom.node(document_handle)?
-        .as_document()?
-        .body_handle(dom, document_handle)
-}
-
-pub(in crate::native_bridge) fn set_detached_html_document_body_html(
-    scope: &mut v8::PinScope<'_, '_>,
-    runtime_ptr: *mut JsContextHost,
-    document_handle: DomHandle,
-    html: &str,
-) -> bool {
-    custom_elements::with_custom_element_reaction_scope(scope, runtime_ptr, |scope| {
-        let runtime = unsafe { &mut *runtime_ptr };
-        let Some(body) = detached_html_document_body_handle(runtime, document_handle) else {
-            return false;
-        };
-        if html.is_empty() && runtime.dom_host().child_handles(body).next().is_none() {
-            return true;
-        }
-        runtime.set_inner_html(scope, runtime_ptr, body, html)
-    })
-}
-
-pub(in crate::native_bridge) fn append_detached_html_document_body_html(
-    scope: &mut v8::PinScope<'_, '_>,
-    runtime_ptr: *mut JsContextHost,
-    document_handle: DomHandle,
-    html: &str,
-) -> bool {
-    custom_elements::with_custom_element_reaction_scope(scope, runtime_ptr, |scope| {
-        let runtime = unsafe { &mut *runtime_ptr };
-        let Some(body) = detached_html_document_body_handle(runtime, document_handle) else {
-            return false;
-        };
-        let scripting_enabled_for_node = |node| runtime.node_document_scripting_enabled(node);
-        let mut next = runtime
-            .dom_host()
-            .get_html(body, &scripting_enabled_for_node, false, &[])
-            .unwrap_or_default();
-        next.push_str(html);
-        runtime.set_inner_html(scope, runtime_ptr, body, &next)
-    })
 }
 
 fn normalized_editing_command<'s>(
