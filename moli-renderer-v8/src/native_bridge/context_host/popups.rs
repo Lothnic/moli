@@ -441,6 +441,8 @@ struct LightweightPopupDocumentRecord {
     owner: LightweightPopupDocumentOwner,
     local_window_id: LightweightPopupLocalWindowId,
     is_initial_empty_document: bool,
+    // document.open() preserves whether navigation initialized Navigation entries.
+    has_committed_navigation: bool,
     url: Url,
     access_origin: super::window_security_tokens::WindowAccessOrigin,
     state: LightweightPopupDocumentState,
@@ -1112,6 +1114,7 @@ impl JsContextHost {
                         owner: initial_document_owner,
                         local_window_id: initial_local_window_id,
                         is_initial_empty_document: true,
+                        has_committed_navigation: false,
                         url: initial_url.clone(),
                         access_origin: initial_origin,
                         state: initial_document_state.clone(),
@@ -1159,7 +1162,7 @@ impl JsContextHost {
                 crate::dom_parser::parse_browsing_context_document_projection_from_source(
                     scope,
                     initial_url.clone(),
-                    "<!doctype html><html><head></head><body></body></html>",
+                    "<html><head></head><body></body></html>",
                     Some("text/html"),
                     None,
                     crate::parser::HtmlParser::with_scripting_enabled(
@@ -1425,6 +1428,11 @@ impl JsContextHost {
     ) -> bool {
         self.lightweight_popup_document_record(popup_id)
             .is_some_and(|document| document.is_initial_empty_document)
+    }
+
+    pub(crate) fn lightweight_popup_has_committed_navigation(&self, popup_id: u64) -> bool {
+        self.lightweight_popup_document_record(popup_id)
+            .is_some_and(|document| document.has_committed_navigation)
     }
 
     pub(in crate::native_bridge::context_host) fn lightweight_popup_document_is_completely_loaded(
@@ -2271,6 +2279,7 @@ impl JsContextHost {
                     owner: commit.owner,
                     local_window_id: current_local_window_id,
                     is_initial_empty_document: false,
+                    has_committed_navigation: true,
                     url: commit.location_url.clone(),
                     access_origin,
                     state: commit.state,
@@ -2573,6 +2582,9 @@ impl JsContextHost {
     ) {
         clear_lightweight_popup_window_document_event_state(scope, window);
         self.clear_lightweight_popup_document_projection(popup_id);
+        // Blank navigations bypass the fetched-response path. Publish their
+        // committed Location before linking the new Document to that object.
+        sync_window_location_runtime_state(scope, window, document_url.as_str());
         let base_url = self
             .lightweight_popup_base_url(scope, popup_id)
             .unwrap_or_else(|| document_url.clone());
@@ -2587,7 +2599,7 @@ impl JsContextHost {
             crate::dom_parser::parse_browsing_context_document_projection_from_source(
                 scope,
                 document_url,
-                "<!doctype html><html><head></head><body></body></html>",
+                "<html><head></head><body></body></html>",
                 Some("text/html"),
                 None,
                 crate::parser::HtmlParser::with_scripting_enabled(
