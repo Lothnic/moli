@@ -1,9 +1,27 @@
 use base64::Engine;
 use moli_crypto::DigestAlgorithm;
 
+#[derive(PartialEq, Eq)]
 pub(crate) struct IntegrityMetadataHash<'a> {
     pub(crate) algorithm: DigestAlgorithm,
     pub(crate) digest: &'a str,
+}
+
+/// Preload consumption compares parsed metadata sets, including weaker hashes,
+/// while ignoring unknown algorithms, duplicate tokens, and unknown options.
+/// A consumer with no supported metadata can consume any matching preload,
+/// including one whose integrity check failed.
+pub(crate) fn integrity_metadata_allows_preload_consumption(
+    preload: &str,
+    consumer: Option<&str>,
+) -> bool {
+    let consumer: Vec<_> = integrity_metadata_hashes(consumer.unwrap_or_default()).collect();
+    if consumer.is_empty() {
+        return true;
+    }
+    let preload: Vec<_> = integrity_metadata_hashes(preload).collect();
+    consumer.iter().all(|hash| preload.contains(hash))
+        && preload.iter().all(|hash| consumer.contains(hash))
 }
 
 struct ParsedIntegrityMetadata {
@@ -157,6 +175,18 @@ mod tests {
                     );
                 }
             }
+            assert!(!integrity_metadata_allows_preload_consumption(
+                &valid,
+                Some(malformed)
+            ));
+            assert!(integrity_metadata_allows_preload_consumption(
+                malformed,
+                Some(malformed)
+            ));
+            assert!(!integrity_metadata_allows_preload_consumption(
+                "",
+                Some(malformed)
+            ));
         }
     }
 
@@ -165,6 +195,7 @@ mod tests {
         let body = b"noncanonical integrity";
         let digest = base64::engine::general_purpose::STANDARD
             .encode(DigestAlgorithm::Sha256.digest_bytes(body));
+        let metadata = format!("sha256-{digest}");
         for padding in ["", "=", "===", "======="] {
             let padded = format!("sha256-{}{padding}", digest.trim_end_matches('='));
             assert!(response_matches_subresource_integrity_metadata(
@@ -177,6 +208,10 @@ mod tests {
                 Some(&padded),
                 false
             ));
+            assert_eq!(
+                integrity_metadata_allows_preload_consumption(&metadata, Some(&padded)),
+                metadata == padded
+            );
         }
         // Only the top four bits of the final SHA-256 base64 symbol carry data.
         let mut noncanonical = digest.trim_end_matches('=').as_bytes().to_vec();
@@ -188,6 +223,37 @@ mod tests {
             body,
             Some(&noncanonical),
             true
+        ));
+        assert!(!integrity_metadata_allows_preload_consumption(
+            &metadata,
+            Some(&noncanonical)
+        ));
+    }
+
+    #[test]
+    fn preload_integrity_compares_sets_including_weaker_hashes() {
+        let preload = "sha384-AAAA sha256-BBBB";
+        for compatible in [
+            None,
+            Some(""),
+            Some("unknown-AAAA"),
+            Some("sha256-BBBB sha384-AAAA"),
+            Some("sha384-AAAA?ignored sha256-BBBB sha384-AAAA unknown-AAAA"),
+        ] {
+            assert!(
+                integrity_metadata_allows_preload_consumption(preload, compatible),
+                "{compatible:?}"
+            );
+        }
+        for incompatible in ["sha384-AAAA", "sha384-AAAA sha256-CCCC", "sha512-AAAA"] {
+            assert!(
+                !integrity_metadata_allows_preload_consumption(preload, Some(incompatible)),
+                "{incompatible}"
+            );
+        }
+        assert!(!integrity_metadata_allows_preload_consumption(
+            "",
+            Some("sha384-AAAA")
         ));
     }
 
