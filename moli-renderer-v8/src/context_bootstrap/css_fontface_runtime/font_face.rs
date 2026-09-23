@@ -1,3 +1,4 @@
+pub(super) use super::font_loading::start_font_face_load;
 use super::*;
 use crate::web_api_interfaces;
 use crate::{
@@ -50,8 +51,6 @@ struct FontFaceObjectDeclaration<'s> {
     error: Option<v8::Local<'s, v8::Value>>,
     #[webapi(slot = FONT_FACE_SET_OWNERS_SLOT, constructor_default = Vec::new())]
     owner_sets: Vec<v8::Local<'s, v8::Value>>,
-    #[webapi(slot = FONT_FACE_LOAD_NOTIFICATION_SENT_SLOT, constructor_default = false)]
-    load_notification_sent: bool,
 }
 
 #[derive(WebApiFunctionTemplate)]
@@ -320,7 +319,7 @@ pub(in crate::context_bootstrap) fn font_face_constructor_callback<'s>(
         size_adjust,
     ] = descriptors;
     let this = args.this();
-    let (source, status, error) = if invalid_descriptors {
+    let (source, status, error, data) = if invalid_descriptors {
         let source = match parsed.source {
             FontFaceConstructorSource::Css(source) => source,
             FontFaceConstructorSource::Binary(_) => String::new(),
@@ -330,13 +329,13 @@ pub(in crate::context_bootstrap) fn font_face_constructor_callback<'s>(
             "Invalid FontFace descriptor.",
             "SyntaxError",
         );
-        (source, "error", Some(error))
+        (source, "error", Some(error), None)
     } else {
         match parsed.source {
             FontFaceConstructorSource::Css(source)
                 if moli_css_parse::normalize_font_face_src(&source).is_some() =>
             {
-                (source, "unloaded", None)
+                (source, "unloaded", None, None)
             }
             FontFaceConstructorSource::Css(source) => {
                 let error = crate::context_bootstrap::new_dom_exception_value(
@@ -344,11 +343,12 @@ pub(in crate::context_bootstrap) fn font_face_constructor_callback<'s>(
                     "Invalid FontFace source descriptor.",
                     "SyntaxError",
                 );
-                (source, "error", Some(error))
+                (source, "error", Some(error), None)
             }
             FontFaceConstructorSource::Binary(value) => {
-                // Retain the native buffer during union conversion. Descriptor
-                // getters may mutate or detach it before the operation copies it.
+                // BufferSource conversion retains the native buffer; copying its
+                // bytes belongs to the operation, after descriptor conversion.
+                // A descriptor getter may have modified or detached the buffer.
                 let bytes = match webidl::convert::<webidl::BufferSource>(
                     scope,
                     value,
@@ -361,17 +361,14 @@ pub(in crate::context_bootstrap) fn font_face_constructor_callback<'s>(
                     }
                 };
                 if moli_layout::validate_web_font_bytes(&bytes).is_ok() {
-                    let backing = v8::ArrayBuffer::new_backing_store_from_vec(bytes).make_shared();
-                    let data = v8::ArrayBuffer::with_backing_store(scope, &backing);
-                    set_private_value(scope, this, "__moliFontFaceData", data.into());
-                    (String::new(), "loaded", None)
+                    (String::new(), "loaded", None, Some(bytes))
                 } else {
                     let error = crate::context_bootstrap::new_dom_exception_value(
                         scope,
                         "Invalid font data in ArrayBuffer.",
                         "SyntaxError",
                     );
-                    (String::new(), "error", Some(error))
+                    (String::new(), "error", Some(error), None)
                 }
             }
         }
@@ -398,6 +395,11 @@ pub(in crate::context_bootstrap) fn font_face_constructor_callback<'s>(
     )
     .initialize(scope, this)
     .expect("FontFace declaration should initialize object");
+    if let Some(data) = data {
+        super::font_loading::store_font_face_binary_data(scope, this, data);
+    } else {
+        super::font_loading::capture_font_face_sources(scope, this);
+    }
     rv.set(this.into());
 }
 
@@ -413,7 +415,9 @@ fn font_face_constructor_source_arg<'s>(
     }
     let value = args.get(index);
     let context = webidl::Context::argument("FontFace", (index + 1) as usize);
-    // The BufferSource alternative has neither AllowShared nor AllowResizable.
+    // This BufferSource union has neither AllowShared nor AllowResizable.
+    // Reject those native buffer inputs before reading the descriptors or
+    // attempting the CSSOMString alternative of the union.
     if value.is_shared_array_buffer()
         || crate::blob::buffer_source_has_shared_or_resizable_backing_store(value)
     {
@@ -450,49 +454,6 @@ pub(in crate::context_bootstrap) fn font_face_load_callback<'s>(
     }
 }
 
-pub(super) fn start_font_face_load<'s>(
-    scope: &mut v8::PinScope<'s, '_>,
-    face: v8::Local<'s, v8::Object>,
-) {
-    if font_face_status(scope, face).as_deref() != Some("unloaded") {
-        super::events::notify_font_face_set_owners_of_load(scope, face);
-        return;
-    }
-
-    set_font_face_status(scope, face, "loading");
-    let source = font_face_string_slot(scope, face, FONT_FACE_SOURCE_SLOT).unwrap_or_default();
-    let succeeds = font_face_css_source_has_url(&source);
-    if succeeds {
-        set_font_face_status(scope, face, "loaded");
-    } else {
-        set_font_face_status(scope, face, "error");
-    }
-
-    if succeeds {
-        if let Some(resolver) = font_face_loaded_resolver(scope, face) {
-            let _ = resolver.resolve(scope, face.into());
-        }
-    } else {
-        let exception = crate::context_bootstrap::new_dom_exception_value(
-            scope,
-            "No source in the FontFace src list could be loaded.",
-            "NetworkError",
-        );
-        set_font_face_slot_value(scope, face, FONT_FACE_ERROR_SLOT, exception);
-        if let Some(resolver) = font_face_loaded_resolver(scope, face) {
-            let _ = resolver.reject(scope, exception);
-        }
-    }
-    super::events::notify_font_face_set_owners_of_load(scope, face);
-}
-
-pub(super) fn font_face_load_failed<'s>(
-    scope: &mut v8::PinScope<'s, '_>,
-    face: v8::Local<'s, v8::Object>,
-) -> bool {
-    font_face_status(scope, face).as_deref() == Some("error")
-}
-
 pub(crate) fn load_font_faces_for_family<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     font_set: v8::Local<'s, v8::Object>,
@@ -517,24 +478,14 @@ pub(crate) fn load_font_faces_for_family<'s>(
     }
 }
 
-fn font_face_css_source_has_url(source: &str) -> bool {
-    moli_css_parse::normalize_font_face_src(source)
-        .and_then(|source| crate::css_style::top_level_comma_separated_component_values(&source))
-        .is_some_and(|sources| {
-            sources
-                .iter()
-                .any(|source| source.trim_start().starts_with("url("))
-        })
-}
-
-fn font_face_status<'s>(
+pub(super) fn font_face_status<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     face: v8::Local<'s, v8::Object>,
 ) -> Option<String> {
     font_face_string_slot(scope, face, FONT_FACE_STATUS_SLOT)
 }
 
-fn font_face_string_slot<'s>(
+pub(super) fn font_face_string_slot<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     face: v8::Local<'s, v8::Object>,
     slot: &str,
@@ -544,7 +495,7 @@ fn font_face_string_slot<'s>(
         .map(|value| value.to_rust_string_lossy(scope))
 }
 
-fn set_font_face_status<'s>(
+pub(super) fn set_font_face_status<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     face: v8::Local<'s, v8::Object>,
     status: &'static str,
@@ -553,7 +504,7 @@ fn set_font_face_status<'s>(
     set_font_face_slot_value(scope, face, FONT_FACE_STATUS_SLOT, status.into());
 }
 
-fn font_face_loaded_resolver<'s>(
+pub(super) fn font_face_loaded_resolver<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     face: v8::Local<'s, v8::Object>,
 ) -> Option<v8::Local<'s, v8::PromiseResolver>> {
@@ -562,10 +513,12 @@ fn font_face_loaded_resolver<'s>(
         .map(|object| unsafe { v8::Local::<v8::PromiseResolver>::cast_unchecked(object) })
 }
 
-fn ensure_font_face_loaded_promise<'s>(
+pub(super) fn ensure_font_face_loaded_promise<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     face: v8::Local<'s, v8::Object>,
 ) -> Option<v8::Local<'s, v8::Promise>> {
+    let context = face.get_creation_context(scope)?;
+    let scope = &mut v8::ContextScope::new(scope, context);
     if let Some(loaded) = font_face_slot_value(scope, face, FONT_FACE_LOADED_SLOT)
         .and_then(|value| v8::Local::<v8::Promise>::try_from(value).ok())
     {
