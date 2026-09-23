@@ -9,11 +9,16 @@ use moli_core::{
 use std::time::Instant;
 use support::FixtureServer;
 use tokio::time::Duration;
-#[path = "fetch_behaviors/preload_lifecycle.rs"]
-mod preload_lifecycle;
+
 
 #[path = "fetch_behaviors/preload_as.rs"]
 mod preload_as;
+#[path = "fetch_behaviors/preload_crossorigin.rs"]
+mod preload_crossorigin;
+#[path = "fetch_behaviors/preload_lifecycle.rs"]
+mod preload_lifecycle;
+#[path = "fetch_behaviors/preload_parser.rs"]
+mod preload_parser;
 
 #[path = "fetch_behaviors/font_binary.rs"]
 mod font_binary;
