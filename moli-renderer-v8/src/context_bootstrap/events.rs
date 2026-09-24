@@ -26,9 +26,6 @@ pub(in crate::context_bootstrap) use device::{
 pub(in crate::context_bootstrap) use modifiers::{
     event_get_modifier_state_callback, initialize_legacy_event_modifiers,
 };
-pub(in crate::context_bootstrap) use value::{
-    ValueEventKind, build_value_event_template, install_value_event_template_bindings,
-};
 
 const CLOSE_EVENT_WAS_CLEAN_SLOT: &str = "__moliCloseEventWasClean";
 const CLOSE_EVENT_CODE_SLOT: &str = "__moliCloseEventCode";
@@ -113,14 +110,18 @@ fn new_before_unload_event<'s>(
     if event.set_prototype(scope, prototype.into()) != Some(true) {
         return None;
     }
+    let wrapper = event;
+    let event = new_event_state(scope);
     base::initialize_event_object(scope, event, event_type, false, cancelable);
-    set_private_value(
+    set_event_private_value(
         scope,
         event,
         BEFORE_UNLOAD_EVENT_RETURN_VALUE_SLOT,
         v8str(scope, "").into(),
     );
-    Some(event)
+    web_api_interfaces::initialize(scope, event, "BeforeUnloadEvent").ok()?;
+    initialize_event_wrapper(scope, wrapper, event)?;
+    Some(wrapper)
 }
 
 pub(crate) fn construct_original_before_unload_event<'s>(
@@ -143,7 +144,7 @@ fn before_unload_event_return_value<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     event: v8::Local<'s, v8::Object>,
 ) -> Option<v8::Local<'s, v8::String>> {
-    get_private_value(scope, event, BEFORE_UNLOAD_EVENT_RETURN_VALUE_SLOT)
+    event_private_value(scope, event, BEFORE_UNLOAD_EVENT_RETURN_VALUE_SLOT)
         .and_then(|value| v8::Local::<v8::String>::try_from(value).ok())
 }
 
@@ -159,7 +160,7 @@ pub(crate) fn set_before_unload_event_return_value<'s>(
     event: v8::Local<'s, v8::Object>,
     value: v8::Local<'s, v8::String>,
 ) {
-    set_private_value(
+    set_event_private_value(
         scope,
         event,
         BEFORE_UNLOAD_EVENT_RETURN_VALUE_SLOT,
@@ -499,7 +500,7 @@ pub(super) fn clipboard_event_clipboard_data_getter_function<'s>(
         throw_type_error(scope, "Illegal invocation");
         return;
     }
-    let value = get_private_value(scope, args.this(), CLIPBOARD_EVENT_CLIPBOARD_DATA_SLOT)
+    let value = event_private_value(scope, args.this(), CLIPBOARD_EVENT_CLIPBOARD_DATA_SLOT)
         .unwrap_or_else(|| v8::null(scope).into());
     rv.set(value);
 }
@@ -513,7 +514,7 @@ pub(super) fn clipboard_change_event_types_getter_function<'s>(
         throw_type_error(scope, "Illegal invocation");
         return;
     }
-    let Some(value) = get_private_value(scope, args.this(), CLIPBOARD_CHANGE_EVENT_TYPES_SLOT)
+    let Some(value) = event_private_value(scope, args.this(), CLIPBOARD_CHANGE_EVENT_TYPES_SLOT)
     else {
         throw_type_error(scope, "Illegal invocation");
         return;
@@ -530,7 +531,8 @@ pub(super) fn clipboard_change_event_change_id_getter_function<'s>(
         throw_type_error(scope, "Illegal invocation");
         return;
     }
-    let Some(value) = get_private_value(scope, args.this(), CLIPBOARD_CHANGE_EVENT_CHANGE_ID_SLOT)
+    let Some(value) =
+        event_private_value(scope, args.this(), CLIPBOARD_CHANGE_EVENT_CHANGE_ID_SLOT)
     else {
         throw_type_error(scope, "Illegal invocation");
         return;
