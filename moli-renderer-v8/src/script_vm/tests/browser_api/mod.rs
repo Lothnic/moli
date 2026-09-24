@@ -38,6 +38,7 @@ mod idle_callbacks;
 mod idle_detection;
 mod images;
 mod legacy_event_init;
+mod location_entry_settings;
 mod media;
 mod media_devices;
 mod media_query_list_events;
@@ -84,6 +85,7 @@ mod window_event_target;
 mod window_legacy_objects;
 mod window_onerror;
 mod window_open_empty_url;
+mod window_open_named_targets;
 mod window_open_referrer;
 mod worker_listener_invocation;
 
