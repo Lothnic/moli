@@ -1,7 +1,10 @@
 use super::*;
 
+mod ancestor_navigation;
+mod child_beforeunload;
 mod child_history_traversal;
 mod cross_origin_navigation;
+mod frame_attribute_ancestors;
 mod history_limits;
 mod hyperlink_navigation;
 mod navigation_focus;
@@ -269,7 +272,7 @@ const mode = MODE;
 const beforeTop = location.href;
 let target = window, frame;
 if (ownerKind === 'child') {
-  frame = document.createElement('iframe'); frame.src = 'history.html'; document.body.appendChild(frame);
+  frame = document.createElement('iframe'); frame.src = 'history.html?child'; document.body.appendChild(frame);
   await new Promise(resolve => frame.addEventListener('load', resolve, {once:true})); target = frame.contentWindow;
 } else if (ownerKind === 'popup') {
   target = open('history.html'); await new Promise(resolve => target.addEventListener('load',resolve,{once:true}));
@@ -544,7 +547,7 @@ async fn precommit_rejections_preserve_promise_and_event_order() {
   const parentURL=location.href;
   let target=window, frame;
   if(ownerKind==='child') {
-    frame=document.createElement('iframe');frame.src='history.html';document.body.appendChild(frame);
+    frame=document.createElement('iframe');frame.src='history.html?child';document.body.appendChild(frame);
     await new Promise(resolve=>frame.addEventListener('load',resolve,{once:true}));target=frame.contentWindow;
   } else if(ownerKind==='popup') {
     target=open('history.html');await new Promise(resolve=>target.addEventListener('load',resolve,{once:true}));
@@ -961,7 +964,7 @@ async fn asynchronous_precommit_controllers_apply_final_redirects() {
   const parentURL = location.href;
   let target = window, frame;
   if (ownerKind === 'child') {
-    frame = document.createElement('iframe'); frame.src = 'history.html'; document.body.appendChild(frame);
+    frame = document.createElement('iframe'); frame.src = 'history.html?child'; document.body.appendChild(frame);
     await new Promise(resolve => frame.addEventListener('load', resolve, {once:true})); target = frame.contentWindow;
   } else if (ownerKind === 'popup') {
     target = open('history.html'); await new Promise(resolve => target.addEventListener('load', resolve, {once:true}));
@@ -1147,7 +1150,7 @@ async fn asynchronous_precommit_controller_rejects_retired_windows() {
   let target, frame, controller, release;
   const tick = () => new Promise(resolve => setTimeout(resolve,0));
   if (ownerKind === 'child') {
-    frame=document.createElement('iframe');frame.src='history.html';document.body.appendChild(frame);
+    frame=document.createElement('iframe');frame.src='history.html?child';document.body.appendChild(frame);
     await new Promise(resolve=>frame.addEventListener('load',resolve,{once:true}));target=frame.contentWindow;
   } else {
     target=open('history.html');await new Promise(resolve=>target.addEventListener('load',resolve,{once:true}));
