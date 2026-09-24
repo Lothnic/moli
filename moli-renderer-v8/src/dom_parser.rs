@@ -26,6 +26,7 @@ use super::{
 
 pub(crate) const DOM_PARSER_FOREIGN_NODE_SLOT: &str = "__moliDomParserForeignNode";
 const DOM_PARSER_DOCUMENT_HANDLE_SLOT: &str = "__moliDomParserDocumentHandle";
+const DOM_PARSER_DOCUMENT_SLOT: &str = "__moliDomParserDocument";
 const XML_PARSER_ERROR_NAMESPACE: &str = "http://www.mozilla.org/newlayout/xml/parsererror.xml";
 
 #[derive(Clone, Copy)]
@@ -145,6 +146,9 @@ pub(super) fn dom_parser_constructor_callback<'s>(
         DOM_PARSER_DOCUMENT_HANDLE_SLOT,
         handle_value.into(),
     );
+    if let Some(document) = crate::util::node_wrapper_from_handle(scope, document_handle) {
+        set_private_value(scope, parser, DOM_PARSER_DOCUMENT_SLOT, document.into());
+    }
     rv.set(parser.into());
 }
 
@@ -198,6 +202,14 @@ pub(super) fn dom_parser_parse_from_string_callback<'s>(
         rv.set(v8::null(scope).into());
         return;
     };
+    if let Some(source_document) = get_private_object(scope, args.this(), DOM_PARSER_DOCUMENT_SLOT)
+    {
+        crate::native_bridge::document::inherit_detached_document_origin(
+            scope,
+            obj,
+            source_document,
+        );
+    }
     rv.set(obj.into());
 }
 
@@ -420,9 +432,7 @@ fn parse_browsing_context_document_snapshot(
     content_type: Option<&str>,
     html_parser: HtmlParser,
 ) -> (DomHost, DetachedDocumentKind) {
-    if content_type.is_some_and(is_xml_document_mime)
-        || (content_type.is_none() && child_document_url_is_xml_like(&document_url))
-    {
+    if browsing_context_document_uses_xml_parser(&document_url, content_type) {
         let parser = XmlParser;
         return (
             DomHost::from_dom(parser.parse(document_url, source.to_owned())),
@@ -443,7 +453,13 @@ fn parse_browsing_context_document_snapshot(
     )
 }
 
-fn child_document_url_is_xml_like(url: &Url) -> bool {
+pub(crate) fn browsing_context_document_uses_xml_parser(
+    url: &Url,
+    content_type: Option<&str>,
+) -> bool {
+    if let Some(content_type) = content_type {
+        return is_xml_document_mime(content_type);
+    }
     let path = url.path().to_ascii_lowercase();
     path.ends_with(".xml") || path.ends_with(".xhtml") || path.ends_with(".svg")
 }
