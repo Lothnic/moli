@@ -1,5 +1,4 @@
 use super::*;
-use crate::native_bridge::window_contexts_allow_access;
 use crate::util::{get_private_value, new_null_prototype_object, set_private_value};
 use crate::web_api_interfaces;
 use moli_webapi_declare::WebApiObject;
@@ -80,12 +79,15 @@ fn location_proxy_set<'s>(
     let caller = scope
         .get_incumbent_context()
         .unwrap_or_else(|| scope.get_current_context());
-    let scope = &mut v8::ContextScope::new(scope, caller);
-    if target
-        .get_creation_context(scope)
-        .is_some_and(|owner| window_contexts_allow_access(caller, owner))
-    {
-        let Ok(reflect_set) = v8::Local::<v8::Function>::try_from(args.data()) else {
+    if super::origin::context_can_access(scope, caller, target) {
+        // Reflect.set itself performs the target access check in its own
+        // realm. Use the caller's captured intrinsic when the handler belongs
+        // to a popup that shares an unrelated opener realm. Calling it without
+        // entering a ContextScope preserves the original entry settings.
+        let global = caller.global(scope);
+        let reflect_set =
+            get_private_value(scope, global, REFLECT_SET_SLOT).unwrap_or_else(|| args.data());
+        let Ok(reflect_set) = v8::Local::<v8::Function>::try_from(reflect_set) else {
             return;
         };
         if let Some(value) = reflect_set.call(
@@ -100,8 +102,15 @@ fn location_proxy_set<'s>(
     let Ok(key) = v8::Local::<v8::Name>::try_from(args.get(1)) else {
         return;
     };
-    if let Some(value) =
-        set_cross_origin_location_property(scope, target, key, args.get(2), args.get(3))
+    let setter = {
+        let scope = &mut v8::ContextScope::new(scope, caller);
+        cross_origin_location_setter(scope, target, key)
+    };
+    // Only construct the cross-origin surface in the caller's realm. Entering
+    // that context during the call would replace the entry settings object
+    // used by URL parsing, including nested calls during value conversion.
+    if let Some(setter) = setter
+        && let Some(value) = call_location_setter(scope, setter, args.get(3), args.get(2))
     {
         rv.set_bool(value);
     }
@@ -121,22 +130,29 @@ pub(super) fn set_location_href<'s>(
     // Proxy trap would instead recover the incumbent author script's realm.
     // Perform the Location operation here while preserving its actual receiver.
     let caller = scope.get_current_context();
-    if target
-        .get_creation_context(scope)
-        .is_some_and(|owner| window_contexts_allow_access(caller, owner))
-    {
+    if super::origin::context_can_access(scope, caller, target) {
         return target.set_with_receiver(scope, key.into(), value, location);
     }
-    set_cross_origin_location_property(scope, target, key.into(), value, location.into())
+    let setter = cross_origin_location_setter(scope, target, key.into())?;
+    call_location_setter(scope, setter, location.into(), value)
 }
 
-fn set_cross_origin_location_property<'s>(
+fn call_location_setter<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    setter: v8::Local<'s, v8::Function>,
+    receiver: v8::Local<'s, v8::Value>,
+    value: v8::Local<'s, v8::Value>,
+) -> Option<bool> {
+    // Preserve Reflect.set's receiver. Interceptor callbacks only expose the
+    // holder, and must not substitute it for a forged or author Proxy receiver.
+    setter.call(scope, receiver, &[value]).map(|_| true)
+}
+
+fn cross_origin_location_setter<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     target: v8::Local<'s, v8::Object>,
     key: v8::Local<'s, v8::Name>,
-    value: v8::Local<'s, v8::Value>,
-    receiver: v8::Local<'s, v8::Value>,
-) -> Option<bool> {
+) -> Option<v8::Local<'s, v8::Function>> {
     if key != v8str(scope, "href") {
         crate::native_bridge::throw_cross_origin_location_security_error(scope);
         return None;
@@ -145,12 +161,9 @@ fn set_cross_origin_location_property<'s>(
     let descriptor = surface
         .get_own_property_descriptor(scope, key)
         .and_then(|value| v8::Local::<v8::Object>::try_from(value).ok())?;
-    let setter = descriptor
+    descriptor
         .get(scope, v8str(scope, "set").into())
-        .and_then(|value| v8::Local::<v8::Function>::try_from(value).ok())?;
-    // Preserve Reflect.set's receiver. Interceptor callbacks only expose the
-    // holder, and must not substitute it for a forged or author Proxy receiver.
-    setter.call(scope, receiver, &[value]).map(|_| true)
+        .and_then(|value| v8::Local::<v8::Function>::try_from(value).ok())
 }
 
 fn location_proxy_set_prototype<'s>(
@@ -165,10 +178,7 @@ fn location_proxy_set_prototype<'s>(
         .get_incumbent_context()
         .unwrap_or_else(|| scope.get_current_context());
     let scope = &mut v8::ContextScope::new(scope, caller);
-    if !target
-        .get_creation_context(scope)
-        .is_some_and(|owner| window_contexts_allow_access(caller, owner))
-    {
+    if !super::origin::context_can_access(scope, caller, target) {
         rv.set_bool(args.get(1).is_null());
         return;
     }
@@ -229,20 +239,15 @@ unsafe extern "C" fn location_access_check(
 ) -> bool {
     let scope = std::pin::pin!(unsafe { v8::CallbackScope::new(accessing_context) });
     let scope = &mut scope.init();
-    object
-        .get_creation_context(scope)
-        .is_some_and(|owner| window_contexts_allow_access(accessing_context, owner))
+    super::origin::context_can_access(scope, accessing_context, object)
 }
 
-pub(super) fn require_same_origin(
-    scope: &mut v8::PinScope<'_, '_>,
-    object: v8::Local<'_, v8::Object>,
+pub(super) fn require_same_origin<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    object: v8::Local<'s, v8::Object>,
+    callee: v8::Local<'s, v8::Object>,
 ) -> bool {
-    let current = scope.get_current_context();
-    if object
-        .get_creation_context(scope)
-        .is_some_and(|owner| window_contexts_allow_access(current, owner))
-    {
+    if super::origin::callback_can_access(scope, callee, object) {
         return true;
     }
     crate::native_bridge::throw_dom_exception(
@@ -261,11 +266,9 @@ pub(super) fn require_entry_origin<'s>(
     if !super::install::location_has_relevant_document(scope, object) {
         return true;
     }
-    let entry = scope.get_entered_or_microtask_context();
-    if object
-        .get_creation_context(scope)
-        .is_some_and(|owner| window_contexts_allow_access(entry, owner))
-    {
+    let entry = v8::Local::new(scope, scope.get_entered_or_microtask_context());
+    let target = location_target(scope, object);
+    if super::origin::context_can_access(scope, entry, target) {
         return true;
     }
     crate::native_bridge::throw_dom_exception(
