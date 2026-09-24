@@ -316,7 +316,14 @@ pub(crate) fn window_open_callback<'s>(
         target @ (SpecialBrowsingContextTarget::Parent | SpecialBrowsingContextTarget::Top),
     ) = special_target
     {
-        match navigate_existing_browsing_context_target(scope, host_ptr, target, url.as_deref()) {
+        let source = window_open_entry_scope(scope, unsafe { &*host_ptr });
+        match navigate_existing_browsing_context_target(
+            scope,
+            host_ptr,
+            source,
+            target,
+            url.as_deref(),
+        ) {
             Some(window) => rv.set(window.into()),
             None => rv.set(v8::null(scope).into()),
         }
@@ -326,6 +333,22 @@ pub(crate) fn window_open_callback<'s>(
         existing_named_child_window_for_window_open(scope, host_ptr, &parsed.target_name)
         && !suppress_opener
     {
+        let host = unsafe { &*host_ptr };
+        let source = window_open_entry_scope(scope, host);
+        if url
+            .as_deref()
+            .and_then(|url| Url::parse(url).ok())
+            .is_some_and(|url| {
+                host.blocks_ancestor_navigation(
+                    source,
+                    OwnerDispatchScope::Child(target_handle),
+                    &url,
+                )
+            })
+        {
+            rv.set(v8::null(scope).into());
+            return;
+        }
         let opener_child_handle = window_open_receiver_child_handle(scope, entered_window);
         let opener_endpoint = opener_child_handle
             .map(PendingWindowMessageEndpoint::ChildWindow)
@@ -348,6 +371,17 @@ pub(crate) fn window_open_callback<'s>(
         }
     }
     let host = unsafe { &mut *host_ptr };
+    if let Some(popup_id) = host.named_lightweight_popup_id(&parsed.target_name)
+        && let Some(destination) = url.as_deref().and_then(|url| Url::parse(url).ok())
+        && host.blocks_ancestor_navigation(
+            window_open_entry_scope(scope, host),
+            OwnerDispatchScope::LightweightPopup(popup_id),
+            &destination,
+        )
+    {
+        rv.set(v8::null(scope).into());
+        return;
+    }
     // Only a newly selected browsing context defaults an omitted URL to
     // about:blank. Reusing a target must preserve its current document and any
     // navigation already in flight.
@@ -468,7 +502,7 @@ pub(crate) fn window_open_callback<'s>(
         let popup_id = opened_popup.popup_id;
         if opened_popup.created_new_browsing_context {
             host.set_lightweight_popup_is_popup(popup_id, parsed_features.is_popup());
-        } else if url.is_none() {
+        } else if url.is_none() || !opened_popup.allows_navigation_activation(scope, host) {
             if suppress_opener {
                 rv.set(v8::null(scope).into());
             } else {
