@@ -48,6 +48,7 @@ mod message_port_lifecycle;
 mod misc;
 mod navigation;
 mod navigation_recursion;
+mod nested_frame_access;
 mod performance;
 mod performance_memory;
 mod platform_identity;
@@ -88,6 +89,7 @@ mod window_onerror;
 mod window_open_empty_url;
 mod window_open_named_targets;
 mod window_open_referrer;
+mod window_open_special_targets;
 mod worker_listener_invocation;
 
 
