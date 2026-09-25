@@ -1,4 +1,4 @@
-use crate::dom::native::{Element, Node};
+use crate::dom::native::{Element, NativeDom, Node};
 
 use super::super::{
     JsContextHost, PendingWindowMessageEndpoint, document, node::node_runtime_and_handle_from_args,
@@ -47,25 +47,33 @@ pub(crate) fn contenteditable_editing_host(
     runtime: &JsContextHost,
     handle: DomHandle,
 ) -> Option<DomHandle> {
-    let dom = runtime.dom_host().dom();
+    contenteditable_editing_host_in_dom(runtime.dom_host().dom(), handle)
+}
+
+pub(crate) fn contenteditable_editing_host_in_dom(
+    dom: &NativeDom,
+    handle: DomHandle,
+) -> Option<DomHandle> {
     let mut current = Some(handle);
+    let mut editing_host = None;
     while let Some(candidate) = current {
         if let Some(element) = dom.node(candidate).and_then(Node::as_element)
+            && element.namespace() == document::XHTML_NS
             && let Some(value) = element.attribute("contenteditable")
         {
             match contenteditable_state_from_attr(value) {
-                Some(true) => return Some(candidate),
-                Some(false) => return None,
+                Some(true) => editing_host = Some(candidate),
+                Some(false) => break,
                 None => {}
             }
         }
         current = dom.parent_node(candidate);
     }
-    None
+    editing_host
 }
 
 fn contenteditable_state_from_attr(value: &str) -> Option<bool> {
-    let normalized = value.trim().to_ascii_lowercase();
+    let normalized = value.to_ascii_lowercase();
     if normalized.is_empty() || normalized == "true" || normalized == "plaintext-only" {
         Some(true)
     } else if normalized == "false" {
@@ -502,6 +510,7 @@ pub(crate) fn reset_document_navigation_focus(
             viewport,
             None,
             Some(document),
+            SelectionBehaviorOnFocus::Restore,
         );
     }
     unsafe { &mut *runtime_ptr }.set_sequential_focus_starting_point(document, focus_target);
@@ -720,6 +729,33 @@ pub(crate) fn update_focus(
     update_focus_from_previous(scope, runtime_ptr, previous, next);
 }
 
+#[derive(Clone, Copy)]
+enum SelectionBehaviorOnFocus {
+    Restore,
+    Preserve,
+}
+
+pub(crate) fn focus_text_control_preserving_selection(
+    scope: &mut v8::PinScope<'_, '_>,
+    runtime_ptr: *mut JsContextHost,
+    target: DomHandle,
+) {
+    let runtime = unsafe { &*runtime_ptr };
+    if !is_focusable(runtime, target) {
+        return;
+    }
+    let previous = runtime.active_element_handle();
+    update_focus_from_previous_with_previous_focus_within(
+        scope,
+        runtime_ptr,
+        previous,
+        Some(target),
+        None,
+        None,
+        SelectionBehaviorOnFocus::Preserve,
+    );
+}
+
 pub(crate) fn reset_focus_from_previous_handle(
     scope: &mut v8::PinScope<'_, '_>,
     runtime_ptr: *mut JsContextHost,
@@ -732,6 +768,7 @@ pub(crate) fn reset_focus_from_previous_handle(
         None,
         None,
         None,
+        SelectionBehaviorOnFocus::Restore,
     );
 }
 
@@ -748,6 +785,7 @@ pub(crate) fn reset_focus_from_previous_handle_with_previous_focus_within(
         None,
         Some(previous_focus_within),
         None,
+        SelectionBehaviorOnFocus::Restore,
     );
 }
 
@@ -764,6 +802,7 @@ fn update_focus_from_previous(
         next,
         None,
         None,
+        SelectionBehaviorOnFocus::Restore,
     );
 }
 
@@ -774,6 +813,7 @@ fn update_focus_from_previous_with_previous_focus_within(
     next: Option<DomHandle>,
     previous_focus_within: Option<Vec<DomHandle>>,
     viewport_document: Option<DomHandle>,
+    selection_behavior: SelectionBehaviorOnFocus,
 ) {
     // A viewport has no element handle. Its Document must stay explicit:
     // clearing a parent's focus does not clear its inactive child's focused area.
@@ -894,13 +934,19 @@ fn update_focus_from_previous_with_previous_focus_within(
     } else {
         viewport_document.or(previous_viewport)
     });
-    if let Some(handle) = next.filter(|handle| is_text_control(runtime, *handle)) {
-        runtime.note_text_control_selection(handle);
-    }
     if viewport_document.is_none() || next.is_some() {
         runtime.mark_focus_changed(previous, next);
     }
     runtime.note_focus_style_activity(None, next);
+    if let Some(handle) = next
+        && matches!(selection_behavior, SelectionBehaviorOnFocus::Restore)
+    {
+        let _ = crate::context_bootstrap::focus_element_selection(scope, runtime_ptr, handle);
+        let runtime = unsafe { &mut *runtime_ptr };
+        if is_text_control(runtime, handle) {
+            runtime.note_text_control_selection(handle);
+        }
+    }
     let previous_value = same_document
         .then(|| wrap_handle_value(scope, runtime_ptr, previous))
         .flatten();

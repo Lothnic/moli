@@ -1747,3 +1747,75 @@ fn before_unload_event_uses_its_string_return_value_interface() {
         r#"{"constructor":["function",true,"TypeError"],"initial":[true,true,false,""],"initialized":["beforeunload",true],"values":["null","undefined","object value","TypeError","object value"],"metadata":["get returnValue",0,"set returnValue",1,true,true],"receiverErrors":["TypeError","TypeError"]}"#
     );
 }
+
+#[test]
+fn selection_range_membership_uses_native_document_relationships() {
+    let mut vm = new_storage_test_vm("https://selection-native-membership.test/");
+    assert_eq!(
+        vm.eval(include_str!(
+            "../../../../../tests/fixtures/selection-native-membership.js"
+        ))
+        .expect("selection membership should ignore author relationship properties"),
+        ""
+    );
+}
+
+#[test]
+fn selection_shadow_direction_and_composed_boundaries_follow_native_mutations() {
+    let mut vm = new_storage_test_vm("https://selection-shadow-state.test/");
+    assert_eq!(
+        vm.eval(include_str!(
+            "../../../../../tests/fixtures/selection-shadow-state.js"
+        ))
+        .expect("shadow selections should retain their composed state"),
+        ""
+    );
+}
+
+#[test]
+fn selection_tracks_associated_range_document_across_realms() {
+    let mut vm = new_storage_test_vm("https://selection-range-owner.test/");
+    assert_eq!(
+        vm.eval(include_str!(
+            "../../../../../tests/fixtures/selection-range-ownership.js"
+        ))
+        .expect("associated Range mutations should update their owning Selection"),
+        ""
+    );
+}
+
+#[test]
+fn text_control_selection_setters_restore_the_focused_document_selection() {
+    let mut vm = new_storage_test_vm("https://text-control-selection-restoration.test/");
+    assert_eq!(
+        vm.eval(include_str!(
+            "../../../../../tests/fixtures/text-control-selection-restoration.js"
+        ))
+        .expect("text control selection updates should restore only their focused document"),
+        ""
+    );
+}
+
+#[test]
+fn document_selection_tracks_visible_text_controls_independently_of_cached_offsets() {
+    let mut vm = new_storage_test_vm("https://text-control-visible-selection.test/");
+    assert_eq!(
+        vm.eval(include_str!(
+            "../../../../../tests/fixtures/text-control-visible-selection.js"
+        ))
+        .expect("visible text control selections should follow their document and focus lifecycle"),
+        ""
+    );
+}
+
+#[test]
+fn text_control_selections_follow_value_default_value_and_form_reset() {
+    let mut vm = new_storage_test_vm("https://text-control-selection-values.test/");
+    assert_eq!(
+        vm.eval(include_str!(
+            "../../../../../tests/fixtures/text-control-selection-values.js"
+        ))
+        .expect("value mutations should reconcile both cached and visible selections"),
+        ""
+    );
+}
