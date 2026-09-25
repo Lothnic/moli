@@ -145,18 +145,38 @@ fn set_receiver_related_window_alias<'s>(
         rv.set_null();
         return;
     }
+    rv.set(window_parent_or_top(
+        scope,
+        receiver,
+        slot == WINDOW_TOP_SLOT,
+    ));
+}
+
+/// Read native Window relationships without consulting replaceable JS
+/// properties, preserving the accessor's cross-origin WindowProxy projection.
+/// The caller must validate the receiver and its lifetime first.
+pub(crate) fn window_parent_or_top<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    receiver: v8::Local<'s, v8::Object>,
+    top: bool,
+) -> v8::Local<'s, v8::Value> {
+    let slot = if top {
+        WINDOW_TOP_SLOT
+    } else {
+        WINDOW_PARENT_SLOT
+    };
     let value = {
         let context = receiver
             .get_creation_context(scope)
             .unwrap_or_else(|| scope.get_current_context());
         let scope = &mut v8::ContextScope::new(scope, context);
-        window_hidden_value(scope, receiver, slot)
-            .unwrap_or_else(|| context.global(scope).into())
+        window_hidden_value(scope, receiver, slot).unwrap_or_else(|| receiver.into())
     };
-    rv.set(CrossOriginWindowAccessor::project_related_window(scope, value));
+    CrossOriginWindowAccessor::project_related_window(scope, value)
 }
 
 pub(crate) fn window_opener_getter<'s>(
+
     scope: &mut v8::PinScope<'s, '_>,
     args: v8::FunctionCallbackArguments<'s>,
     mut rv: v8::ReturnValue<'_, v8::Value>,
@@ -186,6 +206,12 @@ pub(crate) fn window_opener_getter<'s>(
             if let Some(opener) = host.child_browsing_context_opener(scope, handle) { rv.set(opener.into()); }
             return;
         }
+    }
+    if let Some(host_ptr) = window_host_ptr(scope, receiver)
+        && let Some(opener) = unsafe { &*host_ptr }.top_window_opener(scope)
+    {
+        rv.set(opener.into());
+        return;
     }
     let Some(host) = receiver
         .get_creation_context(scope)
@@ -227,8 +253,11 @@ pub(in crate::context_bootstrap) fn window_opener_setter<'s>(
                 host.clear_lightweight_popup_opener(popup_id);
             } else if let Some(handle) = window_child_context_handle(scope, receiver) {
                 host.clear_child_browsing_context_opener(handle);
-            } else if let Some(environment) = host.page_script_environment() {
-                environment.set_opener(None);
+            } else {
+                host.clear_top_window_opener();
+                if let Some(environment) = host.page_script_environment() {
+                    environment.set_opener(None);
+                }
             }
         }
         return;
