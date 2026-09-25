@@ -84,6 +84,9 @@ mod child_frame_runtime;
 mod child_runtime_script_order;
 mod document_parser_owner;
 pub(crate) use child_frame_runtime::install_child_window_proxy_access_check_handlers;
+pub(crate) use child_frame_runtime::{
+    install_synthetic_window_access_check_handlers, synthetic_window_context_can_access,
+};
 mod child_frame_snapshots;
 mod child_frames;
 mod close_watchers;
@@ -888,6 +891,7 @@ pub(crate) struct JsContextHost {
     child_document_script_schedulers: FrameDocumentScriptSchedulerStore,
     child_document_parsers: ChildDocumentParserStore,
     child_window_proxy_records: ChildWindowProxyRecords,
+    top_window_opener: Option<(PendingWindowMessageEndpoint, v8::Global<v8::Object>)>,
     child_default_context_bootstrap: Option<ChildDefaultContextBootstrapConfig>,
     #[cfg(test)]
     force_child_default_context_preflight_failure: bool,
