@@ -409,7 +409,7 @@ pub(in crate::native_bridge) fn choose_form_navigation_target(
     destination: &url::Url,
 ) -> Option<crate::native_bridge::OwnerDispatchScope> {
     use crate::native_bridge::OwnerDispatchScope;
-    let runtime = unsafe { &*runtime_ptr };
+    let runtime = unsafe { &mut *runtime_ptr };
     let source = runtime.owner_dispatch_scope_for_node(form)?;
     let special = target_name.and_then(SpecialBrowsingContextTarget::parse);
     match special {
@@ -429,15 +429,12 @@ pub(in crate::native_bridge) fn choose_form_navigation_target(
     let Some(target_name) = target_name else {
         return Some(source);
     };
-    if special.is_none() {
-        let document = runtime.dom_host().owner_document_handle(form);
-        if let Some(handle) =
-            named_iframe_target_handle_for_navigation(scope, runtime_ptr, target_name, document)
-        {
-            return Some(OwnerDispatchScope::Child(handle));
-        }
+    let named_target =
+        runtime.browsing_context_target_by_name_for_navigation(scope, target_name, source);
+    if let Some(target @ (OwnerDispatchScope::Top | OwnerDispatchScope::Child(_))) = named_target {
+        return Some(target);
     }
-    if let Some(popup_id) = runtime.named_lightweight_popup_id(target_name)
+    if let Some(OwnerDispatchScope::LightweightPopup(popup_id)) = named_target
         && runtime.blocks_ancestor_navigation(
             source,
             OwnerDispatchScope::LightweightPopup(popup_id),
@@ -462,16 +459,28 @@ pub(in crate::native_bridge) fn choose_form_navigation_target(
     let runtime = unsafe { &mut *runtime_ptr };
     let (_, root_document, source) =
         runtime.renderer_window_document_source_for_dispatch_scope(source)?;
-    let opened = runtime.open_lightweight_popup_window(
-        scope,
-        runtime_ptr,
-        (!relations.suppress_opener).then_some(creator.opener),
-        None,
-        target_name,
-        None,
-        creator.base_url,
-        creator.policy_container,
-    )?;
+    let opener = (!relations.suppress_opener).then_some(creator.opener);
+    let opened = match named_target {
+        Some(OwnerDispatchScope::LightweightPopup(id)) => runtime.reuse_lightweight_popup_window(
+            scope,
+            id,
+            opener,
+            None,
+            None,
+            creator.base_url,
+            creator.policy_container,
+        ),
+        _ => runtime.open_lightweight_popup_window(
+            scope,
+            runtime_ptr,
+            opener,
+            None,
+            target_name,
+            None,
+            creator.base_url,
+            creator.policy_container,
+        ),
+    }?;
     if !opened.allows_navigation_activation(scope, runtime) {
         return None;
     }
@@ -562,41 +571,12 @@ fn browsing_context_dispatch_scope_for_node(
         .map(crate::native_bridge::OwnerDispatchScope::Child)
 }
 
-fn special_target_window_from_window<'s>(
-    scope: &mut v8::PinScope<'s, '_>,
-    source_window: v8::Local<'s, v8::Object>,
-    target: Option<SpecialBrowsingContextTarget>,
-) -> Option<v8::Local<'s, v8::Object>> {
-    match target {
-        None | Some(SpecialBrowsingContextTarget::Current) => Some(source_window),
-        Some(SpecialBrowsingContextTarget::Top) => source_window
-            .get(scope, v8str(scope, "top").into())
-            .and_then(|value| v8::Local::<v8::Object>::try_from(value).ok()),
-        Some(SpecialBrowsingContextTarget::Parent) => source_window
-            .get(scope, v8str(scope, "parent").into())
-            .and_then(|value| v8::Local::<v8::Object>::try_from(value).ok()),
-        Some(SpecialBrowsingContextTarget::Blank) => None,
-    }
-}
-
-fn navigate_special_target_from_window<'s>(
-    scope: &mut v8::PinScope<'s, '_>,
-    source_window: v8::Local<'s, v8::Object>,
-    target: Option<SpecialBrowsingContextTarget>,
-    resolved_url: Option<&str>,
-) -> Option<v8::Local<'s, v8::Object>> {
-    let target_window = special_target_window_from_window(scope, source_window, target)?;
-    let Some(resolved_url) = resolved_url else {
-        return Some(target_window);
-    };
-    let navigated = navigate_target_window_location(scope, target_window, resolved_url);
-    if navigated { Some(target_window) } else { None }
-}
-
 pub(crate) fn navigate_existing_browsing_context_target<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     runtime_ptr: *mut JsContextHost,
     navigation_source: crate::native_bridge::OwnerDispatchScope,
+    receiver_scope: crate::native_bridge::OwnerDispatchScope,
+    receiver_window: v8::Local<'s, v8::Object>,
     target: SpecialBrowsingContextTarget,
     resolved_url: Option<&str>,
 ) -> Option<v8::Local<'s, v8::Object>> {
@@ -606,12 +586,11 @@ pub(crate) fn navigate_existing_browsing_context_target<'s>(
         "a new-context target cannot use existing-context navigation"
     );
     let runtime = unsafe { &*runtime_ptr };
-    let dispatch_scope = runtime
-        .window_execution_context_identity_for_access_check(scope.get_current_context())
-        .map(|identity| identity.dispatch_scope())
-        .filter(|owner| matches!(owner, crate::native_bridge::OwnerDispatchScope::Child(_)))
-        .unwrap_or_else(|| runtime.entered_owner_dispatch_scope(scope));
-    let mut destination_scope = dispatch_scope;
+    // Blink chooses targets from the receiver's frame tree, independently of
+    // the entry Window that supplies the URL base and navigation authority.
+    // Use native ancestry: the replaceable Window.parent property can be
+    // shadowed by author code and must not redirect this lookup.
+    let mut destination_scope = receiver_scope;
     while target != SpecialBrowsingContextTarget::Current
         && let crate::native_bridge::OwnerDispatchScope::Child(handle) = destination_scope
     {
@@ -628,16 +607,27 @@ pub(crate) fn navigate_existing_browsing_context_target<'s>(
     {
         return None;
     }
-    let source_window =
-        browsing_context_window_for_dispatch_scope(scope, runtime_ptr, dispatch_scope)?;
-    navigate_special_target_from_window(scope, source_window, Some(target), resolved_url)
+    let target_window = if destination_scope == receiver_scope {
+        receiver_window
+    } else {
+        v8::Local::<v8::Object>::try_from(crate::context_bootstrap::window_parent_or_top(
+            scope,
+            receiver_window,
+            target == SpecialBrowsingContextTarget::Top,
+        ))
+        .ok()?
+    };
+    let Some(resolved_url) = resolved_url else {
+        return Some(target_window);
+    };
+    let navigated = navigate_target_window_location(scope, target_window, resolved_url);
+    if navigated { Some(target_window) } else { None }
 }
 
 /// Resolve an existing target without reading script-visible WindowProxy properties.
 fn existing_hyperlink_target(
     scope: &mut v8::PinScope<'_, '_>,
     runtime_ptr: *mut JsContextHost,
-    source_handle: DomHandle,
     source: crate::native_bridge::OwnerDispatchScope,
     target_name: Option<&str>,
 ) -> Option<crate::native_bridge::OwnerDispatchScope> {
@@ -661,16 +651,8 @@ fn existing_hyperlink_target(
             Some(target)
         }
         Some(SpecialBrowsingContextTarget::Blank) => None,
-        None => {
-            let document = runtime.dom_host().owner_document_handle(source_handle);
-            named_iframe_target_handle_for_navigation(scope, runtime_ptr, name, document)
-                .map(OwnerDispatchScope::Child)
-                .or_else(|| {
-                    unsafe { &*runtime_ptr }
-                        .named_lightweight_popup_id(name)
-                        .map(OwnerDispatchScope::LightweightPopup)
-                })
-        }
+        None => unsafe { &mut *runtime_ptr }
+            .browsing_context_target_by_name_for_navigation(scope, name, source),
     }
 }
 
@@ -690,9 +672,7 @@ pub(in crate::native_bridge) fn navigate_element_target_browsing_context(
     let Some(source) = unsafe { &*runtime_ptr }.owner_dispatch_scope_for_node(source_handle) else {
         return false;
     };
-    let Some(target) =
-        existing_hyperlink_target(scope, runtime_ptr, source_handle, source, target_name)
-    else {
+    let Some(target) = existing_hyperlink_target(scope, runtime_ptr, source, target_name) else {
         return target_name.is_some_and(|name| {
             navigate_element_popup_target(
                 scope,
@@ -775,17 +755,13 @@ pub(in crate::native_bridge) fn named_iframe_target_handle_for_navigation(
     source_document: Option<DomHandle>,
 ) -> Option<DomHandle> {
     let runtime = unsafe { &mut *runtime_ptr };
-    if let Some(document) = source_document
-        && let Some(handle) = runtime
-            .child_browsing_context_handle_by_name_for_navigation_from_document(
-                scope,
-                target_name,
-                document,
-            )
-    {
-        return Some(handle);
+    let source = source_document
+        .and_then(|document| runtime.owner_dispatch_scope_for_node(document))
+        .unwrap_or(crate::native_bridge::OwnerDispatchScope::Top);
+    match runtime.browsing_context_target_by_name_for_navigation(scope, target_name, source) {
+        Some(crate::native_bridge::OwnerDispatchScope::Child(handle)) => Some(handle),
+        _ => None,
     }
-    runtime.child_browsing_context_handle_by_name_for_navigation(scope, target_name)
 }
 
 pub(crate) fn navigate_iframe_target<'s>(
