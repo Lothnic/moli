@@ -2261,6 +2261,7 @@ mod hyperlink_null_url_protocol;
 mod import_meta;
 mod indexed_db;
 mod inspector_unwrap;
+mod javascript_url_origin;
 mod joint_history;
 mod lazy_storage;
 mod lazy_window_surfaces;
