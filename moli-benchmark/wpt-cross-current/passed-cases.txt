@@ -211,6 +211,7 @@ content-security-policy/script-src/hash-always-converted-to-utf-8/iso-8859-9.htm
 content-security-policy/script-src/hash-always-converted-to-utf-8/utf-8-lone-surrogate.html
 content-security-policy/script-src/hash-always-converted-to-utf-8/utf-8.html
 content-security-policy/script-src/javascript-window-open-blocked.html
+content-security-policy/script-src/non-nonceable-elements.html
 content-security-policy/script-src/script-src-1_1.html
 content-security-policy/script-src/script-src-1_10_1.html
 content-security-policy/script-src/script-src-1_2.html
@@ -6444,6 +6445,8 @@ html/semantics/forms/the-input-element/radio-input-cancel.html
 html/semantics/forms/the-input-element/radio-morphed.html
 html/semantics/forms/the-input-element/radio-multiple-selected.html
 html/semantics/forms/the-input-element/radio.html
+html/semantics/forms/the-input-element/range-2.html
+html/semantics/forms/the-input-element/range.html
 html/semantics/forms/the-input-element/required_attribute.html
 html/semantics/forms/the-input-element/reset.html
 html/semantics/forms/the-input-element/search_input.html
@@ -7984,8 +7987,6 @@ pointerlock/constructor.html
 pointerlock/pointerlock-requires-gesture.html
 preload/avoid-delaying-onload-link-modulepreload-exec.html
 preload/avoid-delaying-onload-link-modulepreload.html
-preload/avoid-delaying-onload-link-preload-style.html
-preload/avoid-delaying-onload-link-preload.html
 preload/modulepreload-as.html
 preload/modulepreload-json.html
 preload/modulepreload-multiple.html
@@ -7995,8 +7996,6 @@ preload/modulepreload-style.html
 preload/modulepreload-text.html
 preload/preconnect-onerror-event.html
 preload/preconnect.html
-preload/preload-type-match.html
-preload/preload-with-type.html
 preload/reflected-as-value.html
 preload/supported-as-values.html?as=audio&expected=0
 preload/supported-as-values.html?as=fetch&expected=1
