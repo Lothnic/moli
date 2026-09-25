@@ -1,5 +1,4 @@
-use super::global_attributes::parse_tab_index_attribute;
-use crate::dom::native::Node;
+use crate::dom::native::{Element, Node};
 
 use super::super::{
     JsContextHost, PendingWindowMessageEndpoint, document, node::node_runtime_and_handle_from_args,
@@ -9,6 +8,7 @@ use super::forms::{
     text_control_value,
 };
 use super::geometry::{read_element_metrics, scroll_node_into_view_if_needed};
+use super::global_attributes::parse_tab_index_attribute;
 use super::styles::{StyleMode, style_property_value};
 use super::{
     construct_click_event, construct_focus_event, construct_interest_event,
@@ -80,10 +80,7 @@ fn html_area_has_associated_image_map(runtime: &JsContextHost, handle: DomHandle
     let Some(area) = dom.node(handle).and_then(Node::as_element) else {
         return false;
     };
-    if area.namespace() != document::XHTML_NS
-        || area.local_name() != "area"
-        || !area.has_attribute("href")
-    {
+    if !area.is_html_element("area") {
         return false;
     }
 
@@ -105,9 +102,10 @@ fn html_area_has_associated_image_map(runtime: &JsContextHost, handle: DomHandle
         ancestor = dom.parent_node(candidate);
     };
 
-    let mut stack = dom
-        .child_handles(runtime.document_handle())
-        .collect::<Vec<_>>();
+    let Some(document) = dom.owner_document_handle(handle) else {
+        return false;
+    };
+    let mut stack = dom.child_handles(document).collect::<Vec<_>>();
     while let Some(candidate) = stack.pop() {
         let Some(element) = dom.node(candidate).and_then(Node::as_element) else {
             stack.extend(dom.child_handles(candidate));
@@ -140,15 +138,80 @@ pub(super) fn is_focusable(runtime: &JsContextHost, handle: DomHandle) -> bool {
     {
         return false;
     }
-    if element.namespace() == document::XHTML_NS && element.local_name() == "area" {
-        return html_area_has_associated_image_map(runtime, handle);
+    if element.is_html_element("area") && !html_area_has_associated_image_map(runtime, handle) {
+        return false;
     }
-    matches!(
-        element.local_name(),
-        "input" | "button" | "select" | "textarea" | "a" | "iframe" | "frame" | "dialog"
-    ) || element.has_attribute("tabindex")
-        || contenteditable_editing_host(runtime, handle) == Some(handle)
+    if element.is_html_element("input")
+        && element
+            .attribute("type")
+            .is_some_and(|value| value.eq_ignore_ascii_case("hidden"))
+    {
+        return false;
+    }
+    element
+        .attribute("tabindex")
+        .and_then(parse_tab_index_attribute)
+        .is_some()
+        || has_default_focus_behavior(runtime, handle)
         || element_is_scrollable(runtime, handle)
+}
+
+fn has_default_focus_behavior(runtime: &JsContextHost, handle: DomHandle) -> bool {
+    let Some(element) = runtime.dom_host().node(handle).and_then(Node::as_element) else {
+        return false;
+    };
+    let native_focus_behavior = match (element.namespace(), element.local_name()) {
+        (document::XHTML_NS, "a" | "area") | (document::MATHML_NS, "a") => {
+            element.has_attribute("href")
+        }
+        (document::SVG_NS, "a") => {
+            element.has_attribute("href")
+                || element.has_attribute_ns("http://www.w3.org/1999/xlink", "href")
+        }
+        (
+            document::XHTML_NS,
+            "input" | "button" | "select" | "textarea" | "iframe" | "frame" | "object" | "dialog",
+        ) => true,
+        (document::XHTML_NS, "audio" | "video") => element.has_attribute("controls"),
+        (document::XHTML_NS, "summary") => {
+            runtime
+                .dom_host()
+                .parent_node(handle)
+                .is_some_and(|parent| {
+                    super::details_dialog::main_summary_child(runtime, parent) == Some(handle)
+                })
+        }
+        _ => false,
+    };
+    native_focus_behavior
+        || (element.namespace() == document::XHTML_NS
+            && contenteditable_editing_host(runtime, handle) == Some(handle))
+}
+
+fn svg_element_is_non_renderable(element: &Element) -> bool {
+    // Only directly renderable SVG elements can receive focus. Definitions,
+    // effects, animation and unknown elements cannot opt in with display or
+    // tabindex. Source <symbol> elements are not <use> shadow-tree instances.
+    element.namespace() == document::SVG_NS
+        && !matches!(
+            element.local_name(),
+            "a" | "circle"
+                | "ellipse"
+                | "foreignObject"
+                | "g"
+                | "image"
+                | "line"
+                | "path"
+                | "polygon"
+                | "polyline"
+                | "rect"
+                | "svg"
+                | "switch"
+                | "text"
+                | "textPath"
+                | "tspan"
+                | "use"
+        )
 }
 
 fn element_focus_is_suppressed(runtime: &JsContextHost, handle: DomHandle) -> bool {
@@ -168,6 +231,7 @@ fn element_focus_is_suppressed(runtime: &JsContextHost, handle: DomHandle) -> bo
             .and_then(Node::as_element)
             && (element.has_attribute("inert")
                 || element.has_attribute("hidden")
+                || svg_element_is_non_renderable(element)
                 || computed_display(runtime, candidate) == "none")
         {
             return true;
@@ -326,63 +390,70 @@ fn delegated_focus_target(runtime: &JsContextHost, handle: DomHandle) -> Option<
     first_delegates_focus_target(runtime, root)
 }
 
-/// Whether the current Document has post-parse autofocus work worth
+/// Whether the Document has post-parse autofocus work worth
 /// admitting to the rendering-update task source.
 ///
-/// Do not check candidate focusability here: the inserting script can enable
-/// or reveal an element before the rendering task runs. The selected task
-/// resolves the candidate because script can also remove it or move focus
-/// between publication and execution.
-pub(crate) fn post_parse_autofocus_is_pending(runtime: &JsContextHost) -> bool {
-    !runtime.autofocus_processed()
-        && runtime.active_element_handle().is_none()
-        && !runtime.autofocus_candidates().is_empty()
+/// Current focus and candidate focusability are resolved during rendering:
+/// script can blur, remove or enable an element before the selected task runs.
+/// A Document that still has author focus must consume its candidates and
+/// complete its one-time autofocus decision at that rendering opportunity.
+pub(crate) fn post_parse_autofocus_is_pending(
+    runtime: &JsContextHost,
+    document: DomHandle,
+) -> bool {
+    !runtime.autofocus_processed(document) && runtime.next_autofocus_candidate(document).is_some()
 }
 
 pub(crate) fn process_post_parse_autofocus(
     scope: &mut v8::PinScope<'_, '_>,
     runtime_ptr: *mut JsContextHost,
+    document: DomHandle,
 ) -> bool {
     let runtime = unsafe { &mut *runtime_ptr };
-    if runtime.autofocus_processed() || runtime.autofocus_candidates().is_empty() {
+    if runtime.autofocus_processed(document) || runtime.next_autofocus_candidate(document).is_none()
+    {
         return false;
     }
-    if runtime.active_element_handle().is_some()
+    if runtime.document_focused_area(document).is_some()
         || runtime
             .dom_host()
-            .document_target_element(runtime.document_handle())
+            .document_target_element(document)
             .is_some()
     {
-        runtime.mark_autofocus_processed();
+        runtime.mark_autofocus_processed(document);
         return false;
     }
-    // A pending script-blocking stylesheet can still change focusability.
-    // Preserve the candidates until its resource and imports have settled.
-    if !runtime.has_all_blocking_stylesheets_resolved() {
-        return false;
+    while let Some(candidate) = runtime.next_autofocus_candidate(document) {
+        let candidate_document = runtime.dom_host().owner_document_handle(candidate);
+        if !runtime.dom_host().is_connected(candidate)
+            || candidate_document.and_then(|doc| runtime.top_level_document_for_document(doc))
+                != Some(document)
+        {
+            runtime.pop_autofocus_candidate(document);
+            continue;
+        }
+        let candidate_document = candidate_document.expect("active candidate Document");
+        // The first remaining candidate keeps its place while its own Document
+        // waits for styles. An unrelated frame must not delay or overtake it.
+        if runtime.autofocus_document_has_blocking_stylesheets(candidate_document) {
+            return false;
+        }
+        runtime.pop_autofocus_candidate(document);
+        if runtime.autofocus_ancestor_has_target(candidate_document) {
+            continue;
+        }
+        let target = focusable_area_for_element(runtime, candidate)
+            .map(|target| delegated_focus_target(runtime, target).unwrap_or(target));
+        let Some(target) = target else {
+            continue;
+        };
+        // Focus listeners can replace the Document. Complete this Document's
+        // one-time autofocus state before running any author code.
+        runtime.mark_autofocus_processed(document);
+        update_focus(scope, runtime_ptr, Some(target));
+        return true;
     }
-    // Every examined candidate is consumed, including unfocusable elements.
-    // A later rendering opportunity must not retry them without reinsertion.
-    let target = runtime
-        .take_autofocus_candidates()
-        .into_iter()
-        .filter(|handle| {
-            runtime.dom_host().is_connected(*handle)
-                && runtime.dom_host().owner_document_handle(*handle)
-                    == Some(runtime.document_handle())
-        })
-        .find_map(|candidate| {
-            focusable_area_for_element(runtime, candidate)
-                .map(|target| delegated_focus_target(runtime, target).unwrap_or(target))
-        });
-    let Some(target) = target else {
-        return false;
-    };
-    // Focus listeners can replace the Document. Complete this Document's
-    // one-time autofocus state before running any author code.
-    runtime.mark_autofocus_processed();
-    update_focus(scope, runtime_ptr, Some(target));
-    true
+    false
 }
 
 pub(crate) fn reset_document_navigation_focus(
@@ -451,20 +522,28 @@ pub(super) fn run_dialog_focusing_steps(
     };
     focus_element(scope, runtime_ptr, target);
 
-    let should_mark_top_document_processed = {
+    let top_document = {
         let runtime = unsafe { &*runtime_ptr };
         let owner_document = runtime.dom_host().owner_document_handle(target);
-        owner_document == Some(runtime.document_handle())
+        let same_origin_with_top = owner_document == Some(runtime.document_handle())
+            || owner_document.is_some_and(|document| {
+                runtime
+                    .lightweight_popup_id_for_document_handle(document)
+                    .is_some()
+            })
             || owner_document
                 .and_then(|document| {
                     runtime.child_browsing_context_host_for_document_handle(document)
                 })
                 .is_some_and(|child| {
                     runtime.child_window_has_same_origin_with_its_top_level_origin(child)
-                })
+                });
+        owner_document
+            .filter(|_| same_origin_with_top)
+            .and_then(|document| runtime.top_level_document_for_document(document))
     };
-    if should_mark_top_document_processed {
-        unsafe { &mut *runtime_ptr }.mark_autofocus_processed();
+    if let Some(document) = top_document {
+        unsafe { &mut *runtime_ptr }.mark_autofocus_processed(document);
     }
 }
 
@@ -704,56 +783,175 @@ fn update_focus_from_previous_with_previous_focus_within(
     if previous == next {
         return;
     }
-    let next_value = wrap_handle_value(scope, runtime_ptr, next);
+    let next_document = next.and_then(|handle| {
+        unsafe { &*runtime_ptr }
+            .dom_host()
+            .owner_document_handle(handle)
+    });
+    let previous_document = previous.and_then(|handle| {
+        unsafe { &*runtime_ptr }
+            .dom_host()
+            .owner_document_handle(handle)
+    });
+    let window_focus_transition =
+        window_focus_transition_for_handles(scope, runtime_ptr, previous, next);
+    // Related targets do not cross Document boundaries in the focus chains.
+    let same_document = previous_document == next_document;
+    let next_value = same_document
+        .then(|| wrap_handle_value(scope, runtime_ptr, next))
+        .flatten();
     let runtime = unsafe { &mut *runtime_ptr };
+    // Blur listeners observe the viewport, before the new target gains focus.
+    // Keep inactive Documents' focused areas when moving between Documents.
+    let previous_viewport = previous_document.or(runtime.focused_viewport_document());
+    let common_ancestor = previous.zip(next).and_then(|(previous, next)| {
+        let mut candidate = Some(previous);
+        while let Some(handle) = candidate {
+            if shadow_including_contains(runtime, handle, next) {
+                return Some(handle);
+            }
+            candidate = flat_tree_parent(runtime, handle);
+        }
+        None
+    });
+    runtime.set_active_element_handle(None);
+    runtime
+        .dom_host()
+        .set_focus_transition_common_ancestor(common_ancestor);
+    runtime.set_focused_viewport_document(previous_viewport);
+    if viewport_document.is_none()
+        && (next.is_none()
+            || previous.and_then(|handle| runtime.dom_host().owner_document_handle(handle))
+                == next_document)
+    {
+        runtime.mark_focus_changed(previous, None);
+    }
+    if let Some(previous_focus_within) = previous_focus_within {
+        runtime.note_focus_style_activity_with_previous_focus_within(
+            previous,
+            None,
+            Some(previous_focus_within),
+        );
+    } else {
+        runtime.note_focus_style_activity(previous, None);
+    }
+    let mut redirected = false;
+    if let Some(previous_handle) = previous {
+        dispatch_pending_text_control_change_if_needed(scope, runtime_ptr, previous_handle);
+        if let Some(event) = construct_node_focus_event(
+            scope,
+            runtime_ptr,
+            previous_handle,
+            "blur",
+            next_value,
+            false,
+        ) {
+            let _ = dispatch_public_event(scope, runtime_ptr, previous_handle, event);
+        }
+        // A blur listener can complete a different focus transition. Finish the
+        // old target's focusout, but do not overwrite the listener's decision.
+        redirected = unsafe { &*runtime_ptr }.active_element_handle().is_some();
+        if let Some(event) = construct_node_focus_event(
+            scope,
+            runtime_ptr,
+            previous_handle,
+            "focusout",
+            if redirected { None } else { next_value },
+            true,
+        ) {
+            let _ = dispatch_public_event(scope, runtime_ptr, previous_handle, event);
+        }
+        dispatch_interest_event_if_needed(scope, runtime_ptr, previous_handle, "loseinterest");
+    }
+    if redirected || unsafe { &*runtime_ptr }.active_element_handle().is_some() {
+        clear_focus_transition_style(unsafe { &mut *runtime_ptr });
+        return;
+    }
+    let target_is_current = |runtime: &JsContextHost| {
+        next.is_none_or(|handle| {
+            runtime.dom_host().owner_document_handle(handle) == next_document
+                && next_document.is_some_and(|document| {
+                    runtime.top_level_document_for_document(document).is_some()
+                })
+                && is_focusable(runtime, handle)
+        })
+    };
+    if !target_is_current(unsafe { &*runtime_ptr }) {
+        clear_focus_transition_style(unsafe { &mut *runtime_ptr });
+        return;
+    }
+    if let Some((previous_window, _)) = window_focus_transition {
+        dispatch_window_focus_event(scope, runtime_ptr, previous_window, "blur");
+    }
+    let runtime = unsafe { &mut *runtime_ptr };
+    if runtime.active_element_handle().is_some() || !target_is_current(runtime) {
+        clear_focus_transition_style(runtime);
+        return;
+    }
     runtime.set_active_element_handle(next);
+    runtime.set_focused_viewport_document(if next.is_some() {
+        None
+    } else {
+        viewport_document.or(previous_viewport)
+    });
     if let Some(handle) = next.filter(|handle| is_text_control(runtime, *handle)) {
         runtime.note_text_control_selection(handle);
     }
     if viewport_document.is_none() || next.is_some() {
         runtime.mark_focus_changed(previous, next);
     }
-    if let Some(previous_focus_within) = previous_focus_within {
-        runtime.note_focus_style_activity_with_previous_focus_within(
-            previous,
-            next,
-            Some(previous_focus_within),
-        );
-    } else {
-        runtime.note_focus_style_activity(previous, next);
-    }
-    if let Some(previous_handle) = previous {
-        dispatch_pending_text_control_change_if_needed(scope, runtime_ptr, previous_handle);
-        if let Some(event) = construct_focus_event(scope, "blur", next_value, false) {
-            let _ = dispatch_public_event(scope, runtime_ptr, previous_handle, event);
-        }
-        if let Some(event) = construct_focus_event(scope, "focusout", next_value, true) {
-            let _ = dispatch_public_event(scope, runtime_ptr, previous_handle, event);
-        }
-        dispatch_interest_event_if_needed(scope, runtime_ptr, previous_handle, "loseinterest");
-    }
-    let window_focus_transition =
-        window_focus_transition_for_handles(scope, runtime_ptr, previous, next);
-    if let Some((previous_window, _)) = window_focus_transition {
-        dispatch_window_focus_event(scope, runtime_ptr, previous_window, "blur");
-    }
-    let previous_value = wrap_handle_value(scope, runtime_ptr, previous);
+    runtime.note_focus_style_activity(None, next);
+    let previous_value = same_document
+        .then(|| wrap_handle_value(scope, runtime_ptr, previous))
+        .flatten();
     if let Some(next_handle) = next {
-        if let Some(event) = construct_focus_event(scope, "focus", previous_value, false) {
+        if let Some(event) = construct_node_focus_event(
+            scope,
+            runtime_ptr,
+            next_handle,
+            "focus",
+            previous_value,
+            false,
+        ) {
             let _ = dispatch_public_event(scope, runtime_ptr, next_handle, event);
         }
-        if let Some(event) = construct_focus_event(scope, "focusin", previous_value, true) {
+        if unsafe { &*runtime_ptr }.active_element_handle() != Some(next_handle) {
+            return;
+        }
+        if let Some(event) = construct_node_focus_event(
+            scope,
+            runtime_ptr,
+            next_handle,
+            "focusin",
+            previous_value,
+            true,
+        ) {
             let _ = dispatch_public_event(scope, runtime_ptr, next_handle, event);
+        }
+        if unsafe { &*runtime_ptr }.active_element_handle() != Some(next_handle) {
+            return;
         }
         if let Some(target) =
             dispatch_interest_event_if_needed(scope, runtime_ptr, next_handle, "interest")
         {
             show_interest_popover_if_needed(scope, runtime_ptr, next_handle, target);
         }
+        if unsafe { &*runtime_ptr }.active_element_handle() != Some(next_handle) {
+            return;
+        }
         schedule_focus_blur_if_needed(scope, runtime_ptr, next_handle);
     }
     if let Some((_, next_window)) = window_focus_transition {
         dispatch_window_focus_event(scope, runtime_ptr, next_window, "focus");
+    }
+}
+
+fn clear_focus_transition_style(runtime: &mut JsContextHost) {
+    if let Some(ancestor) = runtime
+        .dom_host()
+        .set_focus_transition_common_ancestor(None)
+    {
+        runtime.note_focus_style_activity(Some(ancestor), runtime.active_element_handle());
     }
 }
 
@@ -767,6 +965,11 @@ fn window_focus_transition_for_handles(
     let execution_window = current_execution_window_endpoint(scope);
     let previous_window = previous
         .and_then(|handle| focused_window_endpoint(runtime, handle))
+        .or_else(|| {
+            runtime
+                .focused_viewport_document()
+                .and_then(|document| runtime.window_endpoint_for_document(document))
+        })
         .unwrap_or(execution_window);
     // Clearing an element's focus does not blur its Window. A later focus in
     // another Document supplies the concrete new focused-frame endpoint.
@@ -810,14 +1013,65 @@ fn focused_window_endpoint(
     (document == runtime.document_handle()).then_some(PendingWindowMessageEndpoint::TopWindow)
 }
 
+fn construct_node_focus_event<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    runtime_ptr: *mut JsContextHost,
+    target: DomHandle,
+    event_type: &str,
+    related_target: Option<v8::Local<'s, v8::Value>>,
+    bubbles: bool,
+) -> Option<v8::Local<'s, v8::Object>> {
+    let endpoint = focused_window_endpoint(unsafe { &*runtime_ptr }, target)?;
+    construct_window_focus_event(
+        scope,
+        runtime_ptr,
+        endpoint,
+        event_type,
+        related_target,
+        bubbles,
+    )
+}
+
+fn construct_window_focus_event<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    runtime_ptr: *mut JsContextHost,
+    endpoint: PendingWindowMessageEndpoint,
+    event_type: &str,
+    related_target: Option<v8::Local<'s, v8::Value>>,
+    bubbles: bool,
+) -> Option<v8::Local<'s, v8::Object>> {
+    let runtime = unsafe { &mut *runtime_ptr };
+    match endpoint {
+        PendingWindowMessageEndpoint::ChildWindow(child) => {
+            runtime
+                .ensure_prebootstrapped_child_default_context(scope, child)
+                .ok()?;
+        }
+        PendingWindowMessageEndpoint::LightweightPopup(popup) => {
+            runtime
+                .ensure_lightweight_popup_execution_context(scope, popup)
+                .then_some(())?;
+        }
+        PendingWindowMessageEndpoint::TopWindow => {}
+    }
+    let dispatch_scope = endpoint.dispatch_scope();
+    let owner = runtime.current_window_execution_context_owner(dispatch_scope)?;
+    let (_, context) = runtime.window_execution_context(scope, owner, dispatch_scope)?;
+    let scope = &mut v8::ContextScope::new(scope, context);
+    construct_focus_event(scope, event_type, related_target, bubbles)
+}
+
 fn dispatch_window_focus_event(
     scope: &mut v8::PinScope<'_, '_>,
     runtime_ptr: *mut JsContextHost,
     endpoint: PendingWindowMessageEndpoint,
     event_type: &str,
 ) {
-    let event = construct_focus_event(scope, event_type, None, false)
-        .expect("Window focus transition must materialize its FocusEvent");
+    let Some(event) =
+        construct_window_focus_event(scope, runtime_ptr, endpoint, event_type, None, false)
+    else {
+        return;
+    };
     let runtime = unsafe { &mut *runtime_ptr };
     match endpoint {
         PendingWindowMessageEndpoint::TopWindow => {
@@ -1319,16 +1573,10 @@ fn is_interactive_sequential_focusable_descendant(
     runtime: &JsContextHost,
     handle: DomHandle,
 ) -> bool {
-    let Some(element) = runtime.dom_host().node(handle).and_then(Node::as_element) else {
-        return false;
-    };
-    if is_disabled_form_control(runtime, handle) {
+    if !is_focusable(runtime, handle) {
         return false;
     }
-    let is_interactive_element = matches!(
-        element.local_name(),
-        "a" | "button" | "input" | "select" | "textarea"
-    );
+    let is_interactive_element = has_default_focus_behavior(runtime, handle);
     let has_non_negative_tab_index = element_attribute(runtime, handle, "tabindex")
         .and_then(|value| parse_tab_index_attribute(&value))
         .is_some_and(|value| value >= 0);
@@ -1346,13 +1594,12 @@ fn default_sequential_tab_index(runtime: &JsContextHost, handle: DomHandle) -> i
     let Some(element) = runtime.dom_host().node(handle).and_then(Node::as_element) else {
         return -1;
     };
-    if element.namespace() != "http://www.w3.org/1999/xhtml" {
-        return -1;
-    }
-    match element.local_name() {
-        "a" | "button" | "input" | "select" | "textarea" => 0,
-        _ if element_is_scrollable(runtime, handle) => 0,
-        _ => -1,
+    if (has_default_focus_behavior(runtime, handle) && !element.is_html_element("dialog"))
+        || element_is_scrollable(runtime, handle)
+    {
+        0
+    } else {
+        -1
     }
 }
 
