@@ -2294,6 +2294,7 @@ mod readable_algorithm_arrays;
 mod remote_playback_interface;
 mod rendering_observers;
 mod rendering_update;
+mod resize_observer_entries;
 mod retained_child_window;
 mod script_terminal_completion;
 mod speech_events;
