@@ -5,9 +5,12 @@ use url::Url;
 use super::{NativeDom, NativeNodeId};
 
 mod base_url;
+mod referrer_policy;
 
 pub use base_url::DocumentBaseUrlPolicyCheck;
 use base_url::DocumentBaseUrlState;
+pub use referrer_policy::DocumentMetaReferrerPolicySource;
+use referrer_policy::MetaReferrerPolicy;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DocumentTitleSetterTarget {
@@ -67,6 +70,9 @@ pub struct Document {
     default_language: Option<Box<str>>,
     source_last_modified_ms: Option<f64>,
     base_url_state: DocumentBaseUrlState,
+    // Meta delivery updates policy in time order; removing the element does
+    // not undo the policy it delivered to this Document.
+    meta_referrer_policy: MetaReferrerPolicy,
 }
 
 impl Document {
@@ -95,6 +101,7 @@ impl Document {
             css_target: None,
             default_language: None,
             source_last_modified_ms: None,
+            meta_referrer_policy: MetaReferrerPolicy::default(),
         }
     }
 
@@ -115,6 +122,7 @@ impl Document {
             css_target: None,
             default_language: None,
             source_last_modified_ms: None,
+            meta_referrer_policy: MetaReferrerPolicy::default(),
         }
     }
 
@@ -161,8 +169,17 @@ impl Document {
     pub(super) fn clone_for_new_document(&self) -> Self {
         Self {
             active_parser_was_aborted: false,
+            meta_referrer_policy: MetaReferrerPolicy::default(),
             ..self.clone()
         }
+    }
+
+    pub fn meta_referrer_policy(&self) -> Option<&str> {
+        self.meta_referrer_policy.get()
+    }
+
+    pub fn meta_referrer_policy_source(&self) -> DocumentMetaReferrerPolicySource {
+        self.meta_referrer_policy.source()
     }
 
     pub fn visibility_hidden(&self) -> bool {

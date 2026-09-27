@@ -34,6 +34,25 @@ mod module_document_referrer;
 #[path = "modulepreload_document_referrer.rs"]
 mod modulepreload_document_referrer;
 
+#[path = "classic_document_referrer.rs"]
+mod classic_document_referrer;
+
+#[path = "meta_referrer_policy.rs"]
+mod meta_referrer_policy;
+
+#[path = "referrer_policy_inheritance.rs"]
+mod referrer_policy_inheritance;
+
+#[path = "fetch_client_referrer.rs"]
+mod fetch_client_referrer;
+
+#[path = "css_import_referrer.rs"]
+mod css_import_referrer;
+#[path = "local_worker_referrer.rs"]
+mod local_worker_referrer;
+#[path = "service_worker_referrer.rs"]
+mod service_worker_referrer;
+
 struct IntegrityServers {
     origin: String,
     cross_origin: String,
@@ -179,6 +198,12 @@ fn fixture_response(
     let (path, query) = request.path.split_once('?').unwrap_or((&request.path, ""));
     let javascript = "Content-Type: text/javascript\r\n";
     match path {
+        "/meta-policy.html" | "/meta-policy.js" | "/meta-policy-fetch" => {
+            meta_referrer_policy::fixture_response(path, request.referer.as_deref())
+        }
+        "/classic-policy.html" | "/classic-policy.js" => {
+            classic_document_referrer::fixture_response(path, query, origin, cross)
+        }
         "/preload-policy.html" | "/preload-policy.js" => {
             modulepreload_document_referrer::fixture_response(path, query, origin, cross)
         }
@@ -186,6 +211,9 @@ fn fixture_response(
             module_document_referrer::fixture_response(path, query, origin, cross)
         }
         "/import-referrer.js" => dynamic_import_referrer::fixture_response(query),
+        "/local-referrer-worker.js" | "/local-referrer-page.html" => {
+            local_worker_referrer::fixture_response(path, query, request.referer.as_deref())
+        }
         "/import-credentials.js" => (
             "200 OK",
             format!("{javascript}Cache-Control: no-store\r\n"),
@@ -332,6 +360,22 @@ fn fixture_response(
             "200 OK",
             format!("{javascript}Cache-Control: max-age=60\r\n"),
             SCRIPT.to_owned(),
+        ),
+        "/cached-client-referrer" => (
+            "200 OK",
+            "Content-Type: application/json\r\nCache-Control: max-age=60\r\nVary: Referer\r\n"
+                .to_owned(),
+            serde_json::to_string(&request.referer).unwrap(),
+        ),
+        "/native-referrer-worker.js" => (
+            "200 OK",
+            format!("{javascript}Cache-Control: no-store\r\n"),
+            include_str!("native_referrer_worker.js").to_owned(),
+        ),
+        "/css-import-referrer-worker.js" => (
+            "200 OK",
+            format!("{javascript}Cache-Control: no-store\r\n"),
+            include_str!("css_import_referrer_worker.js").to_owned(),
         ),
         "/cors.js" | "/cors-null.js" | "/cors-origin.js" => (
             "200 OK",

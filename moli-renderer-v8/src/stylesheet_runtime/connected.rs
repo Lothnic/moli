@@ -9,7 +9,7 @@ use crate::module_runtime::{
 use crate::planning::{ScriptFetchMetadata, module_script_credentials_mode};
 use crate::service_worker_runtime::ServiceWorkerRequestDestination;
 use crate::stylesheet_blocking::{
-    DocumentOwnedBlockingStylesheetDiscoveryInput, StylesheetFetchOptions,
+    DocumentOwnedBlockingStylesheetDiscoveryInput, StylesheetFetchOptions, StylesheetFetcher,
     connected_preload_like_link_url, document_owned_blocking_stylesheet_candidate_for_node,
     link_rel_includes_token, preload_like_link_loads_stylesheet, stylesheet_link_disposition,
     stylesheet_preload_link_request,
@@ -24,6 +24,7 @@ struct ConnectedLinkReadinessFetchResponse {
     response_filter: Option<AsyncSubresourceFetchResponseFilter>,
     integrity_matches: bool,
     from_service_worker: bool,
+    service_worker_response_url: Option<Url>,
 }
 
 impl ConnectedLinkReadinessFetchResponse {
@@ -33,6 +34,7 @@ impl ConnectedLinkReadinessFetchResponse {
         load_event_successful: bool,
         integrity: Option<&str>,
         from_service_worker: bool,
+        service_worker_response_url: Option<Url>,
     ) -> Self {
         // Hash the original body, including binary responses. A matching digest
         // must not make an opaque response eligible, including SW responses to
@@ -55,6 +57,7 @@ impl ConnectedLinkReadinessFetchResponse {
             response_filter,
             integrity_matches,
             from_service_worker,
+            service_worker_response_url,
         }
     }
 
@@ -65,6 +68,7 @@ impl ConnectedLinkReadinessFetchResponse {
             return Err("preload response failed its integrity check".to_owned());
         }
         Ok(crate::network::preloads::DocumentPreloadResponse {
+            service_worker_response_url: self.service_worker_response_url.clone(),
             response: self.response.clone(),
             from_service_worker: self.from_service_worker,
             response_filter: self.response_filter.clone(),
@@ -117,6 +121,7 @@ pub(crate) struct PreparedConnectedStyleLoad {
     csp_blocked: bool,
     remember_before_initial_scan: bool,
     event_plan: ConnectedStyleLoadEventPlan,
+    document_referrer_policy: Option<String>,
 }
 
 #[derive(Debug)]
@@ -181,6 +186,7 @@ impl PreparedConnectedStyleLoad {
             csp_blocked,
             remember_before_initial_scan,
             event_plan,
+            document_referrer_policy: None,
         }
     }
 
@@ -299,6 +305,7 @@ impl DocumentRuntime {
         host_ptr: *mut JsContextHost,
         link: DomHandle,
         check: DocumentContentSecurityPolicyCheck,
+        document_referrer_policy: String,
     ) {
         // Ineligible preload hints never enter Fetch, so they must not emit
         // CSP violations or link errors either.
@@ -306,7 +313,9 @@ impl DocumentRuntime {
             return;
         }
         self.apply_preload_link_csp_check(scope, host_ptr, link, check);
-        for prepared in self.prepare_connected_style_load_handles(&[link], true) {
+        for mut prepared in self.prepare_connected_style_load_handles(&[link], true) {
+            // Realm materialization can finish after subsequent parser tokens.
+            prepared.document_referrer_policy = Some(document_referrer_policy.clone());
             let Some(admission) = unsafe { &mut *host_ptr }
                 .commit_connected_style_load_event_plan(prepared.event_plan())
             else {
@@ -555,7 +564,13 @@ impl DocumentRuntime {
             return ConnectedStyleLoadPrimeResult::default();
         }
         let inline_source = inline_source.or_else(|| self.inline_style_source_for_test(handle));
-        self.enqueue_connected_style_load(handle, inline_source, host_ptr, Some(event_admission))
+        self.enqueue_connected_style_load(
+            handle,
+            inline_source,
+            host_ptr,
+            Some(event_admission),
+            prepared.document_referrer_policy,
+        )
     }
 
     #[cfg(test)]
@@ -789,14 +804,26 @@ impl DocumentRuntime {
         inline_source: Option<Arc<crate::style_engine::OwnerStyleSheetSource>>,
         host_ptr: *mut JsContextHost,
         event_admission: Option<ConnectedStyleLoadEventAdmission>,
+        document_referrer_policy: Option<String>,
     ) -> ConnectedStyleLoadPrimeResult {
         if self.current_document_resource_loader().is_some()
             && !self.parser_created_style_import_waits_for_blocking_discovery(handle)
         {
-            self.prime_connected_style_load_handle(handle, inline_source, host_ptr, event_admission)
+            self.prime_connected_style_load_handle(
+                handle,
+                inline_source,
+                host_ptr,
+                event_admission,
+                document_referrer_policy,
+            )
         } else {
             self.stylesheet_lifecycle.pending_connected_loads.push_back(
-                QueuedConnectedStyleLoad::new(handle, inline_source, event_admission),
+                QueuedConnectedStyleLoad::new(
+                    handle,
+                    inline_source,
+                    event_admission,
+                    document_referrer_policy,
+                ),
             );
             ConnectedStyleLoadPrimeResult::default()
         }
@@ -854,6 +881,7 @@ impl DocumentRuntime {
                 queued.inline_source().cloned(),
                 host_ptr,
                 queued.event_admission(),
+                queued.document_referrer_policy().map(str::to_owned),
             ));
         }
         result
@@ -889,6 +917,7 @@ impl DocumentRuntime {
         inline_source: Option<Arc<crate::style_engine::OwnerStyleSheetSource>>,
         host_ptr: *mut JsContextHost,
         event_admission: Option<ConnectedStyleLoadEventAdmission>,
+        document_referrer_policy: Option<String>,
     ) -> ConnectedStyleLoadPrimeResult {
         let mut result = ConnectedStyleLoadPrimeResult::default();
         if !self.dom_host.is_connected(handle) {
@@ -937,7 +966,11 @@ impl DocumentRuntime {
         if let Some(disposition) = stylesheet_link_disposition(&self.dom_host, node_id) {
             let load_event_binding =
                 Self::load_event_binding_for_connected_admission(event_admission);
-            let stylesheet_fetcher = self.stylesheet_fetcher_for_owner(handle, host_ptr);
+            let mut stylesheet_fetcher = self.stylesheet_fetcher_for_owner(handle, host_ptr);
+            if let Some(policy) = document_referrer_policy.as_ref() {
+                stylesheet_fetcher =
+                    stylesheet_fetcher.with_document_referrer_policy(Some(policy.clone()));
+            }
             let document_url = stylesheet_fetcher
                 .resource_loader()
                 .fetch_context()
@@ -1125,12 +1158,15 @@ impl DocumentRuntime {
                         )
                     })
                     .unwrap_or(RequestResourceType::CssStyleSheet);
-                let fetcher = self
+                let mut fetcher = self
                     .stylesheet_fetcher_for_owner(handle, host_ptr)
                     .with_preload_metadata(request_resource_type, true)
                     .with_completion_producer(self.connected_style_task_producer(
                         event_admission.map(ConnectedStyleLoadEventAdmission::document_owner),
                     ));
+                if let Some(policy) = document_referrer_policy.as_ref() {
+                    fetcher = fetcher.with_document_referrer_policy(Some(policy.clone()));
+                }
                 let document_url = fetcher
                     .resource_loader()
                     .fetch_context()
@@ -1169,7 +1205,7 @@ impl DocumentRuntime {
                 self.invalidate_stylesheet_owner_operations(handle);
                 return result;
             }
-            let fetch_options = element
+            let mut fetch_options = element
                 .map(|element| {
                     preload_like_link_readiness_fetch_options(
                         element,
@@ -1182,12 +1218,25 @@ impl DocumentRuntime {
                         resource_type,
                     ),
                     script_fetch_metadata: None,
+                    document_referrer_policy: None,
                     request_mode: moli_fetch::RequestMode::Cors,
                     credentials_mode: RequestCredentialsMode::Include,
                     fetch_priority_hint: None,
                     link_preload: false,
                     link_fetch_options: StylesheetFetchOptions::default(),
                 });
+            if fetch_options.script_fetch_metadata.is_some() {
+                fetch_options.document_referrer_policy = document_referrer_policy.or_else(|| {
+                    if host_ptr.is_null() {
+                        return self.current_document_referrer_policy();
+                    }
+                    let document = self.dom_host.owner_document_handle(handle)?;
+                    crate::context_bootstrap::document_referrer_policy_for_native_document(
+                        unsafe { &*host_ptr },
+                        document,
+                    )
+                });
+            }
             let parameters = ConnectedLoadParameters::PreloadLikeLink {
                 url: url.clone(),
                 options: Arc::new(fetch_options.clone()),
@@ -1279,6 +1328,7 @@ impl DocumentRuntime {
                         .as_ref()
                         .is_ok_and(|response| response.load_event_successful),
                     network_results: vec![ConnectedLoadNetworkResult {
+                        import_options: None,
                         consumed_preload_error: false,
                         document_owner,
                         stylesheet_fetch: None,
@@ -1470,11 +1520,14 @@ impl DocumentRuntime {
             .document_url()
             .clone();
         let resource_loader = stylesheet_fetcher.resource_loader().clone();
+        let options =
+            stylesheet_fetcher.prepare_stylesheet_fetch_options(StylesheetFetchOptions::default());
         resource_loader.spawn_resource_task(async move {
             let (graph, network_results) = fetch_observed_stylesheet_import_graph(
                 stylesheet_fetcher,
                 document_url,
                 urls,
+                options,
                 vec![handle],
             )
             .await;
@@ -1510,16 +1563,16 @@ impl DocumentRuntime {
         root_is_external_resource: bool,
         host_ptr: *mut JsContextHost,
     ) {
-        let urls = stylesheet
-            .pending_import_requests_in_graph()
-            .into_iter()
-            .map(|request| request.url)
+        let pending_imports = stylesheet.pending_import_requests_in_graph();
+        let urls = pending_imports
+            .iter()
+            .map(|request| request.url.clone())
             .collect::<Vec<_>>();
         if urls.is_empty() {
             return;
         }
         let root = ConnectedStyleImportRoot::new(owner, &stylesheet, root_is_external_resource);
-        let urls = match connected_style_import_readiness(urls) {
+        match connected_style_import_readiness(urls) {
             ConnectedStyleImportReadiness::Ready(_) => {
                 if unsafe { &*host_ptr }
                     .install_live_stylesheet_import_graph(root.clone(), &[])
@@ -1530,8 +1583,8 @@ impl DocumentRuntime {
                 }
                 return;
             }
-            ConnectedStyleImportReadiness::Pending(urls) => urls,
-        };
+            ConnectedStyleImportReadiness::Pending(_) => {}
+        }
         let task_producer = self
             .stylesheet_lifecycle
             .task_producer
@@ -1544,16 +1597,38 @@ impl DocumentRuntime {
             .document_url()
             .clone();
         let resource_loader = stylesheet_fetcher.resource_loader().clone();
+        let document_options =
+            stylesheet_fetcher.prepare_stylesheet_fetch_options(StylesheetFetchOptions::default());
+        let mut groups = Vec::<(StylesheetFetchOptions, Vec<Url>)>::new();
+        let mut group_indices = HashMap::new();
+        for request in pending_imports {
+            let options = request
+                .import_options
+                .unwrap_or_else(|| document_options.clone());
+            let index = *group_indices.entry(options.clone()).or_insert_with(|| {
+                groups.push((options, Vec::new()));
+                groups.len() - 1
+            });
+            groups[index].1.push(request.url);
+        }
         resource_loader.spawn_resource_task(async move {
-            let (_, mut network_results) = fetch_observed_stylesheet_import_graph(
-                stylesheet_fetcher,
-                document_url,
-                urls,
-                vec![owner],
-            )
-            .await;
-            for result in &mut network_results {
-                result.import_roots.push(root.clone());
+            let results =
+                futures_util::future::join_all(groups.into_iter().map(|(options, urls)| {
+                    fetch_observed_stylesheet_import_graph(
+                        stylesheet_fetcher.clone(),
+                        document_url.clone(),
+                        urls,
+                        options,
+                        vec![owner],
+                    )
+                }))
+                .await;
+            let mut network_results = Vec::new();
+            for (_, results) in results {
+                for mut result in results {
+                    result.import_roots.push(root.clone());
+                    network_results.push(result);
+                }
             }
             let _ = task_producer.send_live_import_completion(LiveStylesheetImportLoadCompletion {
                 network_results,
@@ -2080,6 +2155,7 @@ impl DocumentRuntime {
                 handle,
                 None,
                 load_event_binding.map(ConnectedStyleLoadEventAdmission::LoadDelaying),
+                None,
             ));
     }
 }
@@ -2395,6 +2471,7 @@ fn preload_like_link_readiness_fetch_options(
         resource_type,
         request_resource_type,
         script_fetch_metadata,
+        document_referrer_policy: None,
         request_mode,
         credentials_mode,
         fetch_priority_hint,
@@ -2457,6 +2534,7 @@ async fn fetch_connected_link_readiness_with_service_worker(
                     load_event_successful,
                     integrity,
                     !response.from_network_fallback,
+                    response.response_url,
                 ));
             }
             Ok(None) => {}
@@ -2484,6 +2562,7 @@ async fn fetch_connected_link_readiness_with_service_worker(
                 load_event_successful,
                 integrity,
                 false,
+                None,
             )
         })
 }
@@ -2536,7 +2615,7 @@ fn connected_link_readiness_request(
         request = request.with_script_fetch_metadata(moli_fetch::ScriptFetchRequestMetadata {
             cross_origin: metadata.cross_origin.clone(),
             referrer_policy: metadata.referrer_policy.clone(),
-            document_referrer_policy: None,
+            document_referrer_policy: options.document_referrer_policy.clone(),
             charset: metadata.charset.clone(),
             integrity: metadata.integrity.clone(),
             nonce: metadata.nonce.clone(),
@@ -4050,7 +4129,7 @@ mod tests {
         let loader = ResourceRequestClient::new(&FetchConfig::default())?;
         let mut runtime = DocumentRuntime::new_networked(&document, &loader);
 
-        runtime.prime_connected_style_load_handle(link, None, std::ptr::null_mut(), None);
+        runtime.prime_connected_style_load_handle(link, None, std::ptr::null_mut(), None, None);
         let first = runtime
             .active_stylesheet_link_client_for_test(link)
             .expect("first style preload client");
@@ -4061,7 +4140,7 @@ mod tests {
                 .dom_host
                 .set_attribute(link, "crossorigin", "use-credentials")
         );
-        runtime.prime_connected_style_load_handle(link, None, std::ptr::null_mut(), None);
+        runtime.prime_connected_style_load_handle(link, None, std::ptr::null_mut(), None, None);
         let second = runtime
             .active_stylesheet_link_client_for_test(link)
             .expect("reprocessed style preload client");
@@ -5360,6 +5439,7 @@ mod tests {
             document_url,
             script_url,
             ConnectedLinkReadinessFetchOptions {
+                document_referrer_policy: None,
                 resource_type: SubresourceResourceType::Script,
                 request_resource_type: Some(RequestResourceType::Script),
                 script_fetch_metadata: Some(metadata),
