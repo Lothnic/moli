@@ -206,8 +206,12 @@ impl JsContextHost {
             .get_or_insert(snapshot.document_url);
         if let Some(document) = snapshot.document_handle {
             // Meta policies are delivered separately from response headers.
-            // Capture their current list so later creator mutations cannot
+            // Capture their current values so later creator mutations cannot
             // change the new Document's policy container.
+            policy.referrer_policy =
+                crate::context_bootstrap::document_referrer_policy_for_native_document(
+                    self, document,
+                );
             policy.inherited_meta_content_security_policies = unsafe { &*self.runtime }
                 .meta_content_security_policy_strings_for_document(document);
         }
@@ -229,12 +233,6 @@ impl JsContextHost {
         let snapshot = self.owner_document_policy_snapshot(owner)?;
         let origin = self.window_access_origin_for_dispatch_scope(owner)?;
         let mut policy_container = self.document_policy_container_for_inheritance(owner)?;
-        if let Some(document) = snapshot.document_handle {
-            policy_container.referrer_policy =
-                crate::context_bootstrap::document_referrer_policy_for_native_document(
-                    self, document,
-                );
-        }
         let element_referrer_policy = source_element
             .and_then(|handle| self.dom_host().node(handle))
             .and_then(|node| node.as_element())
@@ -276,10 +274,14 @@ impl JsContextHost {
         &self,
     ) -> Option<crate::runtime::RendererAboutDocumentState> {
         let state = self.about_document_state.as_ref()?;
+        let mut policy = self.document_policy_container_for_inheritance(OwnerDispatchScope::Top)?;
+        // Reload/traversal retains the navigation's original policy, unlike
+        // a newly created Document inheriting the creator's current meta value.
+        policy.referrer_policy = self.response_referrer_policy().map(ToOwned::to_owned);
         Some(crate::runtime::RendererAboutDocumentState::new(
             self.window_access_origin_for_dispatch_scope(OwnerDispatchScope::Top)?,
             state.base_url().clone(),
-            self.document_policy_container_for_inheritance(OwnerDispatchScope::Top)?,
+            policy,
         ))
     }
 
@@ -341,6 +343,25 @@ impl JsContextHost {
         self.local_worker_content_security_policy_source_for_owner(
             policy_owner_dispatch_scope_for_global(scope, global),
         )
+    }
+
+    pub(crate) fn object_url_policy_source_for_global<'s>(
+        &self,
+        scope: &mut v8::PinScope<'s, '_>,
+        global: v8::Local<'s, v8::Object>,
+    ) -> Option<crate::blob::ObjectUrlPolicySource> {
+        let owner = policy_owner_dispatch_scope_for_global(scope, global);
+        let snapshot = self.owner_document_policy_snapshot(owner)?;
+        Some(crate::blob::ObjectUrlPolicySource {
+            content_security_policy: self
+                .local_worker_content_security_policy_source_for_owner(owner)?,
+            referrer_policy: snapshot.policy_container.referrer_policy,
+            document_meta_referrer_policy: snapshot
+                .document_handle
+                .and_then(|document| self.dom_host().node(document))
+                .and_then(moli_dom::native::Node::as_document)
+                .map(moli_dom::native::Document::meta_referrer_policy_source),
+        })
     }
 
     pub(crate) fn document_permissions_policy_for_owner(

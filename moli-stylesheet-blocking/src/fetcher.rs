@@ -23,6 +23,8 @@ pub struct StylesheetFetchOptions(Arc<StylesheetFetchOptionsData>);
 struct StylesheetFetchOptionsData {
     cross_origin: Option<String>,
     referrer_policy: Option<String>,
+    document_referrer_policy: Option<String>,
+    referrer_url: Option<Url>,
     integrity: Option<String>,
     nonce: Option<String>,
     charset: Option<String>,
@@ -48,6 +50,8 @@ impl StylesheetFetchOptions {
         Self(Arc::new(StylesheetFetchOptionsData {
             cross_origin: normalize_cross_origin(cross_origin),
             referrer_policy: normalize_token(referrer_policy),
+            document_referrer_policy: None,
+            referrer_url: None,
             integrity: normalize_preserved_value(integrity),
             nonce: normalize_preserved_value(nonce),
             charset: normalize_token(charset),
@@ -67,6 +71,34 @@ impl StylesheetFetchOptions {
 
     pub fn referrer_policy(&self) -> Option<&str> {
         self.0.referrer_policy.as_deref()
+    }
+
+    pub fn with_document_referrer_policy(mut self, policy: Option<String>) -> Self {
+        Arc::make_mut(&mut self.0).document_referrer_policy = policy;
+        self
+    }
+
+    pub fn document_referrer_policy(&self) -> Option<&str> {
+        self.0.document_referrer_policy.as_deref()
+    }
+
+    /// Requests initiated by an external sheet use that sheet's response URL
+    /// and policy, independently of the owning Document's fetch authority.
+    pub fn for_import(mut referrer_url: Url, referrer_policy: Option<String>) -> Self {
+        referrer_url.set_fragment(None);
+        Self(Arc::new(StylesheetFetchOptionsData {
+            referrer_url: Some(referrer_url),
+            referrer_policy: Some(
+                referrer_policy
+                    .filter(|policy| !policy.is_empty())
+                    .unwrap_or_else(|| moli_fetch::DEFAULT_REFERRER_POLICY.to_owned()),
+            ),
+            ..Default::default()
+        }))
+    }
+
+    pub fn referrer_url(&self) -> Option<&Url> {
+        self.0.referrer_url.as_ref()
     }
 
     pub fn integrity(&self) -> Option<&str> {
@@ -131,6 +163,8 @@ pub struct StylesheetResourceKey {
     request_mode: RequestMode,
     credentials_mode: RequestCredentialsMode,
     referrer_policy: Option<String>,
+    document_referrer_policy: Option<String>,
+    referrer_url: Option<Url>,
     integrity: Option<String>,
     charset: Option<String>,
     quirks_mode_mime_compatibility: bool,
@@ -145,6 +179,8 @@ impl StylesheetResourceKey {
             request_mode,
             credentials_mode,
             referrer_policy: options.referrer_policy().map(str::to_owned),
+            document_referrer_policy: options.document_referrer_policy().map(str::to_owned),
+            referrer_url: options.referrer_url().cloned(),
             integrity: options.integrity().map(str::to_owned),
             charset: options.charset().map(str::to_owned),
             quirks_mode_mime_compatibility: options.quirks_mode_mime_compatibility(),
@@ -194,6 +230,7 @@ impl StylesheetUsability {
 
 #[derive(Debug, Clone)]
 pub struct StylesheetFetchTerminal {
+    service_worker_response_url: Option<Url>,
     physical: StylesheetPhysicalOutcome,
     usability: StylesheetUsability,
     origin_clean: Option<bool>,
@@ -213,6 +250,7 @@ impl StylesheetFetchTerminal {
             usability,
             origin_clean: Some(origin_clean),
             from_service_worker: false,
+            service_worker_response_url: None,
             response_filter: None,
             consumed_preload_error: false,
         }
@@ -243,6 +281,7 @@ impl StylesheetFetchTerminal {
             usability: StylesheetUsability::Failed { reason },
             origin_clean: None,
             from_service_worker: false,
+            service_worker_response_url: None,
             response_filter: None,
             consumed_preload_error: false,
         }
@@ -270,6 +309,15 @@ impl StylesheetFetchTerminal {
 
     pub fn from_service_worker(&self) -> bool {
         self.from_service_worker
+    }
+
+    pub fn with_service_worker_response_url(mut self, url: Option<Url>) -> Self {
+        self.service_worker_response_url = url;
+        self
+    }
+
+    pub fn service_worker_response_url(&self) -> Option<&Url> {
+        self.service_worker_response_url.as_ref()
     }
 
     pub fn response_filter(&self) -> Option<&moli_fetch::FetchResponseFilter> {
@@ -365,6 +413,15 @@ impl PreparedStylesheetFetch {
 }
 
 pub trait StylesheetFetcher: Clone + Send + 'static {
+    /// Captures Document defaults before selecting a shared physical resource.
+    /// Owner signatures retain their original element attributes.
+    fn prepare_stylesheet_fetch_options(
+        &self,
+        options: StylesheetFetchOptions,
+    ) -> StylesheetFetchOptions {
+        options
+    }
+
     /// Distinguishes environment-specific responses when a store serves several Documents.
     fn resource_cache_scope(&self) -> u64 {
         0

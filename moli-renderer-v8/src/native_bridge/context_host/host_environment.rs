@@ -285,6 +285,21 @@ impl JsContextHost {
         root: crate::document_runtime::ConnectedStyleImportRoot,
         responses: &[crate::live_stylesheet::LiveStylesheetImportResponse],
     ) -> Option<bool> {
+        let document_policy =
+            self.dom_host()
+                .owner_document_handle(root.owner)
+                .and_then(|document| {
+                    crate::context_bootstrap::document_referrer_policy_for_native_document(
+                        self, document,
+                    )
+                });
+        let stylesheet = self.live_stylesheets.get(root.stylesheet_id)?;
+        stylesheet.set_import_options(
+            stylesheet
+                .import_options()
+                .unwrap_or_default()
+                .with_document_referrer_policy(document_policy),
+        );
         self.live_stylesheets.install_import_graph(
             root.stylesheet_id,
             root.contents_revision,
@@ -292,6 +307,29 @@ impl JsContextHost {
             responses,
             root.root_resource_url.as_ref(),
         )
+    }
+
+    pub(crate) fn retain_linked_stylesheet_import_options(
+        &self,
+        owner: DomHandle,
+        terminal: &crate::stylesheet_blocking::StylesheetFetchTerminal,
+    ) {
+        let document_policy = self
+            .dom_host()
+            .owner_document_handle(owner)
+            .and_then(|document| {
+                crate::context_bootstrap::document_referrer_policy_for_native_document(
+                    self, document,
+                )
+            });
+        let document_options = crate::stylesheet_blocking::StylesheetFetchOptions::default()
+            .with_document_referrer_policy(document_policy);
+        if let Some(options) =
+            crate::document_runtime::stylesheet_import_options(terminal, &document_options)
+            && let Some(stylesheet) = self.linked_live_stylesheet(owner)
+        {
+            stylesheet.set_import_options(options);
+        }
     }
 
     pub(crate) fn refresh_live_stylesheet_after_import_graph(
@@ -584,6 +622,42 @@ impl JsContextHost {
             .document_base_url_for_handle(document)
             .unwrap_or_else(|| context.base_url().clone());
         Some(context.subresource_environment(base_url, frame_id))
+    }
+
+    pub(crate) fn document_client_referrer_source(
+        &self,
+        mut owner: crate::native_bridge::OwnerDispatchScope,
+    ) -> Option<url::Url> {
+        use super::{OwnerDispatchScope, WindowAccessOrigin};
+        if matches!(
+            self.window_access_origin_for_dispatch_scope(owner)?,
+            WindowAccessOrigin::Opaque { .. }
+        ) {
+            return None;
+        }
+        // Referrer Policy follows srcdoc containers, not inherited base URLs.
+        // Keep this separate from the captured origin and cookie initiator.
+        for _ in 0..=self.child_browsing_contexts.len() {
+            let document = match owner {
+                OwnerDispatchScope::Top => self.document_handle(),
+                OwnerDispatchScope::LightweightPopup(popup_id) => {
+                    self.lightweight_popup_document_handle(popup_id)?
+                }
+                OwnerDispatchScope::Child(handle) => {
+                    let document = self.child_browsing_context_document_handle(handle)?;
+                    let url = self.dom_host().document_url_for_handle(document)?;
+                    // A javascript: replacement retains the Document URL even
+                    // though its navigation bootstrap is no longer Srcdoc.
+                    if moli_url::is_about_srcdoc(url) {
+                        owner = self.owner_dispatch_scope_for_node(handle)?;
+                        continue;
+                    }
+                    document
+                }
+            };
+            return self.dom_host().document_url_for_handle(document).cloned();
+        }
+        None
     }
 
     pub(crate) fn parent_document_resource_loader_for_child_context(
