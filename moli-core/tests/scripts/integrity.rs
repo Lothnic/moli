@@ -19,6 +19,21 @@ mod text_modules;
 #[path = "runtime_modulepreload.rs"]
 mod runtime_modulepreload;
 
+#[path = "child_module_records.rs"]
+mod child_module_records;
+
+#[path = "dynamic_import_credentials.rs"]
+mod dynamic_import_credentials;
+
+#[path = "dynamic_import_referrer.rs"]
+mod dynamic_import_referrer;
+
+#[path = "module_document_referrer.rs"]
+mod module_document_referrer;
+
+#[path = "modulepreload_document_referrer.rs"]
+mod modulepreload_document_referrer;
+
 struct IntegrityServers {
     origin: String,
     cross_origin: String,
@@ -32,6 +47,7 @@ struct IntegrityRequest {
     path: String,
     origin: Option<String>,
     cookie: Option<String>,
+    referer: Option<String>,
     sec_fetch_dest: Option<String>,
     sec_fetch_mode: Option<String>,
     sec_fetch_site: Option<String>,
@@ -52,12 +68,16 @@ impl IntegrityServers {
         let origin = format!("http://{}", main.local_addr()?);
         let cross_origin = format!("http://{}", cross.local_addr()?);
         let requests = Arc::new(Mutex::new(Vec::new()));
+        let module_started = Arc::new(tokio::sync::Notify::new());
+        let module_release = Arc::new(tokio::sync::Semaphore::new(0));
         let tasks = [main, cross]
             .into_iter()
             .map(|listener| {
                 let origin = origin.clone();
                 let cross_origin = cross_origin.clone();
                 let requests = Arc::clone(&requests);
+                let module_started = Arc::clone(&module_started);
+                let module_release = Arc::clone(&module_release);
                 tokio::spawn(async move {
                     let mut connections = JoinSet::new();
                     loop {
@@ -67,6 +87,8 @@ impl IntegrityServers {
                                 let origin = origin.clone();
                                 let cross_origin = cross_origin.clone();
                                 let requests = Arc::clone(&requests);
+                                let module_started = Arc::clone(&module_started);
+                                let module_release = Arc::clone(&module_release);
                                 connections.spawn(async move {
                                     let mut request = Vec::new();
                                     while !request.ends_with(b"\r\n\r\n") && request.len() < 16384 {
@@ -81,12 +103,22 @@ impl IntegrityServers {
                                     let incoming = IntegrityRequest {
                                         method: request.split_whitespace().next().unwrap_or("GET").to_owned(),
                                         path: path.to_owned(), origin: header("Origin"), cookie: header("Cookie"),
+                                        referer: header("Referer"),
                                         sec_fetch_dest: header("Sec-Fetch-Dest"),
                                         sec_fetch_mode: header("Sec-Fetch-Mode"),
                                         sec_fetch_site: header("Sec-Fetch-Site"),
                                     };
                                     let (status, headers, body) = fixture_response(&incoming, &origin, &cross_origin);
                                     requests.lock().push(incoming);
+                                    // Hold a module response across document.open without a timed sleep.
+                                    if path == "/echo-origin.js?consumer-open" {
+                                        module_started.notify_one();
+                                        let _ = module_release.acquire().await;
+                                    } else if path == "/module-response-started" {
+                                        module_started.notified().await;
+                                    } else if path == "/module-response-release" {
+                                        module_release.close();
+                                    }
                                     let response = format!(
                                         "HTTP/1.1 {status}\r\n{headers}Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
                                         body.len(),
@@ -147,6 +179,28 @@ fn fixture_response(
     let (path, query) = request.path.split_once('?').unwrap_or((&request.path, ""));
     let javascript = "Content-Type: text/javascript\r\n";
     match path {
+        "/preload-policy.html" | "/preload-policy.js" => {
+            modulepreload_document_referrer::fixture_response(path, query, origin, cross)
+        }
+        "/document-referrer.html" | "/document-referrer.js" => {
+            module_document_referrer::fixture_response(path, query, origin, cross)
+        }
+        "/import-referrer.js" => dynamic_import_referrer::fixture_response(query),
+        "/import-credentials.js" => (
+            "200 OK",
+            format!("{javascript}Cache-Control: no-store\r\n"),
+            dynamic_import_credentials::importer_source(query),
+        ),
+        "/module-records.html"
+        | "/module-record.js"
+        | "/module-record-tla.js"
+        | "/module-record-wrapper.js"
+        | "/module-record-redirect.js" => child_module_records::fixture_response(path, cross),
+        "/module-response-started" | "/module-response-release" => (
+            "200 OK",
+            "Content-Type: text/plain\r\nCache-Control: no-store\r\n".to_owned(),
+            String::new(),
+        ),
         "/runtime-modulepreload.html" => (
             "200 OK",
             "Content-Type: text/html\r\n".to_owned(),
