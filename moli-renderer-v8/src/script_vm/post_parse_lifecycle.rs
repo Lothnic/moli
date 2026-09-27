@@ -2196,6 +2196,7 @@ impl ScriptVm {
     #[cfg(test)]
     pub(super) fn test_pending_runtime_source_load_script(&self) -> PreparedScript {
         PreparedScript {
+            document_referrer_policy: None,
             position: 0,
             node_id: NodeId::new(1),
             kind: ScriptKind::Classic,
@@ -2246,6 +2247,7 @@ impl ScriptVm {
         self.document_runtime
             .bind_runtime_owned_script_handle_for_node(node_id, &host_script_handle);
         let script = PreparedScript {
+            document_referrer_policy: None,
             position: node_id.index(),
             node_id,
             kind: ScriptKind::Classic,
@@ -2546,6 +2548,7 @@ impl ScriptVm {
         let mut host = self._context_host.borrow_mut();
         for network_result in results {
             let crate::document_runtime::ConnectedLoadNetworkResult {
+                import_options,
                 consumed_preload_error,
                 document_owner,
                 stylesheet_fetch,
@@ -2609,6 +2612,7 @@ impl ScriptVm {
                     });
                 if is_import_graph_result {
                     let response = crate::live_stylesheet::LiveStylesheetImportResponse {
+                        import_options: import_options.clone(),
                         request_url: request_url.clone(),
                         response_url: stylesheet_base_url.clone(),
                         css_text: stylesheet_text.clone(),
