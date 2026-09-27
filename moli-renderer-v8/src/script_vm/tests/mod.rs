@@ -2210,6 +2210,7 @@ fn decode_png_dimensions_from_data_url(data_url: &str) -> (u32, u32) {
 mod audio_node_interfaces;
 mod blob_range;
 mod blob_response_headers;
+mod body_completion;
 mod body_mime;
 mod browser_api;
 mod cache_interfaces;
@@ -2263,6 +2264,7 @@ mod import_meta;
 mod indexed_db;
 mod inspector_unwrap;
 mod intersection_observers;
+mod intersection_target_order;
 mod javascript_url_origin;
 mod joint_history;
 mod lazy_storage;
@@ -2288,6 +2290,7 @@ mod remote_playback_interface;
 mod rendering_observers;
 mod rendering_update;
 mod resize_observer_entries;
+mod response_blob_mime;
 mod retained_child_window;
 mod script_terminal_completion;
 mod storage_dense_name_arrays;
@@ -2317,10 +2320,8 @@ mod worklet_interfaces;
 mod payment_response_interfaces;
 
 mod body_mime_consolidation;
-mod response_blob_mime;
 mod intersection_target_order;
 mod observer_element_arguments;
-
 mod media_device_interfaces;
 mod dom_rect_factory_descriptors;
 mod dom_rect_structured_clone;
