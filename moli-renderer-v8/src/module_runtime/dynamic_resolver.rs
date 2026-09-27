@@ -12,7 +12,6 @@ use crate::{
     native_bridge::{
         OwnerDispatchScope, WindowExecutionContextIdentity, WindowExecutionContextOwner,
     },
-    planning::ScriptFetchMetadata,
 };
 
 use super::{
@@ -30,10 +29,11 @@ pub(crate) struct PendingDynamicModuleImport {
     owner: DynamicModuleImportOwner,
     specifier: String,
     base_url: Url,
+    referrer_url: Option<Url>,
     resolved_url: Option<Url>,
     attributes: ModuleAttributesKey,
     phase: ModuleImportPhase,
-    fetch_metadata: ScriptFetchMetadata,
+    fetch_metadata: super::ModuleFetchMetadata,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -192,16 +192,29 @@ impl PendingDynamicModuleImport {
             owner,
             specifier: specifier.into(),
             base_url,
+            referrer_url: None,
             resolved_url: None,
             attributes,
             phase,
-            fetch_metadata: ScriptFetchMetadata::default(),
+            fetch_metadata: super::ModuleFetchMetadata::default(),
         }
     }
 
-    pub(crate) fn with_referrer_fetch_metadata(mut self, metadata: ScriptFetchMetadata) -> Self {
+    pub(crate) fn with_referrer_script(
+        mut self,
+        base_url: Url,
+        metadata: super::ModuleFetchMetadata,
+    ) -> Self {
+        self.referrer_url = Some(base_url);
         self.fetch_metadata = metadata;
         self
+    }
+
+    pub(crate) fn referrer(&self) -> module_tree::ModuleReferrer {
+        self.referrer_url.clone().map_or_else(
+            module_tree::ModuleReferrer::client,
+            module_tree::ModuleReferrer::from_url,
+        )
     }
 
     pub(crate) fn with_resolved_url(mut self, resolved_url: Url) -> Self {
@@ -241,7 +254,7 @@ impl PendingDynamicModuleImport {
         self.phase
     }
 
-    pub(crate) fn fetch_metadata(&self) -> &ScriptFetchMetadata {
+    pub(crate) fn fetch_metadata(&self) -> &super::ModuleFetchMetadata {
         &self.fetch_metadata
     }
 
