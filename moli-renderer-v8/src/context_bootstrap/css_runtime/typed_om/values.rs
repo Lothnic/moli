@@ -1,6 +1,7 @@
 use super::factories::VALID_UNIT_NAMES;
 use super::*;
 use crate::web_api_interfaces;
+use moli_css_parse::{TypedImageValue, TypedStyleValueList};
 use style::typed_om::{NumericValue, TypedValue};
 
 mod number;
@@ -14,6 +15,13 @@ const CSS_UNIT_VALUE_UNIT_SLOT: &str = "__moliCssUnitValueUnit";
 #[derive(WebApiObject)]
 #[webapi(interface = web_api_interfaces::CSSStyleValue)]
 struct CssStyleValueObjectDeclaration {
+    #[webapi(slot = CSS_STYLE_VALUE_TEXT_SLOT)]
+    text: String,
+}
+
+#[derive(WebApiObject)]
+#[webapi(interface = web_api_interfaces::CSSImageValue)]
+struct CssImageValueObjectDeclaration {
     #[webapi(slot = CSS_STYLE_VALUE_TEXT_SLOT)]
     text: String,
 }
@@ -194,8 +202,12 @@ pub(super) fn from_parsed<'s>(
     source: &str,
     parsed: moli_css_parse::ParsedTypedStyleValue,
 ) -> Vec<v8::Local<'s, v8::Object>> {
-    let Some(typed) = parsed.values.filter(|list| !list.values.is_empty()) else {
+    let Some(typed) = parsed.values.filter(|list| !list.is_empty()) else {
         return vec![opaque_style_value(scope, property, &parsed.css_text)];
+    };
+    let typed = match typed {
+        TypedStyleValueList::Native(typed) => typed,
+        TypedStyleValueList::Images(images) => return image_values(scope, images),
     };
     // Stylo determines whether this property is list-valued. Only subdivide
     // its serialization when that projection has multiple items; a shorthand
@@ -238,9 +250,7 @@ pub(super) fn from_parsed<'s>(
                     sources.get(index).map_or(text.as_str(), String::as_str),
                     &value,
                 )?,
-                // Native image objects remain to be connected. Preserve an
-                // immutable value associated with the validated property.
-                TypedValue::Image(_) => opaque_style_value(scope, property, text.trim()),
+                TypedValue::Image(_) => image_value(scope, text.trim()),
             })
         })
         .collect::<Option<Vec<_>>>()
@@ -265,13 +275,41 @@ pub(super) fn opaque_style_value<'s>(
     object
 }
 
+fn image_value<'s>(scope: &mut v8::PinScope<'s, '_>, text: &str) -> v8::Local<'s, v8::Object> {
+    // Images have no author-visible fields or constructor. Their immutable
+    // native serialization is reusable across properties accepting images,
+    // unlike property-associated opaque CSSStyleValues.
+    CssImageValueObjectDeclaration::new(text.to_owned())
+        .bind(scope)
+        .expect("CSSImageValue declaration should bind")
+}
+
+fn image_values<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    images: Vec<TypedImageValue>,
+) -> Vec<v8::Local<'s, v8::Object>> {
+    images
+        .into_iter()
+        .map(|value| match value {
+            TypedImageValue::None => CssKeywordValueObjectDeclaration::new("none".into())
+                .bind(scope)
+                .expect("CSSKeywordValue declaration should bind"),
+            TypedImageValue::Image(text) => image_value(scope, &text),
+        })
+        .collect()
+}
+
 pub(super) fn from_computed<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     property: &str,
     parsed: moli_css_parse::ParsedTypedStyleValue,
 ) -> Vec<v8::Local<'s, v8::Object>> {
-    let Some(typed) = parsed.values.filter(|list| !list.values.is_empty()) else {
+    let Some(typed) = parsed.values.filter(|list| !list.is_empty()) else {
         return vec![opaque_style_value(scope, property, &parsed.css_text)];
+    };
+    let typed = match typed {
+        TypedStyleValueList::Native(typed) => typed,
+        TypedStyleValueList::Images(images) => return image_values(scope, images),
     };
     let texts = if typed.values.len() == 1 {
         vec![parsed.css_text.clone()]
@@ -295,7 +333,7 @@ pub(super) fn from_computed<'s>(
                 }
                 TypedValue::Unparsed(parts) => unparsed::from_native(scope, parts.clone()),
                 TypedValue::Transform(value) => transforms::from_native(scope, value)?,
-                TypedValue::Image(_) => opaque_style_value(scope, property, &text),
+                TypedValue::Image(_) => image_value(scope, &text),
             })
         })
         .collect::<Option<Vec<_>>>()
