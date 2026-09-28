@@ -227,9 +227,9 @@ pub(super) fn from_parsed<'s>(
                         .unwrap_or_else(|| f64::from(unit.value));
                     unit_value(scope, number, name.to_owned())
                 }
-                // CSSMath*, transforms and images still need their own native DOM
-                // interfaces. Preserve an immutable, property-associated CSS value
-                // in the meantime, rather than guessing a keyword or numeric type.
+                // Math expression reification and native transform/image objects
+                // remain to be connected. Preserve an immutable, property-associated
+                // value rather than guessing a keyword or a single numeric unit.
                 TypedValue::Numeric(NumericValue::Math(_))
                 | TypedValue::Transform(_)
                 | TypedValue::Image(_) => opaque_style_value(scope, property, text.trim()),
@@ -291,9 +291,9 @@ fn parse_single_unit_value(text: &str) -> Option<(f64, String)> {
         .ok()
 }
 
-fn normalize_unit_name(unit: &str) -> Option<String> {
+pub(super) fn normalize_unit_name(unit: &str) -> Option<String> {
     let unit = unit.to_ascii_lowercase();
-    VALID_UNIT_NAMES.contains(&unit.as_str()).then_some(unit)
+    (VALID_UNIT_NAMES.contains(&unit.as_str()) || unit == "x").then_some(unit)
 }
 
 fn css_style_value_to_string_callback<'s>(
@@ -318,6 +318,9 @@ pub(super) fn serialize<'s>(
 ) -> Option<String> {
     if web_api_interfaces::CSSUnparsedValue::is_instance(scope, value) {
         return super::unparsed::serialize(scope, value);
+    }
+    if web_api_interfaces::CSSMathValue::is_instance(scope, value) {
+        return super::math::serialize(scope, value);
     }
     if let Some(unit) = css_unit_value_unit(scope, value) {
         let value = css_unit_value_number(scope, value)?;
@@ -469,7 +472,7 @@ fn css_style_value_receiver_branded<'s>(
     web_api_interfaces::CSSStyleValue::is_instance(scope, receiver)
 }
 
-fn css_unit_value_number<'s>(
+pub(super) fn css_unit_value_number<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     receiver: v8::Local<'s, v8::Object>,
 ) -> Option<f64> {
