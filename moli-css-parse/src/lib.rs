@@ -8,9 +8,11 @@ mod declaration;
 mod font_face;
 mod font_palette;
 mod math;
+mod numeric_serialization;
 mod root_margin;
 mod stylo_stylesheet;
 mod transform;
+mod typed_om;
 mod util;
 mod value;
 
@@ -35,6 +37,9 @@ pub use math::{
     css_numeric_value_is_supported, css_time_value_is_supported, number_len, parse_angle_degrees,
     parse_number, parse_px_length, resolve_css_number, resolve_css_numeric,
     resolve_length_percentage, resolve_time_seconds, starts_with_supported_math_function,
+};
+pub use numeric_serialization::{
+    css_numeric_token_value, serialize_css_number, serialize_css_token,
 };
 pub use root_margin::{normalize_root_margin, root_margin_components};
 pub use style::moli_declaration_block::{
@@ -72,6 +77,7 @@ pub use stylo_stylesheet::{
     refresh_native_stylesheet_namespaces_after_cssom_mutation,
 };
 pub use transform::{CssTransformFunction, parse_transform_function_list};
+pub use typed_om::{ParsedTypedStyleValue, parse_typed_style_value, reify_unparsed_style_value};
 pub use util::{
     camel_case_style_property_name, camel_to_kebab, canonical_style_property_identifier,
     canonical_style_property_name, decapitalize_ascii_head, escape_top_level_semicolons,
