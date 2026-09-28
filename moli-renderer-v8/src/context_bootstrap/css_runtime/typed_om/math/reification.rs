@@ -13,22 +13,33 @@ pub(in crate::context_bootstrap::css_runtime::typed_om) fn from_native<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     value: &NumericValue,
 ) -> Option<v8::Local<'s, v8::Object>> {
+    reify_native(scope, value, true)
+}
+
+pub(super) fn from_native_declared<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    value: &NumericValue,
+) -> Option<v8::Local<'s, v8::Object>> {
+    reify_native(scope, value, false)
+}
+
+fn reify_native<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    value: &NumericValue,
+    fold_unary_sum: bool,
+) -> Option<v8::Local<'s, v8::Object>> {
     let realm = scope.get_current_context();
     let mut work = vec![Work::Value(value)];
     let mut objects = Vec::new();
     let mut remaining = graph::MAX_WORK;
     while let Some(next) = work.pop() {
         remaining = remaining.checked_sub(1).or_else(|| {
-            crate::util::throw_range_error(scope, "CSS computed numeric value is too large");
+            crate::util::throw_range_error(scope, "CSS numeric value is too large");
             None
         })?;
         match next {
             Work::Value(NumericValue::Unit(unit)) => {
-                let name = if unit.unit_str() == "%" {
-                    "percent"
-                } else {
-                    unit.unit_str()
-                };
+                let name = values::native_unit_name(unit.unit_str());
                 objects.push(values::unit_value(
                     scope,
                     f64::from(unit.value),
@@ -47,7 +58,7 @@ pub(in crate::context_bootstrap::css_runtime::typed_om) fn from_native<'s>(
                 };
                 // The style engine wraps a scalar calculation in a unary sum.
                 // At computed-value time it is the scalar CSSUnitValue.
-                if kind == Kind::Sum && children.len() == 1 {
+                if fold_unary_sum && kind == Kind::Sum && children.len() == 1 {
                     work.push(Work::Value(&children[0]));
                     continue;
                 }

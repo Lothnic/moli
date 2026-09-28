@@ -211,7 +211,7 @@ pub(super) fn from_parsed<'s>(
     let sources = if typed.values.len() == 1 {
         vec![source.to_owned()]
     } else {
-        top_level_comma_separated_component_values(source).unwrap_or_default()
+        crate::css_style::top_level_comma_separated_component_sources(source).unwrap_or_default()
     };
     typed
         .values
@@ -225,11 +225,7 @@ pub(super) fn from_parsed<'s>(
                     .bind(scope)
                     .expect("CSSKeywordValue declaration should bind"),
                 TypedValue::Numeric(NumericValue::Unit(unit)) => {
-                    let name = if unit.unit_str() == "%" {
-                        "percent"
-                    } else {
-                        unit.unit_str()
-                    };
+                    let name = native_unit_name(unit.unit_str());
                     let number = sources
                         .get(index)
                         .and_then(|text| number::from_literal(text, unit.unit_str()))
@@ -237,12 +233,14 @@ pub(super) fn from_parsed<'s>(
                     unit_value(scope, number, name.to_owned())
                 }
                 TypedValue::Transform(value) => transforms::from_native(scope, &value)?,
-                // Declared math expression reification and native image objects
-                // remain to be connected. Preserve an immutable, property-associated
-                // value rather than guessing a keyword or a single numeric unit.
-                TypedValue::Numeric(NumericValue::Math(_)) | TypedValue::Image(_) => {
-                    opaque_style_value(scope, property, text.trim())
-                }
+                TypedValue::Numeric(value @ NumericValue::Math(_)) => math::from_declared(
+                    scope,
+                    sources.get(index).map_or(text.as_str(), String::as_str),
+                    &value,
+                )?,
+                // Native image objects remain to be connected. Preserve an
+                // immutable value associated with the validated property.
+                TypedValue::Image(_) => opaque_style_value(scope, property, text.trim()),
             })
         })
         .collect::<Option<Vec<_>>>()
@@ -337,6 +335,12 @@ fn parse_single_unit_value(text: &str) -> Option<(f64, String)> {
             }
         })
         .ok()
+}
+
+/// Use the Typed OM unit identifier at the style-engine boundary. Percentages
+/// serialize with `%`, but native numeric projections may already use `percent`.
+pub(super) fn native_unit_name(unit: &str) -> &str {
+    if unit == "%" { "percent" } else { unit }
 }
 
 pub(super) fn normalize_unit_name(unit: &str) -> Option<String> {
