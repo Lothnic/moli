@@ -1463,6 +1463,22 @@ impl JsContextHost {
         }
     }
 
+    pub(crate) fn create_text_node_from_utf16_units(
+        &mut self,
+        document: Option<DomHandle>,
+        value: U16String,
+    ) -> DomHandle {
+        let text = string_from_utf16_units_lossy(value.as_slice());
+        let handle = match document {
+            Some(document) => self.create_text_node_for_document(document, &text),
+            None => self.create_text_node(&text),
+        };
+        if utf16_units_contain_unpaired_surrogate(value.as_slice()) {
+            self.character_data_utf16_overrides.insert(handle, value);
+        }
+        handle
+    }
+
     pub(crate) fn character_data_utf16_units(&self, handle: DomHandle) -> Option<Vec<u16>> {
         self.character_data_utf16_overrides
             .get(&handle)
@@ -2354,10 +2370,6 @@ impl JsContextHost {
         &mut self.custom_element_reactions
     }
 
-    pub(crate) fn custom_element_reactions(&self) -> &CustomElementReactionCoordinator {
-        &self.custom_element_reactions
-    }
-
     pub(crate) fn enter_parser_pause(&mut self) -> crate::document_runtime::ParserPauseGuard {
         unsafe { &mut *self.runtime }.enter_parser_pause()
     }
@@ -2471,6 +2483,13 @@ impl JsContextHost {
                 self.custom_elements_mut_for_registry_key(key)
             }
         }
+    }
+
+    pub(crate) fn upgraded_custom_element_handles(&self) -> impl Iterator<Item = DomHandle> + '_ {
+        std::iter::once(&self.custom_elements)
+            .chain(self.child_custom_elements.values())
+            .chain(self.scoped_custom_elements.values())
+            .flat_map(CustomElementStore::upgraded_handles)
     }
 
     pub(crate) fn custom_elements_subtree_lifecycle_quiescent(&self) -> bool {

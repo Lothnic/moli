@@ -1,5 +1,8 @@
 use super::*;
-use crate::custom_elements;
+use crate::native_bridge::node::{
+    ChildNodeMutation, ParentNodeMutation, mutate_child_node, mutate_parent_node,
+    replace_node_child,
+};
 
 fn detached_insert_or_throw<'s>(
     scope: &mut v8::PinScope<'s, '_>,
@@ -131,7 +134,7 @@ pub(in crate::native_bridge) fn bridge_detached_append_callback<'a>(
     let Ok(target) = v8::Local::<v8::Object>::try_from(args.get(0)) else {
         return;
     };
-    if append_to_native_detached_target(scope, &args, target).is_some() {
+    if mutate_native_detached_parent(scope, &args, target, ParentNodeMutation::Append) {
         return;
     }
     let document = detached_owner_document_object(scope, target).unwrap_or(target);
@@ -153,57 +156,25 @@ pub(in crate::native_bridge) fn bridge_detached_append_callback<'a>(
     });
 }
 
-fn append_to_native_detached_target<'s>(
+fn mutate_native_detached_parent<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     args: &v8::FunctionCallbackArguments<'s>,
     target: v8::Local<'s, v8::Object>,
-) -> Option<()> {
-    let runtime_ptr = context_host_ptr_from_global_bridge(scope)?;
-    let parent = detached_native_handle_for_runtime(scope, runtime_ptr, target)?;
-    if unsafe { &*runtime_ptr }
-        .dom_host()
-        .node(parent)
-        .is_some_and(|node| node.is_document())
-    {
-        return None;
-    }
-    let mut children = Vec::new();
-    for index in 1..args.length() {
-        let value = args.get(index);
-        let child = if value.is_object()
-            && let Ok(object) = v8::Local::<v8::Object>::try_from(value)
-        {
-            detached_native_handle_for_runtime(scope, runtime_ptr, object)?
-        } else {
-            let text = value.to_string(scope)?.to_rust_string_lossy(scope);
-            let document_handle = unsafe { &*runtime_ptr }
-                .dom_host()
-                .owner_document_handle(parent)?;
-            unsafe { &mut *runtime_ptr }.create_text_node_for_document(document_handle, &text)
-        };
-        children.push(child);
-    }
-    let inserted =
-        custom_elements::with_custom_element_reaction_scope(scope, runtime_ptr, |scope| {
-            for child in children {
-                if !unsafe { &mut *runtime_ptr }
-                    .insert_detached_native_child_appending_to_current_reaction_queue(
-                        scope,
-                        runtime_ptr,
-                        parent,
-                        child,
-                        None,
-                    )
-                {
-                    return false;
-                }
-            }
-            true
-        });
-    if !inserted {
-        return None;
-    }
-    Some(())
+    mutation: ParentNodeMutation,
+) -> bool {
+    let Some(runtime_ptr) = context_host_ptr_from_global_bridge(scope) else {
+        return false;
+    };
+    let Some(parent) = detached_native_handle_for_runtime(scope, runtime_ptr, target) else {
+        return false;
+    };
+    let values = (1..args.length())
+        .map(|index| args.get(index))
+        .collect::<Vec<_>>();
+    mutate_parent_node(scope, runtime_ptr, parent, mutation, &values, true);
+    // Once argument conversion begins, an exception must not fall through to
+    // the legacy implementation and repeat conversions or partial mutations.
+    true
 }
 
 fn detached_replace_children_for_public_mutation<'s>(
@@ -231,6 +202,9 @@ pub(in crate::native_bridge) fn bridge_detached_prepend_callback<'a>(
     let Ok(target) = v8::Local::<v8::Object>::try_from(args.get(0)) else {
         return;
     };
+    if mutate_native_detached_parent(scope, &args, target, ParentNodeMutation::Prepend) {
+        return;
+    }
     let document = detached_owner_document_object(scope, target).unwrap_or(target);
     let mut values = Vec::new();
     for index in 1..args.length() {
@@ -324,6 +298,9 @@ pub(in crate::native_bridge) fn bridge_detached_replace_children_callback<'a>(
     let Ok(target) = v8::Local::<v8::Object>::try_from(args.get(0)) else {
         return;
     };
+    if mutate_native_detached_parent(scope, &args, target, ParentNodeMutation::ReplaceChildren) {
+        return;
+    }
     let document = detached_owner_document_object(scope, target).unwrap_or(target);
     let mut values = Vec::new();
     for index in 1..args.length() {
@@ -357,6 +334,25 @@ pub(in crate::native_bridge) fn bridge_detached_replace_children_callback<'a>(
     });
 }
 
+fn mutate_native_detached_child<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    args: &v8::FunctionCallbackArguments<'s>,
+    target: v8::Local<'s, v8::Object>,
+    mutation: ChildNodeMutation,
+) -> bool {
+    let Some(runtime_ptr) = context_host_ptr_from_global_bridge(scope) else {
+        return false;
+    };
+    let Some(handle) = detached_native_handle_for_runtime(scope, runtime_ptr, target) else {
+        return false;
+    };
+    let values = (1..args.length())
+        .map(|index| args.get(index))
+        .collect::<Vec<_>>();
+    mutate_child_node(scope, runtime_ptr, handle, mutation, &values, true);
+    true
+}
+
 fn detached_fragment_from_child_mutation_values<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     document: v8::Local<'s, v8::Object>,
@@ -377,6 +373,9 @@ pub(in crate::native_bridge) fn bridge_detached_before_callback<'a>(
     let Ok(target) = v8::Local::<v8::Object>::try_from(args.get(0)) else {
         return;
     };
+    if mutate_native_detached_child(scope, &args, target, ChildNodeMutation::Before) {
+        return;
+    }
     let Some(parent) = detached_parent_node_object(scope, target) else {
         return;
     };
@@ -398,6 +397,9 @@ pub(in crate::native_bridge) fn bridge_detached_after_callback<'a>(
     let Ok(target) = v8::Local::<v8::Object>::try_from(args.get(0)) else {
         return;
     };
+    if mutate_native_detached_child(scope, &args, target, ChildNodeMutation::After) {
+        return;
+    }
     let Some(parent) = detached_parent_node_object(scope, target) else {
         return;
     };
@@ -420,6 +422,9 @@ pub(in crate::native_bridge) fn bridge_detached_replace_with_callback<'a>(
     let Ok(target) = v8::Local::<v8::Object>::try_from(args.get(0)) else {
         return;
     };
+    if mutate_native_detached_child(scope, &args, target, ChildNodeMutation::ReplaceWith) {
+        return;
+    }
     let Some(parent) = detached_parent_node_object(scope, target) else {
         return;
     };
@@ -698,6 +703,23 @@ pub(in crate::native_bridge) fn bridge_detached_replace_child_callback<'a>(
         rv.set_null();
         return;
     };
+    if let Some(runtime_ptr) = context_host_ptr_from_global_bridge(scope)
+        && let Some(parent_handle) = detached_native_handle_for_runtime(scope, runtime_ptr, parent)
+    {
+        if replace_node_child(
+            scope,
+            runtime_ptr,
+            parent_handle,
+            args.get(1),
+            args.get(2),
+            true,
+        )
+        .is_some()
+        {
+            rv.set(args.get(2));
+        }
+        return;
+    }
     let Ok(new_child) = v8::Local::<v8::Object>::try_from(args.get(1)) else {
         throw_dom_exception(
             scope,
@@ -726,19 +748,9 @@ pub(in crate::native_bridge) fn bridge_detached_replace_child_callback<'a>(
         throw_dom_exception(scope, name, code, message);
         return;
     }
-    let old_child_is_child = if detached_has_native_handle(scope, parent) {
-        detached_native_parent_is(scope, old_child, parent).unwrap_or(false)
-            || detached_native_mutation_child_node_objects(scope, parent).is_some_and(|children| {
-                children
-                    .into_iter()
-                    .any(|child| child.strict_equals(old_child.into()))
-            })
-            || detached_document_direct_element_child_matches(scope, parent, old_child)
-    } else {
-        detached_parent_node_object(scope, old_child)
-            .is_some_and(|value| value.strict_equals(parent.into()))
-            || detached_document_direct_element_child_matches(scope, parent, old_child)
-    };
+    let old_child_is_child = detached_parent_node_object(scope, old_child)
+        .is_some_and(|value| value.strict_equals(parent.into()))
+        || detached_document_direct_element_child_matches(scope, parent, old_child);
     if !old_child_is_child {
         throw_dom_exception(
             scope,
@@ -754,20 +766,6 @@ pub(in crate::native_bridge) fn bridge_detached_replace_child_callback<'a>(
         return;
     }
     if new_child.strict_equals(old_child.into()) {
-        rv.set(old_child.into());
-        return;
-    }
-    if detached_has_native_handle(scope, parent) {
-        let replaced = with_detached_tree_reaction_scope(scope, |scope| {
-            let reference_child = detached_sibling_object(scope, old_child, 1);
-            detached_detach_from_parent_appending_to_current_reaction_queue(scope, old_child);
-            detached_insert_or_throw(scope, parent, new_child, reference_child)
-        });
-        if !replaced {
-            let (name, code, message) = detached_pre_insert_hierarchy_error();
-            throw_dom_exception(scope, name, code, message);
-            return;
-        }
         rv.set(old_child.into());
         return;
     }
