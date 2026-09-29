@@ -24,11 +24,41 @@ async fn observer_callback_test_vm(url: &str) -> crate::runtime::PageVmTaskExecu
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn child_node_conversion_preserves_order_and_mutation_boundaries() {
+    let mut vm = observer_callback_test_vm("https://child-node-conversion.test/").await;
+    assert_eq!(
+        vm.eval(include_str!("child_node_conversion.js"))
+            .expect("ChildNode conversion must preserve side effects and record boundaries"),
+        "true"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn parent_node_conversion_preserves_order_and_mutation_boundaries() {
+    let mut vm = observer_callback_test_vm("https://parent-node-conversion.test/").await;
+    assert_eq!(
+        vm.eval(include_str!("parent_node_conversion.js"))
+            .expect("ParentNode conversion must preserve side effects and record boundaries"),
+        "true"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn document_preinsert_validation_precedes_mutation_and_adoption() {
     let mut vm = observer_callback_test_vm("https://document-preinsert.test/").await;
     assert_eq!(
         vm.eval(include_str!("document_preinsert_validation.js"))
             .expect("Document pre-insert validation should precede mutation and adoption"),
+        "true"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn node_replacement_preserves_records_adoption_and_live_state() {
+    let mut vm = observer_callback_test_vm("https://node-replacement.test/").await;
+    assert_eq!(
+        vm.eval(include_str!("node_replacement.js"))
+            .expect("Node replacement must preserve records, adoption and live state"),
         "true"
     );
 }
