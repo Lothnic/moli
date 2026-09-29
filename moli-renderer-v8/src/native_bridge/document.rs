@@ -43,6 +43,7 @@ mod queries;
 mod state;
 mod structure;
 
+pub(crate) use attributes::install_attr_prototype;
 pub(crate) use attributes::install_named_node_map_template_bindings;
 pub(crate) use queries::evaluate_live_xpath_search_node_handles;
 
@@ -105,7 +106,7 @@ pub(crate) fn node_document_design_mode_setter_function<'s>(
     }
 }
 
-pub(in crate::native_bridge) use attributes::is_attr_node_value;
+pub(in crate::native_bridge) use attributes::{AttrReference, is_attr_node_value};
 pub(super) use attributes::{
     build_named_node_map_wrapper_template, clear_live_attr_cache_entry,
     clear_live_attr_cache_entry_ns, live_get_attribute_node_ns_object,
@@ -156,7 +157,7 @@ pub(super) use detached_install::install_detached_bridge_methods;
 pub(in crate::native_bridge) use detached_install::{
     clear_detached_iframe_cached_context, clear_detached_iframe_cached_context_for_handle,
     detached_form_owner_object, detached_iframe_content_document, detached_iframe_content_window,
-    detached_label_control_object, detached_shadow_root_for_host, set_detached_node_text_content,
+    detached_label_control_object, detached_shadow_root_for_host,
     set_detached_text_replacement_value,
 };
 use detached_install::{
