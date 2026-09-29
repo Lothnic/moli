@@ -125,7 +125,7 @@ impl DocumentRuntime {
                         scope,
                         host_ptr,
                         insertion_plan,
-                        profile.upgrade_connected_subtrees,
+                        profile,
                     );
                 });
             }
@@ -134,7 +134,7 @@ impl DocumentRuntime {
                     scope,
                     host_ptr,
                     insertion_plan,
-                    profile.upgrade_connected_subtrees,
+                    profile,
                 );
             }
         }
@@ -145,24 +145,11 @@ impl DocumentRuntime {
         scope: &mut v8::PinScope<'_, '_>,
         host_ptr: *mut JsContextHost,
         insertion_plan: &TreeInsertionPlan<'_>,
-        upgrade_connected_subtrees: bool,
+        profile: TreeMutationSourceProfile,
     ) {
         let was_connected = insertion_plan.was_lifecycle_connected_before_insert();
-        let adopted_across_documents = insertion_plan.adoption.crosses_documents();
-        if was_connected && adopted_across_documents && !insertion_plan.inserting_fragment_children
-        {
-            self.enqueue_adoption_disconnected_callbacks_in_subtrees_unless_pending(
-                scope,
-                host_ptr,
-                insertion_plan.insertion_roots,
-            );
-        }
-        self.enqueue_custom_element_disconnected_callbacks_for_moved_roots_if_needed(
-            scope,
-            host_ptr,
-            insertion_plan.insertion_roots,
-            was_connected,
-        );
+        // Ordinary inputs have already run removal steps in this reaction
+        // scope. Parser and atomic moves retain their separate connection policy.
         custom_elements::apply_registry_association_retargets(
             host_ptr,
             &insertion_plan.adoption.custom_elements().registry_retargets,
@@ -172,13 +159,14 @@ impl DocumentRuntime {
             host_ptr,
             &insertion_plan.adoption.custom_elements().targets,
         );
-        self.enqueue_custom_element_connected_callbacks(
-            scope,
-            host_ptr,
-            insertion_plan.insertion_roots,
-            was_connected && !adopted_across_documents,
-            upgrade_connected_subtrees,
-        );
+        if !profile.preserve_connection {
+            self.enqueue_custom_element_connected_callbacks(
+                scope,
+                host_ptr,
+                insertion_plan.insertion_roots,
+                profile.upgrade_connected_subtrees,
+            );
+        }
         let is_lifecycle_connected = insertion_plan
             .insertion_roots
             .iter()
