@@ -2210,6 +2210,8 @@ fn decode_png_dimensions_from_data_url(data_url: &str) -> (u32, u32) {
 mod audio_node_interfaces;
 mod attr_accessors;
 mod attr_node_references;
+mod audio_param_node_interfaces;
+mod audio_source_interfaces;
 mod bitmap_rendering_context_interface_interfaces;
 mod blob_range;
 mod blob_response_headers;
@@ -2335,7 +2337,6 @@ mod body_mime_consolidation;
 mod observer_element_arguments;
 mod report_body_interface_exposure;
 
-mod media_device_interfaces;
 mod dom_rect_structured_clone;
 mod domrect_receiver_consolidation;
 mod window_promise_method_receivers;
@@ -2343,4 +2344,3 @@ mod window_restricted_accessors;
 mod window_scheduling_receivers;
 mod window_scroll_methods;
 mod window_sync_method_receivers;
-mod worklet_interfaces;
