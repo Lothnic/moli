@@ -77,8 +77,10 @@ use super::super::{
         audio_buffer_constructor, audio_buffer_source_constructor_callback,
         build_audio_context_constructor_template, build_audio_worklet_node_constructor_template,
         channel_merger_constructor, channel_splitter_constructor,
-        constant_source_constructor_callback, delay_constructor, gain_constructor,
-        offline_audio_context_constructor_callback, stereo_panner_constructor,
+        constant_source_constructor_callback, convolver_constructor, delay_constructor,
+        gain_constructor, iir_constructor, offline_audio_context_constructor_callback,
+        oscillator_constructor, periodic_wave_constructor, stereo_panner_constructor,
+        wave_shaper_constructor,
     },
     webrtc::{
         rtc_data_channel_event_constructor_callback, rtc_error_event_constructor_callback,
@@ -1151,6 +1153,46 @@ pub(in crate::context_bootstrap) fn build_constructor_template_for_profile<'s>(
             .length(1)
             .build(scope)
         }
+        ConstructorKind::ConvolverNode => {
+            v8::FunctionTemplate::builder(moli_webapi_declare::web_api_constructor!(
+                web_api_interfaces::ConvolverNode,
+                convolver_constructor
+            ))
+            .length(1)
+            .build(scope)
+        }
+        ConstructorKind::IIRFilterNode => {
+            v8::FunctionTemplate::builder(moli_webapi_declare::web_api_constructor!(
+                web_api_interfaces::IIRFilterNode,
+                iir_constructor
+            ))
+            .length(2)
+            .build(scope)
+        }
+        ConstructorKind::PeriodicWave => {
+            v8::FunctionTemplate::builder(moli_webapi_declare::web_api_constructor!(
+                web_api_interfaces::PeriodicWave,
+                periodic_wave_constructor
+            ))
+            .length(1)
+            .build(scope)
+        }
+        ConstructorKind::OscillatorNode => {
+            v8::FunctionTemplate::builder(moli_webapi_declare::web_api_constructor!(
+                web_api_interfaces::OscillatorNode,
+                oscillator_constructor
+            ))
+            .length(1)
+            .build(scope)
+        }
+        ConstructorKind::WaveShaperNode => {
+            v8::FunctionTemplate::builder(moli_webapi_declare::web_api_constructor!(
+                web_api_interfaces::WaveShaperNode,
+                wave_shaper_constructor
+            ))
+            .length(1)
+            .build(scope)
+        }
         ConstructorKind::GainNode => {
             v8::FunctionTemplate::builder(moli_webapi_declare::web_api_constructor!(
                 web_api_interfaces::GainNode,
@@ -1196,7 +1238,7 @@ pub(in crate::context_bootstrap) fn build_constructor_template_for_profile<'s>(
                 web_api_interfaces::OfflineAudioContext,
                 offline_audio_context_constructor_callback
             ))
-            .length(3)
+            .length(1)
             .build(scope)
         }
         ConstructorKind::AudioBuffer => {
@@ -1209,7 +1251,6 @@ pub(in crate::context_bootstrap) fn build_constructor_template_for_profile<'s>(
         }
         ConstructorKind::BaseAudioContext
         | ConstructorKind::AudioDestinationNode
-        | ConstructorKind::OscillatorNode
         | ConstructorKind::DynamicsCompressorNode
         | ConstructorKind::AnalyserNode
         | ConstructorKind::BiquadFilterNode
