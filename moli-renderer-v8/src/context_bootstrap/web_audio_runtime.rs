@@ -16,10 +16,25 @@ mod audio_param;
 mod biquad;
 mod buffer;
 mod channel_nodes;
+mod convolver;
+mod format;
+
+pub(in crate::context_bootstrap) use convolver::constructor as convolver_constructor;
 mod graph;
+mod iir;
+pub(in crate::context_bootstrap) use iir::constructor as iir_constructor;
 mod node;
+mod offline_context;
+mod oscillator;
 mod param_nodes;
+mod periodic_wave;
 mod source;
+mod wave_shaper;
+
+pub(in crate::context_bootstrap) use offline_context::constructor as offline_audio_context_constructor_callback;
+pub(in crate::context_bootstrap) use oscillator::constructor as oscillator_constructor;
+pub(in crate::context_bootstrap) use periodic_wave::constructor as periodic_wave_constructor;
+pub(in crate::context_bootstrap) use wave_shaper::constructor as wave_shaper_constructor;
 
 pub(in crate::context_bootstrap) use buffer::constructor as audio_buffer_constructor;
 pub(in crate::context_bootstrap) use channel_nodes::{
@@ -176,17 +191,6 @@ struct OfflineAudioContextObjectDeclaration<'scope> {
 }
 
 #[derive(WebApiObject)]
-#[webapi(interface = web_api_interfaces::OscillatorNode)]
-struct OscillatorNodeObjectDeclaration<'scope> {
-    #[webapi(data_property = "type")]
-    kind: &'static str,
-    #[webapi(data_property)]
-    frequency: v8::Local<'scope, v8::Object>,
-    #[webapi(data_property, readonly)]
-    detune: v8::Local<'scope, v8::Object>,
-}
-
-#[derive(WebApiObject)]
 #[webapi(interface = web_api_interfaces::DynamicsCompressorNode)]
 struct DynamicsCompressorNodeObjectDeclaration<'scope> {
     #[webapi(data_property)]
@@ -326,17 +330,6 @@ const SYNTHETIC_ANALYSER_FREQUENCY_BINS: &[f64] = &[
 ];
 
 #[derive(webidl::WebIdlArgs)]
-#[webidl(prefix = "OfflineAudioContext")]
-struct OfflineAudioContextConstructorArgs {
-    #[webidl(required)]
-    channel_count: f64,
-    #[webidl(required)]
-    length: f64,
-    #[webidl(required)]
-    sample_rate: f32,
-}
-
-#[derive(webidl::WebIdlArgs)]
 #[webidl(prefix = "AudioParam.setValueAtTime")]
 struct AudioParamSetValueAtTimeArgs {
     #[webidl(required)]
@@ -376,8 +369,18 @@ struct AudioWorkletNodeTemplateDeclaration {}
 #[derive(WebApiFunctionTemplate)]
 #[webapi(interface = web_api_interfaces::BaseAudioContext, enumerable)]
 struct BaseAudioContextPrototypeDeclaration {
+    #[webapi(accessor_property, receiver = web_api_interfaces::BaseAudioContext::is_instance, getter = offline_context::render_quantum_size_getter)]
+    render_quantum_size: (),
     #[webapi(method, receiver = web_api_interfaces::BaseAudioContext::is_instance, length = 3, callback = buffer::create)]
     create_buffer: (),
+    #[webapi(method, receiver = web_api_interfaces::BaseAudioContext::is_instance, length = 0, callback = wave_shaper::create)]
+    create_wave_shaper: (),
+    #[webapi(method, receiver = web_api_interfaces::BaseAudioContext::is_instance, length = 0, callback = convolver::create)]
+    create_convolver: (),
+    #[webapi(method = "createIIRFilter", receiver = web_api_interfaces::BaseAudioContext::is_instance, length = 2, callback = iir::create)]
+    create_iir_filter: (),
+    #[webapi(method, receiver = web_api_interfaces::BaseAudioContext::is_instance, length = 2, callback = periodic_wave::create)]
+    create_periodic_wave: (),
     #[webapi(method, receiver = web_api_interfaces::BaseAudioContext::is_instance, length = 0, callback = param_nodes::create_gain)]
     create_gain: (),
     #[webapi(method, receiver = web_api_interfaces::BaseAudioContext::is_instance, length = 0, callback = channel_nodes::create_channel_merger)]
@@ -398,7 +401,8 @@ struct BaseAudioContextPrototypeDeclaration {
     #[webapi(
         method = "createOscillator",
         length = 0,
-        callback = audio_context_create_oscillator_callback
+        receiver = web_api_interfaces::BaseAudioContext::is_instance,
+        callback = oscillator::create
     )]
     create_oscillator: (),
 
@@ -451,6 +455,10 @@ pub(in crate::context_bootstrap) fn install_web_audio_template_bindings<'s>(
     source::install(scope, template, interface_name);
     match interface_name {
         "AudioBuffer" => buffer::install(scope, template),
+        "WaveShaperNode" => wave_shaper::install(scope, template),
+        "ConvolverNode" => convolver::install(scope, template),
+        "IIRFilterNode" => iir::install(scope, template),
+        "OscillatorNode" => oscillator::install(scope, template),
         "Worklet" => WorkletPrototypeDeclaration::initialize_prototype_template(
             scope,
             template.prototype_template(scope),
@@ -1250,77 +1258,6 @@ fn dynamics_compressor_reduction_getter_callback<'s>(
     rv.set(v8::Number::new(scope, value).into());
 }
 
-pub(in crate::context_bootstrap) fn offline_audio_context_constructor_callback<'s>(
-    scope: &mut v8::PinScope<'s, '_>,
-    args: v8::FunctionCallbackArguments<'s>,
-    mut rv: v8::ReturnValue<'s, v8::Value>,
-) {
-    if !args.is_construct_call() {
-        throw_type_error(
-            scope,
-            "Failed to construct 'OfflineAudioContext': Please use the 'new' operator.",
-        );
-        return;
-    }
-
-    let Some(parsed) = webidl::parse_args::<OfflineAudioContextConstructorArgs>(scope, &args)
-    else {
-        return;
-    };
-
-    let channel_count = parsed.channel_count.trunc();
-    let length = parsed.length.trunc();
-    let sample_rate = f64::from(parsed.sample_rate);
-    if !channel_count.is_finite()
-        || !length.is_finite()
-        || !sample_rate.is_finite()
-        || channel_count <= 0.0
-        || length <= 0.0
-        || sample_rate <= 0.0
-    {
-        throw_type_error(
-            scope,
-            "Failed to construct 'OfflineAudioContext': invalid channel count, length, or sample rate.",
-        );
-        return;
-    }
-
-    let context = args.this();
-    let destination = audio_destination_node(scope, context);
-    let compressors = v8::Array::new(scope, 0);
-    let modules = new_web_audio_map_object(scope);
-    let module_list = v8::Array::new(scope, 0);
-    let processors = new_web_audio_map_object(scope);
-    set_private_value(scope, context, AUDIO_CONTEXT_MODULES_SLOT, modules.into());
-    set_private_value(
-        scope,
-        context,
-        AUDIO_CONTEXT_MODULE_LIST_SLOT,
-        module_list.into(),
-    );
-    set_private_value(
-        scope,
-        context,
-        AUDIO_CONTEXT_PROCESSORS_SLOT,
-        processors.into(),
-    );
-    OfflineAudioContextObjectDeclaration::new(
-        0.0,
-        length,
-        sample_rate,
-        length,
-        sample_rate,
-        channel_count,
-        compressors,
-        OFFLINE_AUDIO_LISTENERS_SLOT,
-        "suspended",
-        destination,
-    )
-    .initialize(scope, context)
-    .expect("OfflineAudioContext declaration should initialize object");
-    rv.set(context.into());
-}
-
 fn require_base_audio_context<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     object: v8::Local<'s, v8::Object>,
@@ -1330,25 +1267,6 @@ fn require_base_audio_context<'s>(
     }
     throw_type_error(scope, "Illegal invocation: expected a BaseAudioContext.");
     false
-}
-
-fn audio_context_create_oscillator_callback<'s>(
-    scope: &mut v8::PinScope<'s, '_>,
-    args: v8::FunctionCallbackArguments<'s>,
-    mut rv: v8::ReturnValue<'s, v8::Value>,
-) {
-    if !require_base_audio_context(scope, args.this()) {
-        return;
-    }
-    let nyquist = audio_context_sample_rate(scope, args.this()) / 2.0;
-    let frequency = audio_param(scope, 440.0, -nyquist, nyquist);
-    let detune = detune_param(scope);
-    let node = OscillatorNodeObjectDeclaration::new("sine", frequency, detune)
-        .bind(scope)
-        .expect("OscillatorNode declaration should bind");
-    graph::initialize_node(scope, node, args.this());
-    source::initialize_scheduling(scope, node);
-    rv.set(node.into());
 }
 
 fn audio_context_create_dynamics_compressor_callback<'s>(
