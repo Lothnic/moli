@@ -2332,7 +2332,6 @@ mod window_cross_origin_getters;
 mod window_event_receivers;
 mod window_execution_context;
 mod window_getter_consolidation;
-mod worklet_interfaces;
 mod payment_response_interfaces;
 
 mod body_mime_consolidation;
