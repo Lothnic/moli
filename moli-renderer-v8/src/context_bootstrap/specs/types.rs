@@ -218,6 +218,7 @@ pub(in crate::context_bootstrap) enum ConstructorKind {
     GainNode,
     WaveShaperNode,
     ConvolverNode,
+    IIRFilterNode,
     ChannelMergerNode,
     ChannelSplitterNode,
     DelayNode,

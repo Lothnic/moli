@@ -2278,6 +2278,7 @@ mod svg_transform_sync_consolidation;
 mod audio_value_owner_interface_exposure_interfaces;
 mod hyperlink_null_url_protocol;
 mod iframe_reinsertion;
+mod iir_filter_interfaces;
 mod import_meta;
 mod indexed_db;
 mod inspector_unwrap;
