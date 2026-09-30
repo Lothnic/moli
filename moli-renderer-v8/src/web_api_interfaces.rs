@@ -56,11 +56,15 @@ interfaces! {
     ConstantSourceNode: AudioScheduledSourceNode;
     DelayNode: AudioNode;
     GainNode: AudioNode;
+    IIRFilterNode: AudioNode;
+    PeriodicWave;
     Gamepad;
     GamepadButton;
     GamepadEvent: Event;
     GamepadHapticActuator;
     StereoPannerNode: AudioNode;
+    WaveShaperNode: AudioNode;
+    ConvolverNode: AudioNode;
     Blob;
     BlobEvent: Event;
     BroadcastChannel: EventTarget;
