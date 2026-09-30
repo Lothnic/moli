@@ -38,11 +38,13 @@ interfaces! {
     Attr: Node;
     Audio;
     AudioBuffer;
+    AudioBufferSourceNode: AudioScheduledSourceNode;
     AudioContext: BaseAudioContext;
     AudioDestinationNode: AudioNode;
     AudioListener;
     AudioParamMap;
     AudioNode: EventTarget;
+    AudioScheduledSourceNode: AudioNode;
     AudioParam;
     Worklet;
     AudioWorklet: Worklet;
@@ -52,6 +54,10 @@ interfaces! {
     BatteryManager;
     BeforeUnloadEvent: Event;
     BiquadFilterNode: AudioNode;
+    ConstantSourceNode: AudioScheduledSourceNode;
+    DelayNode: AudioNode;
+    GainNode: AudioNode;
+    StereoPannerNode: AudioNode;
     Blob;
     BlobEvent: Event;
     BroadcastChannel: EventTarget;
@@ -388,7 +394,7 @@ interfaces! {
     OffscreenCanvas;
     OffscreenCanvasRenderingContext2D;
     Option;
-    OscillatorNode: AudioNode;
+    OscillatorNode: AudioScheduledSourceNode;
     PageTransitionEvent: Event;
     Path2D;
     PaymentResponse: EventTarget;
