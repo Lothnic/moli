@@ -2224,6 +2224,7 @@ mod blob_range;
 mod blob_response_headers;
 mod body_completion;
 mod body_mime;
+mod body_mime_consolidation;
 mod body_window_handler_receivers;
 mod browser_api;
 mod cache_interfaces;
@@ -2303,6 +2304,7 @@ mod node_normalization;
 mod observable;
 mod observer_callbacks;
 mod observer_documents;
+mod observer_element_arguments;
 mod observer_receivers;
 mod offline_audio_context_interfaces;
 mod performance_receivers;
@@ -2350,8 +2352,6 @@ mod window_execution_context;
 mod window_getter_consolidation;
 mod payment_response_interfaces;
 
-mod body_mime_consolidation;
-mod observer_element_arguments;
 mod report_body_interface_exposure;
 
 mod dom_rect_structured_clone;
