@@ -613,6 +613,14 @@ const CONSTRUCTOR_SPECS_BEFORE_STREAMS: &[ConstructorSpec] = &[
         kind: ConstructorKind::Animation,
     },
     ConstructorSpec {
+        interface: web_api_interfaces::CSSAnimation::DESCRIPTOR,
+        kind: ConstructorKind::Illegal,
+    },
+    ConstructorSpec {
+        interface: web_api_interfaces::CSSTransition::DESCRIPTOR,
+        kind: ConstructorKind::Illegal,
+    },
+    ConstructorSpec {
         interface: web_api_interfaces::AnimationEffect::DESCRIPTOR,
         kind: ConstructorKind::Illegal,
     },

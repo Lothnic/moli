@@ -57,6 +57,7 @@ interfaces! {
     BroadcastChannel: EventTarget;
     ByteLengthQueuingStrategy;
     CDATASection: Text;
+    CSSAnimation: Animation;
     CSSConditionRule: CSSGroupingRule;
     CSSContainerRule: CSSConditionRule;
     CSSCounterStyleRule: CSSRule;
@@ -91,6 +92,7 @@ interfaces! {
     CSSStyleSheet: StyleSheet;
     CSSStyleValue;
     CSSSupportsRule: CSSConditionRule;
+    CSSTransition: Animation;
     CSSUnitValue: CSSNumericValue;
     Cache;
     CacheStorage;
