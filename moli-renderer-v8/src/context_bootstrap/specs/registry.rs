@@ -266,11 +266,11 @@ const CONSTRUCTOR_SPECS_BEFORE_STREAMS: &[ConstructorSpec] = &[
     },
     ConstructorSpec {
         interface: web_api_interfaces::RTCError::DESCRIPTOR,
-        kind: ConstructorKind::Shell { length: 1 },
+        kind: ConstructorKind::RtcError,
     },
     ConstructorSpec {
         interface: web_api_interfaces::RTCErrorEvent::DESCRIPTOR,
-        kind: ConstructorKind::Shell { length: 2 },
+        kind: ConstructorKind::RtcErrorEvent,
     },
     ConstructorSpec {
         interface: web_api_interfaces::RTCIceTransport::DESCRIPTOR,
@@ -278,7 +278,7 @@ const CONSTRUCTOR_SPECS_BEFORE_STREAMS: &[ConstructorSpec] = &[
     },
     ConstructorSpec {
         interface: web_api_interfaces::RTCPeerConnectionIceErrorEvent::DESCRIPTOR,
-        kind: ConstructorKind::Shell { length: 2 },
+        kind: ConstructorKind::RtcPeerConnectionIceErrorEvent,
     },
     ConstructorSpec {
         interface: web_api_interfaces::RTCRtpScriptTransform::DESCRIPTOR,
