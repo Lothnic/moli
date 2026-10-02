@@ -62,25 +62,6 @@ struct InitStorageEventArgs<'s> {
 }
 
 #[derive(webidl::WebIdlArgs)]
-#[webidl(prefix = "UIEvent.initUIEvent")]
-struct InitUiEventArgs<'s> {
-    #[webidl(
-        required,
-        converter = "raw",
-        missing_message = "Failed to execute 'initUIEvent': 1 argument required."
-    )]
-    event_type: webidl::DomString16,
-    #[webidl(default = false)]
-    bubbles: bool,
-    #[webidl(default = false)]
-    cancelable: bool,
-    #[webidl(index = 3, converter = "raw")]
-    view: Option<v8::Local<'s, v8::Value>>,
-    #[webidl(default = 0, index = 4)]
-    detail: i32,
-}
-
-#[derive(webidl::WebIdlArgs)]
 #[webidl(prefix = "MouseEvent.initMouseEvent")]
 struct InitMouseEventArgs<'s> {
     #[webidl(
@@ -125,33 +106,6 @@ struct InitMouseEventArgs<'s> {
 }
 
 #[derive(webidl::WebIdlArgs)]
-#[webidl(prefix = "KeyboardEvent.initKeyboardEvent")]
-struct InitKeyboardEventArgs<'s> {
-    #[webidl(
-        required,
-        converter = "raw",
-        missing_message = "Failed to execute 'initKeyboardEvent': 1 argument required."
-    )]
-    event_type: webidl::DomString16,
-    #[webidl(default = false)]
-    bubbles: bool,
-    #[webidl(default = false)]
-    cancelable: bool,
-    #[webidl(index = 3, converter = "raw")]
-    view: Option<v8::Local<'s, v8::Value>>,
-    #[webidl(default = "", index = 4)]
-    key: String,
-    #[webidl(default = 0, index = 5)]
-    location: i32,
-    #[webidl(default = "", index = 6)]
-    _modifiers_list: String,
-    #[webidl(default = false, index = 7)]
-    repeat: bool,
-    #[webidl(default = "", index = 8)]
-    _locale: String,
-}
-
-#[derive(webidl::WebIdlArgs)]
 #[webidl(prefix = "TextEvent.initTextEvent")]
 struct InitTextEventArgs<'s> {
     #[webidl(
@@ -168,32 +122,6 @@ struct InitTextEventArgs<'s> {
     view: Option<v8::Local<'s, v8::Value>>,
     #[webidl(default = "undefined", index = 4)]
     data: String,
-}
-
-#[derive(webidl::WebIdlArgs)]
-#[webidl(prefix = "CompositionEvent.initCompositionEvent")]
-struct InitCompositionEventArgs<'s> {
-    #[webidl(
-        required,
-        converter = "raw",
-        missing_message = "Failed to execute 'initCompositionEvent': 1 argument required."
-    )]
-    event_type: webidl::DomString16,
-    #[webidl(default = false)]
-    bubbles: bool,
-    #[webidl(default = false)]
-    cancelable: bool,
-    #[webidl(index = 3, converter = "raw")]
-    view: Option<v8::Local<'s, v8::Value>>,
-    #[webidl(default = "", index = 4)]
-    data: String,
-}
-
-#[derive(WebApiObject)]
-#[webapi(plain, data_properties, enumerable)]
-struct LegacyUiEventInitDeclaration<'scope> {
-    view: v8::Local<'scope, v8::Value>,
-    detail: i32,
 }
 
 #[derive(WebApiObject)]
@@ -230,20 +158,6 @@ struct LegacyMouseEventTailInitDeclaration<'scope> {
     #[webapi(constructor_default = 0)]
     buttons: i32,
     related_target: v8::Local<'scope, v8::Value>,
-}
-
-#[derive(WebApiObject)]
-#[webapi(plain, data_properties, enumerable)]
-struct LegacyKeyboardEventInitDeclaration<'scope> {
-    view: v8::Local<'scope, v8::Value>,
-    #[webapi(constructor_default = 0)]
-    detail: i32,
-    key: v8::Local<'scope, v8::String>,
-    code: v8::Local<'scope, v8::String>,
-    location: i32,
-    repeat: bool,
-    #[webapi(constructor_default = false)]
-    is_composing: bool,
 }
 
 #[derive(WebApiObject)]
@@ -300,30 +214,6 @@ pub(super) fn event_init_event_callback<'s>(
         parsed.bubbles,
         parsed.cancelable,
     );
-}
-
-pub(super) fn ui_event_init_callback<'s>(
-    scope: &mut v8::PinScope<'s, '_>,
-    args: v8::FunctionCallbackArguments<'s>,
-    _rv: v8::ReturnValue<'_, v8::Value>,
-) {
-    let event = super::events::event_backing(scope, args.this());
-    let Some(parsed) = webidl::parse_args::<InitUiEventArgs>(scope, &args) else {
-        return;
-    };
-    let view = legacy_event_view_or_global(scope, parsed.view);
-    if !reinitialize_event_object(
-        scope,
-        event,
-        &parsed.event_type.0,
-        parsed.bubbles,
-        parsed.cancelable,
-    ) {
-        return;
-    }
-    LegacyUiEventInitDeclaration::new(view, parsed.detail)
-        .initialize(scope, event)
-        .expect("legacy UIEvent init declaration should initialize");
 }
 
 pub(super) fn text_event_init_callback<'s>(
@@ -401,58 +291,6 @@ pub(super) fn mouse_event_init_callback<'s>(
     LegacyMouseEventTailInitDeclaration::new(related_target)
         .initialize(scope, event)
         .expect("legacy MouseEvent tail init declaration should initialize");
-}
-
-pub(super) fn keyboard_event_init_callback<'s>(
-    scope: &mut v8::PinScope<'s, '_>,
-    args: v8::FunctionCallbackArguments<'s>,
-    _rv: v8::ReturnValue<'_, v8::Value>,
-) {
-    let event = super::events::event_backing(scope, args.this());
-    let Some(parsed) = webidl::parse_args::<InitKeyboardEventArgs>(scope, &args) else {
-        return;
-    };
-    let view = legacy_event_view_or_global(scope, parsed.view);
-    if !reinitialize_event_object(
-        scope,
-        event,
-        &parsed.event_type.0,
-        parsed.bubbles,
-        parsed.cancelable,
-    ) {
-        return;
-    }
-    let key = v8_string(scope, &parsed.key).unwrap_or_else(|| v8str(scope, ""));
-    let code = v8str(scope, "");
-    super::events::initialize_legacy_event_modifiers(scope, event, false, false, false, false);
-    LegacyKeyboardEventInitDeclaration::new(view, key, code, parsed.location, parsed.repeat)
-        .initialize(scope, event)
-        .expect("legacy KeyboardEvent init declaration should initialize");
-}
-
-pub(super) fn composition_event_init_callback<'s>(
-    scope: &mut v8::PinScope<'s, '_>,
-    args: v8::FunctionCallbackArguments<'s>,
-    _rv: v8::ReturnValue<'_, v8::Value>,
-) {
-    let event = super::events::event_backing(scope, args.this());
-    let Some(parsed) = webidl::parse_args::<InitCompositionEventArgs>(scope, &args) else {
-        return;
-    };
-    let view = legacy_event_view_or_global(scope, parsed.view);
-    if !reinitialize_event_object(
-        scope,
-        event,
-        &parsed.event_type.0,
-        parsed.bubbles,
-        parsed.cancelable,
-    ) {
-        return;
-    }
-    let data = v8_string(scope, &parsed.data).expect("composition event data");
-    LegacyTextEventInitDeclaration::new(view, 0.0, data)
-        .initialize(scope, event)
-        .expect("legacy CompositionEvent init declaration should initialize");
 }
 
 pub(super) fn custom_event_init_callback<'s>(
