@@ -14,7 +14,8 @@ use crate::{
             construct_form_data_event, dispatch_public_event, form_associated_form_owner,
             is_valid_submit_button,
         },
-        node_relevant_context_for_handle, node_runtime_and_handle_from_object_or_detached, throw_dom_exception,
+        node_relevant_context_for_handle, node_runtime_and_handle_from_object_or_detached,
+        throw_dom_exception,
     },
     util::serialize_v8_iter_array,
     web_api_interfaces, webidl,
@@ -152,12 +153,9 @@ pub(super) fn form_data_constructor_callback<'s>(
                 return;
             }
         }
-        let Some(next_entries) = construct_form_data_entries_for_form(
-            scope,
-            form_runtime_ptr,
-            form_handle,
-            submitter,
-        ) else {
+        let Some(next_entries) =
+            construct_form_data_entries_for_form(scope, form_runtime_ptr, form_handle, submitter)
+        else {
             return;
         };
         entries = next_entries;

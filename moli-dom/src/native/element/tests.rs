@@ -484,7 +484,7 @@ fn set_attribute_preserves_existing_prefix_on_update() {
 }
 
 #[test]
-fn input_type_change_sanitizes_without_dirtying_default_value() {
+fn input_type_change_preserves_current_value_without_dirtying_it() {
     let mut input = Element::new_html("input");
     assert_eq!(input.input_value(), "");
     assert!(!input.input_value_dirty());
@@ -494,7 +494,8 @@ fn input_type_change_sanitizes_without_dirtying_default_value() {
     assert!(!input.input_value_dirty());
 
     assert!(input.set_attribute("type".to_owned(), String::new(), None, "text".to_owned()));
-    assert_eq!(input.input_value(), "");
+    assert_eq!(input.input_value(), "#000000");
+    assert_eq!(input.attribute_ns("", "value"), None);
     assert!(!input.input_value_dirty());
 
     assert!(input.set_attribute("type".to_owned(), String::new(), None, "color".to_owned()));
@@ -503,6 +504,171 @@ fn input_type_change_sanitizes_without_dirtying_default_value() {
     assert!(input.set_attribute("type".to_owned(), String::new(), None, "text".to_owned()));
     assert_eq!(input.input_value(), "#ffffff");
     assert!(input.input_value_dirty());
+}
+
+#[test]
+fn input_reflected_value_modes_follow_attributes_without_creating_a_dirty_value() {
+    use crate::native::DomStringValue;
+    let raw = DomStringValue::from_utf16(&[0xd800, 13, 10, 0xdc00]);
+    let mut input = Element::new_html("input");
+    input.set_attribute("type".to_owned(), String::new(), None, "hidden".to_owned());
+    assert!(input.set_input_value(&raw));
+    assert_eq!(
+        input.attribute_ns_dom_string("", "value"),
+        Some(raw.clone())
+    );
+    assert!(!input.input_value_dirty());
+    assert_eq!(input.input_value_dom_string(), raw);
+    input.set_attribute(
+        "value".to_owned(),
+        String::new(),
+        None,
+        "attribute".to_owned(),
+    );
+    assert_eq!(input.input_value(), "attribute");
+    input.set_attribute("type".to_owned(), String::new(), None, "text".to_owned());
+    assert!(!input.input_value_dirty());
+    input.set_input_value("live");
+    input.set_attribute(
+        "type".to_owned(),
+        String::new(),
+        None,
+        "checkbox".to_owned(),
+    );
+    assert_eq!(input.attribute_ns("", "value"), Some("live"));
+    assert!(input.input_value_dirty());
+    input.remove_attribute("value");
+    assert_eq!(input.input_value(), "on");
+    input.set_attribute("type".to_owned(), String::new(), None, "text".to_owned());
+    assert_eq!(input.input_value(), "");
+    assert!(!input.input_value_dirty());
+}
+
+#[test]
+fn input_type_changes_transfer_current_utf16_values_and_clear_file_state() {
+    use crate::native::{DomStringValue, SelectedFile};
+    let mut input = Element::new_html("input");
+    let raw = DomStringValue::from_utf16(&[0xd800, 0x61, 0xdc00]);
+    input.set_input_value(&raw);
+    input.set_attribute_ns("type".to_owned(), String::new(), None, "button".to_owned());
+    assert_eq!(
+        input.attribute_ns_dom_string("", "value"),
+        Some(raw.clone())
+    );
+    input.remove_attribute_ns("", "type");
+    assert_eq!(input.input_value_dom_string(), raw);
+    assert!(!input.input_value_dirty());
+    input.set_attribute("type".to_owned(), String::new(), None, "file".to_owned());
+    input.set_selected_files(vec![SelectedFile {
+        name: "file.txt".to_owned(),
+        bytes: vec![1],
+        mime_type: "text/plain".to_owned(),
+        last_modified: 0.0,
+    }]);
+    input.set_attribute("type".to_owned(), String::new(), None, "FILE".to_owned());
+    assert_eq!(input.selected_files().len(), 1);
+    assert_eq!(input.input_value(), "C:\\fakepath\\file.txt");
+    input.remove_attribute("type");
+    assert_eq!(input.input_value_dom_string(), raw);
+    assert!(!input.input_value_dirty());
+    input.set_attribute("type".to_owned(), String::new(), None, "file".to_owned());
+    assert!(input.selected_files().is_empty());
+    assert_eq!(input.input_value(), "");
+}
+
+#[test]
+fn namespaced_input_attributes_do_not_change_the_type_or_value_mode() {
+    let mut input = Element::new_html("input");
+    input.set_attribute_ns(
+        "type".to_owned(),
+        "urn:foreign".to_owned(),
+        None,
+        "checkbox".to_owned(),
+    );
+    input.set_attribute_ns(
+        "value".to_owned(),
+        "urn:foreign".to_owned(),
+        None,
+        "foreign".to_owned(),
+    );
+    assert_eq!(input.input_type(), super::InputType::Text);
+    assert_eq!(input.input_value(), "");
+    input.set_attribute_ns(
+        "type".to_owned(),
+        String::new(),
+        None,
+        "checkbox".to_owned(),
+    );
+    assert_eq!(input.input_value(), "on");
+    input.set_input_value("native");
+    assert_eq!(input.attribute_ns("urn:foreign", "value"), Some("foreign"));
+    assert_eq!(input.attribute_ns("", "value"), Some("native"));
+    input.remove_attribute_ns("urn:foreign", "type");
+    assert_eq!(input.input_type(), super::InputType::Checkbox);
+}
+
+#[test]
+fn input_values_preserve_utf16_through_dirty_defaults_cloning_and_sanitization() {
+    use crate::native::DomStringValue;
+
+    let high = DomStringValue::from_utf16(&[0xd800]);
+    let low = DomStringValue::from_utf16(&[0xdc00]);
+    let mut input = Element::new_html("input");
+    assert!(input.set_attribute_ns_utf16_units(
+        "value".to_owned(),
+        String::new(),
+        None,
+        high.as_str_lossy().to_owned(),
+        high.utf16_units().into_owned(),
+    ));
+    assert_eq!(input.input_value_dom_string(), high);
+    assert!(!input.input_value_dirty());
+    assert!(input.set_input_value(&low));
+    assert!(input.input_value_dirty());
+    assert!(input.set_attribute(
+        "value".to_owned(),
+        String::new(),
+        None,
+        "\u{fffd}".to_owned()
+    ));
+    assert_eq!(input.input_value_dom_string(), low);
+    let clone = input.clone();
+    assert_eq!(clone.input_value_dom_string(), low);
+    assert!(clone.input_value_dirty());
+
+    assert!(input.set_attribute("type".to_owned(), String::new(), None, "url".to_owned()));
+    assert!(input.set_input_value(DomStringValue::from_utf16(&[
+        0x20, 0xd800, 0x0d, 0x0a, 0x20
+    ])));
+    assert_eq!(input.input_value_dom_string(), high);
+    let default_value = input.attribute_dom_string("value").unwrap();
+    assert!(input.set_input_value_with_dirty(default_value, false));
+    assert_eq!(
+        input.input_value_dom_string(),
+        DomStringValue::from("\u{fffd}")
+    );
+    assert!(!input.input_value_dirty());
+
+    for input_type in ["number", "date", "month", "time", "week", "datetime-local"] {
+        input.set_attribute(
+            "type".to_owned(),
+            String::new(),
+            None,
+            input_type.to_owned(),
+        );
+        input.set_input_value(&high);
+        assert!(input.input_value_dom_string().is_empty(), "{input_type}");
+    }
+    let mut textarea = Element::new_html("textarea");
+    let raw = DomStringValue::from_utf16(&[0xd800, 0x0d, 0x0a, 0xdc00, 0x0d]);
+    assert!(textarea.set_input_value(&raw));
+    assert_eq!(textarea.input_value_dom_string(), raw);
+    assert_eq!(
+        crate::forms::normalize_textarea_dom_string_value(&raw)
+            .utf16_units()
+            .as_ref(),
+        &[0xd800, 0x0a, 0xdc00, 0x0a],
+    );
 }
 
 #[test]
