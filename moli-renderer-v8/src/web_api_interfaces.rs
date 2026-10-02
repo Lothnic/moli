@@ -49,15 +49,11 @@ interfaces! {
     VideoEncoder: EventTarget;
     CSSAnimation: Animation;
     CSSTransition: Animation;
-    CanvasCaptureMediaStreamTrack: MediaStreamTrack;
     ImageBitmapRenderingContext;
     MediaEncryptedEvent: Event;
     MediaMetadata;
-    MediaRecorder: EventTarget;
-    MediaSession;
     MediaSourceHandle;
     MediaStream: EventTarget;
-    MediaStreamTrack: EventTarget;
     MediaStreamTrackEvent: Event;
     OverconstrainedError: DOMException;
     PictureInPictureEvent: Event;
@@ -65,10 +61,8 @@ interfaces! {
     RemotePlayback: EventTarget;
     SourceBuffer: EventTarget;
     SourceBufferList: EventTarget;
-    TimeRanges;
     VideoColorSpace;
     VideoFrame;
-    VideoPlaybackQuality;
     AudioListener;
     AudioParamMap;
     MediaElementAudioSourceNode: AudioNode;
@@ -271,7 +265,6 @@ interfaces! {
     DynamicsCompressorNode: AudioNode;
     Element: Node;
     ElementInternals;
-    EncodedVideoChunk;
     ErrorEvent: Event;
     Event;
     EventCounts;
