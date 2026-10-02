@@ -15,16 +15,17 @@ pub use interface_names::{
 use attribute::{normalized_option_text_content, split_class_names};
 use html5ever::{LocalName, Namespace, Prefix};
 use indexmap::IndexSet;
+use moli_html_input_type::InputValueMode;
 use rare_data::ElementRareData;
 use selectors::attr::CaseSensitivity;
 use thin_vec::ThinVec;
 
-use super::NativeDom;
 use super::node::{NativeNodeId, Node};
+use super::{DomStringValue, NativeDom};
 use crate::custom_elements::is_valid_custom_element_name;
 use crate::forms::{
     ButtonTypeState, InputType, InputValueSanitizationContext, is_valid_number_input_value,
-    sanitize_input_value_for_type_with_context,
+    sanitize_input_dom_string_for_type_with_context,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -531,7 +532,7 @@ impl Element {
     }
 
     pub fn input_type(&self) -> InputType {
-        InputType::from_attribute_value(self.attribute("type"))
+        InputType::from_attribute_value(self.attribute_ns("", "type"))
     }
 
     pub fn button_type_state(&self) -> ButtonTypeState {
@@ -539,17 +540,49 @@ impl Element {
     }
 
     pub fn input_value(&self) -> String {
-        if self.is_html_input()
-            && self.input_type().is_checkable()
-            && !self.input_value_dirty()
-            && self.attribute("value").is_none()
-        {
-            return "on".to_owned();
+        self.input_value_dom_string().as_str_lossy().to_owned()
+    }
+
+    pub fn input_value_dom_string(&self) -> DomStringValue {
+        if self.is_html_input() {
+            match self.input_type().value_mode() {
+                InputValueMode::Default => {
+                    return self
+                        .attribute_ns_dom_string("", "value")
+                        .unwrap_or_default();
+                }
+                InputValueMode::DefaultOn => {
+                    return self
+                        .attribute_ns_dom_string("", "value")
+                        .unwrap_or_else(|| "on".into());
+                }
+                InputValueMode::Value | InputValueMode::Filename => {}
+            }
         }
         self.control_state()
             .input_value()
+            .cloned()
             .unwrap_or_default()
-            .to_owned()
+    }
+
+    pub fn attribute_dom_string(&self, name: &str) -> Option<DomStringValue> {
+        let value = self.attribute(name)?;
+        Some(
+            self.attribute_utf16_units(name)
+                .map_or_else(|| value.into(), DomStringValue::from_utf16),
+        )
+    }
+
+    pub fn attribute_ns_dom_string(
+        &self,
+        namespace: &str,
+        local_name: &str,
+    ) -> Option<DomStringValue> {
+        let value = self.attribute_ns(namespace, local_name)?;
+        Some(
+            self.attribute_ns_utf16_units(namespace, local_name)
+                .map_or_else(|| value.into(), DomStringValue::from_utf16),
+        )
     }
 
     pub fn input_value_dirty(&self) -> bool {
@@ -635,8 +668,9 @@ impl Element {
         self.is_html_element("link") && self.control_state().link_created_by_parser()
     }
 
-    fn sanitized_input_value(&self, value: &str) -> String {
-        sanitize_input_value_for_type_with_context(
+    fn sanitized_input_value(&self, value: &DomStringValue) -> DomStringValue {
+        let default_value = self.attribute_dom_string("value");
+        sanitize_input_dom_string_for_type_with_context(
             self.input_type(),
             value,
             InputValueSanitizationContext {
@@ -644,7 +678,7 @@ impl Element {
                 min: self.attribute("min"),
                 max: self.attribute("max"),
                 step: self.attribute("step"),
-                value_attribute: self.attribute("value"),
+                value_attribute: default_value.as_ref(),
             },
         )
     }
@@ -653,16 +687,44 @@ impl Element {
         if !self.is_html_input() || self.input_value_dirty() {
             return false;
         }
-        let source = self.attribute("value").unwrap_or_default().to_owned();
+        let source = self.attribute_dom_string("value").unwrap_or_default();
         let value = self.sanitized_input_value(&source);
         self.control_state_mut()
-            .set_input_value_with_dirty(&value, false)
+            .set_input_value_with_dirty(value, false)
     }
 
-    pub fn set_input_value(&mut self, value: &str) -> bool {
+    pub fn set_input_value(&mut self, value: impl Into<DomStringValue>) -> bool {
+        let value = value.into();
+        if self.is_html_input() && self.input_type().value_mode().reflects_content_attribute() {
+            return self.set_attribute_ns_utf16_units(
+                "value".to_owned(),
+                String::new(),
+                None,
+                value.as_str_lossy().to_owned(),
+                value.utf16_units().into_owned(),
+            );
+        }
+        self.set_input_value_with_dirty(value, true)
+    }
+
+    pub fn copy_text_control_value_from(&mut self, source: &Self) -> bool {
+        let value = source.input_value_dom_string();
+        if source.input_value_user_edited() {
+            self.set_input_value_from_user_edit(value)
+        } else {
+            self.set_input_value_with_dirty(value, source.input_value_dirty())
+        }
+    }
+
+    pub fn set_input_value_with_dirty(
+        &mut self,
+        value: impl Into<DomStringValue>,
+        dirty: bool,
+    ) -> bool {
         if !self.is_html_input() && !self.is_html_textarea() {
             return false;
         }
+        let value = value.into();
         if self.is_html_input() && self.input_type() == InputType::File {
             if !value.is_empty() {
                 return false;
@@ -670,30 +732,12 @@ impl Element {
             return self.set_selected_files(Vec::new());
         }
         let value = if self.is_html_input() {
-            self.sanitized_input_value(value)
+            self.sanitized_input_value(&value)
         } else {
-            value.to_owned()
-        };
-        self.control_state_mut().set_input_value(&value)
-    }
-
-    pub fn set_input_value_with_dirty(&mut self, value: &str, dirty: bool) -> bool {
-        if !self.is_html_input() && !self.is_html_textarea() {
-            return false;
-        }
-        if self.is_html_input() && self.input_type() == InputType::File {
-            if !value.is_empty() {
-                return false;
-            }
-            return self.set_selected_files(Vec::new());
-        }
-        let value = if self.is_html_input() {
-            self.sanitized_input_value(value)
-        } else {
-            value.to_owned()
+            value
         };
         self.control_state_mut()
-            .set_input_value_with_dirty(&value, dirty)
+            .set_input_value_with_dirty(value, dirty)
     }
 
     pub fn set_autofilled(&mut self, autofilled: bool) -> bool {
@@ -703,29 +747,30 @@ impl Element {
         self.control_state_mut().set_autofilled(autofilled)
     }
 
-    pub fn set_input_value_from_user_edit(&mut self, value: &str) -> bool {
+    pub fn set_input_value_from_user_edit(&mut self, value: impl Into<DomStringValue>) -> bool {
         if !self.is_html_input() && !self.is_html_textarea() {
             return false;
         }
         if self.is_html_input() && self.input_type() == InputType::File {
             return false;
         }
+        let value = value.into();
         let (value, bad_input) = if self.is_html_input() {
             let input_type = self.input_type();
             let bad_input = input_type == InputType::Number
                 && !value.is_empty()
-                && !is_valid_number_input_value(value);
+                && !is_valid_number_input_value(value.as_str_lossy());
             let value = if bad_input {
-                String::new()
+                DomStringValue::default()
             } else {
-                self.sanitized_input_value(value)
+                self.sanitized_input_value(&value)
             };
             (value, bad_input)
         } else {
-            (value.to_owned(), false)
+            (value, false)
         };
         let control_state = self.control_state_mut();
-        let value_changed = control_state.set_input_value_from_user_edit(&value, bad_input);
+        let value_changed = control_state.set_input_value_from_user_edit(value, bad_input);
         let autofill_changed = control_state.set_autofilled(false);
         value_changed || autofill_changed
     }
@@ -1222,19 +1267,35 @@ impl Element {
     }
 
     pub fn option_value(&self, dom: &NativeDom, handle: NativeNodeId) -> String {
-        self.attribute_ns("", "value")
-            .map(str::to_owned)
-            .unwrap_or_else(|| self.option_text(dom, handle))
+        self.option_value_dom_string(dom, handle)
+            .as_str_lossy()
+            .to_owned()
+    }
+
+    pub fn option_value_dom_string(&self, dom: &NativeDom, handle: NativeNodeId) -> DomStringValue {
+        self.attribute_ns_dom_string("", "value")
+            .unwrap_or_else(|| self.option_text_dom_string(dom, handle))
     }
 
     pub fn option_text(&self, dom: &NativeDom, handle: NativeNodeId) -> String {
+        self.option_text_dom_string(dom, handle)
+            .as_str_lossy()
+            .to_owned()
+    }
+
+    pub fn option_text_dom_string(&self, dom: &NativeDom, handle: NativeNodeId) -> DomStringValue {
         normalized_option_text_content(dom, handle)
     }
 
     pub fn option_label(&self, dom: &NativeDom, handle: NativeNodeId) -> String {
-        self.attribute_ns("", "label")
-            .map(str::to_owned)
-            .unwrap_or_else(|| self.option_text(dom, handle))
+        self.option_label_dom_string(dom, handle)
+            .as_str_lossy()
+            .to_owned()
+    }
+
+    pub fn option_label_dom_string(&self, dom: &NativeDom, handle: NativeNodeId) -> DomStringValue {
+        self.attribute_ns_dom_string("", "label")
+            .unwrap_or_else(|| self.option_text_dom_string(dom, handle))
     }
 
     pub fn select_value(
@@ -1272,13 +1333,31 @@ impl Element {
 
     fn sync_control_state_from_attribute(
         &mut self,
+        attribute_namespace: &str,
         attribute_name: &str,
         attribute_value: Option<&str>,
+        previous_input_type: InputType,
     ) {
+        if !attribute_namespace.is_empty() {
+            return;
+        }
         let is_html_input =
             self.namespace() == "http://www.w3.org/1999/xhtml" && self.local_name() == "input";
+        if is_html_input
+            && attribute_name == "type"
+            && let Some(value) =
+                self.input_type_change_value_attribute(previous_input_type, self.input_type())
+        {
+            self.set_attribute_ns_utf16_units(
+                "value".to_owned(),
+                String::new(),
+                None,
+                value.as_str_lossy().to_owned(),
+                value.utf16_units().into_owned(),
+            );
+        }
         let input_value_attribute = is_html_input
-            .then(|| self.attribute("value").map(str::to_owned))
+            .then(|| self.attribute_ns_dom_string("", "value"))
             .flatten();
         let input_min = is_html_input
             .then(|| self.attribute("min").map(str::to_owned))
@@ -1289,25 +1368,48 @@ impl Element {
         let input_step = is_html_input
             .then(|| self.attribute("step").map(str::to_owned))
             .flatten();
-        let input_type = if is_html_input && attribute_name == "type" {
-            InputType::from_attribute_value(attribute_value)
-        } else {
-            self.input_type()
+        let input_type = self.input_type();
+        let input_context = InputValueSanitizationContext {
+            multiple: is_html_input && self.has_attribute("multiple"),
+            min: input_min.as_deref(),
+            max: input_max.as_deref(),
+            step: input_step.as_deref(),
+            value_attribute: input_value_attribute.as_ref(),
         };
+        if is_html_input && attribute_name == "type" {
+            self.control_state_mut().change_input_type(
+                previous_input_type,
+                input_type,
+                input_context,
+            );
+            return;
+        }
         self.rare_data.sync_control_state_from_attribute(
             self.namespace.as_ref(),
             self.local_name.as_ref(),
             input_type,
-            InputValueSanitizationContext {
-                multiple: is_html_input && self.has_attribute("multiple"),
-                min: input_min.as_deref(),
-                max: input_max.as_deref(),
-                step: input_step.as_deref(),
-                value_attribute: input_value_attribute.as_deref(),
-            },
+            input_context,
             attribute_name,
             attribute_value,
         );
+    }
+
+    pub(crate) fn input_type_change_value_attribute(
+        &self,
+        previous: InputType,
+        current: InputType,
+    ) -> Option<DomStringValue> {
+        if !self.is_html_input()
+            || previous == current
+            || previous.value_mode() != InputValueMode::Value
+            || !current.value_mode().reflects_content_attribute()
+        {
+            return None;
+        }
+        self.control_state()
+            .input_value()
+            .filter(|value| !value.is_empty())
+            .cloned()
     }
 
     pub fn set_attribute(
@@ -1317,6 +1419,7 @@ impl Element {
         prefix: Option<String>,
         value: String,
     ) -> bool {
+        let previous_input_type = self.input_type();
         self.synchronize_element_reference_attribute(&namespace, &local_name);
         let next_value = value.clone();
         if let Some(index) = self
@@ -1340,21 +1443,30 @@ impl Element {
             self.rare_data
                 .set_attribute_utf16_units(&self.attributes[index], None);
             let attribute_local_name = self.attributes[index].local_name.clone();
+            let attribute_namespace = self.attributes[index].namespace.clone();
             self.sync_control_state_from_attribute(
+                attribute_namespace.as_ref(),
                 attribute_local_name.as_ref(),
                 Some(&next_value),
+                previous_input_type,
             );
             return true;
         }
 
         let attribute_local_name = LocalName::from(local_name);
+        let attribute_namespace = Namespace::from(namespace);
         self.attributes.push(Attribute {
             local_name: attribute_local_name.clone(),
-            namespace: Namespace::from(namespace),
+            namespace: attribute_namespace.clone(),
             prefix: prefix.map(Prefix::from),
             value: value.into_boxed_str(),
         });
-        self.sync_control_state_from_attribute(attribute_local_name.as_ref(), Some(&next_value));
+        self.sync_control_state_from_attribute(
+            attribute_namespace.as_ref(),
+            attribute_local_name.as_ref(),
+            Some(&next_value),
+            previous_input_type,
+        );
         true
     }
 
@@ -1366,6 +1478,7 @@ impl Element {
         value: String,
         units: Vec<u16>,
     ) -> bool {
+        let previous_input_type = self.input_type();
         self.synchronize_element_reference_attribute(&namespace, &local_name);
         let next_value = value.clone();
         let value_utf16_units =
@@ -1387,17 +1500,21 @@ impl Element {
             self.rare_data
                 .set_attribute_utf16_units(&self.attributes[index], value_utf16_units);
             let attribute_local_name = self.attributes[index].local_name.clone();
+            let attribute_namespace = self.attributes[index].namespace.clone();
             self.sync_control_state_from_attribute(
+                attribute_namespace.as_ref(),
                 attribute_local_name.as_ref(),
                 Some(&next_value),
+                previous_input_type,
             );
             return true;
         }
 
         let attribute_local_name = LocalName::from(local_name);
+        let attribute_namespace = Namespace::from(namespace);
         self.attributes.push(Attribute {
             local_name: attribute_local_name.clone(),
-            namespace: Namespace::from(namespace),
+            namespace: attribute_namespace.clone(),
             prefix: prefix.map(Prefix::from),
             value: value.into_boxed_str(),
         });
@@ -1407,7 +1524,12 @@ impl Element {
             .expect("new attribute must be present");
         self.rare_data
             .set_attribute_utf16_units(attribute, value_utf16_units);
-        self.sync_control_state_from_attribute(attribute_local_name.as_ref(), Some(&next_value));
+        self.sync_control_state_from_attribute(
+            attribute_namespace.as_ref(),
+            attribute_local_name.as_ref(),
+            Some(&next_value),
+            previous_input_type,
+        );
         true
     }
 
@@ -1442,6 +1564,7 @@ impl Element {
         value: String,
         units: Option<Box<[u16]>>,
     ) -> bool {
+        let previous_input_type = self.input_type();
         self.synchronize_element_reference_attribute(&namespace, &local_name);
         let next_value = value.clone();
         if let Some(index) = self.attributes.iter().position(|attribute| {
@@ -1458,14 +1581,20 @@ impl Element {
             self.attributes[index].value = value.into_boxed_str();
             self.rare_data
                 .set_attribute_utf16_units(&self.attributes[index], units);
-            self.sync_control_state_from_attribute(&local_name, Some(&next_value));
+            self.sync_control_state_from_attribute(
+                &namespace,
+                &local_name,
+                Some(&next_value),
+                previous_input_type,
+            );
             return true;
         }
 
         let attribute_local_name = LocalName::from(local_name);
+        let attribute_namespace = Namespace::from(namespace);
         self.attributes.push(Attribute {
             local_name: attribute_local_name.clone(),
-            namespace: Namespace::from(namespace),
+            namespace: attribute_namespace.clone(),
             prefix: prefix.map(Prefix::from),
             value: value.into_boxed_str(),
         });
@@ -1474,11 +1603,17 @@ impl Element {
             .last()
             .expect("new attribute must be present");
         self.rare_data.set_attribute_utf16_units(attribute, units);
-        self.sync_control_state_from_attribute(attribute_local_name.as_ref(), Some(&next_value));
+        self.sync_control_state_from_attribute(
+            attribute_namespace.as_ref(),
+            attribute_local_name.as_ref(),
+            Some(&next_value),
+            previous_input_type,
+        );
         true
     }
 
     pub fn remove_attribute(&mut self, name: &str) -> bool {
+        let previous_input_type = self.input_type();
         self.synchronize_element_reference_attribute("", name);
         let Some(index) = self
             .attributes
@@ -1489,12 +1624,17 @@ impl Element {
         };
         let removed = self.attributes.remove(index);
         self.rare_data.set_attribute_utf16_units(&removed, None);
-        let local_name = removed.local_name;
-        self.sync_control_state_from_attribute(local_name.as_ref(), None);
+        self.sync_control_state_from_attribute(
+            removed.namespace.as_ref(),
+            removed.local_name.as_ref(),
+            None,
+            previous_input_type,
+        );
         true
     }
 
     pub fn remove_attribute_ns(&mut self, namespace: &str, local_name: &str) -> bool {
+        let previous_input_type = self.input_type();
         self.synchronize_element_reference_attribute(namespace, local_name);
         let Some(index) = self.attributes.iter().position(|attribute| {
             attribute.namespace() == namespace && attribute.local_name() == local_name
@@ -1503,8 +1643,12 @@ impl Element {
         };
         let removed = self.attributes.remove(index);
         self.rare_data.set_attribute_utf16_units(&removed, None);
-        let local_name = removed.local_name;
-        self.sync_control_state_from_attribute(local_name.as_ref(), None);
+        self.sync_control_state_from_attribute(
+            removed.namespace.as_ref(),
+            removed.local_name.as_ref(),
+            None,
+            previous_input_type,
+        );
         true
     }
 

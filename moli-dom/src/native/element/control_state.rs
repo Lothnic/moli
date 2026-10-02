@@ -1,8 +1,10 @@
 use super::Attribute;
-use crate::forms::{InputValueSanitizationContext, sanitize_input_value_for_type_with_context};
-use crate::native::NativeNodeId;
+use crate::forms::{
+    InputValueSanitizationContext, sanitize_input_dom_string_for_type_with_context,
+};
+use crate::native::{DomStringValue, NativeNodeId};
 use indexmap::IndexSet;
-use moli_html_input_type::InputType;
+use moli_html_input_type::{InputType, InputValueMode};
 use std::collections::HashMap;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -132,7 +134,7 @@ struct ExplicitElementReferenceState {
 
 #[derive(Debug, Clone, Default)]
 pub struct ElementControlState {
-    input_value: Option<String>,
+    input_value: Option<DomStringValue>,
     input_value_dirty: bool,
     input_value_user_edited: bool,
     input_bad_input: bool,
@@ -258,21 +260,24 @@ impl ElementControlState {
         let attribute = |name: &str| {
             attributes
                 .iter()
-                .find(|attribute| attribute.local_name() == name)
+                .find(|attribute| {
+                    attribute.namespace().is_empty() && attribute.local_name() == name
+                })
                 .map(Attribute::value)
         };
 
         if local_name == "input" {
             let input_type = InputType::from_attribute_value(attribute("type"));
-            state.input_value = Some(sanitize_input_value_for_type_with_context(
+            let default_value = attribute("value").map(DomStringValue::from);
+            state.input_value = Some(sanitize_input_dom_string_for_type_with_context(
                 input_type,
-                attribute("value").unwrap_or_default(),
+                &default_value.clone().unwrap_or_default(),
                 InputValueSanitizationContext {
                     multiple: attribute("multiple").is_some(),
                     min: attribute("min"),
                     max: attribute("max"),
                     step: attribute("step"),
-                    value_attribute: attribute("value"),
+                    value_attribute: default_value.as_ref(),
                 },
             ));
             state.checked = Some(attribute("checked").is_some());
@@ -300,8 +305,8 @@ impl ElementControlState {
         Some(state)
     }
 
-    pub fn input_value(&self) -> Option<&str> {
-        self.input_value.as_deref()
+    pub fn input_value(&self) -> Option<&DomStringValue> {
+        self.input_value.as_ref()
     }
 
     pub fn input_value_dirty(&self) -> bool {
@@ -491,16 +496,20 @@ impl ElementControlState {
         self.custom_states.contains(state)
     }
 
-    pub fn set_input_value(&mut self, value: &str) -> bool {
-        self.set_input_value_with_state(value, true, false, false)
+    pub fn set_input_value_with_dirty(
+        &mut self,
+        value: impl Into<DomStringValue>,
+        dirty: bool,
+    ) -> bool {
+        self.set_input_value_with_state(value.into(), dirty, false, false)
     }
 
-    pub fn set_input_value_with_dirty(&mut self, value: &str, dirty: bool) -> bool {
-        self.set_input_value_with_state(value, dirty, false, false)
-    }
-
-    pub fn set_input_value_from_user_edit(&mut self, value: &str, bad_input: bool) -> bool {
-        self.set_input_value_with_state(value, true, true, bad_input)
+    pub fn set_input_value_from_user_edit(
+        &mut self,
+        value: impl Into<DomStringValue>,
+        bad_input: bool,
+    ) -> bool {
+        self.set_input_value_with_state(value.into(), true, true, bad_input)
     }
 
     pub fn prepare_datalist_text_decoration_for_value_mutation(
@@ -532,19 +541,19 @@ impl ElementControlState {
 
     fn set_input_value_with_state(
         &mut self,
-        value: &str,
+        value: DomStringValue,
         dirty: bool,
         user_edited: bool,
         bad_input: bool,
     ) -> bool {
-        if self.input_value.as_deref() == Some(value)
+        if self.input_value.as_ref() == Some(&value)
             && self.input_value_dirty == dirty
             && self.input_value_user_edited == user_edited
             && self.input_bad_input == bad_input
         {
             return false;
         }
-        self.input_value = Some(value.to_owned());
+        self.input_value = Some(value);
         self.input_value_dirty = dirty;
         self.input_value_user_edited = user_edited;
         self.input_bad_input = bad_input;
@@ -936,58 +945,31 @@ impl ElementControlState {
         match (local_name, attribute_name) {
             ("input", "value") => {
                 if !self.input_value_dirty {
-                    self.input_value = Some(sanitize_input_value_for_type_with_context(
+                    self.input_value = Some(sanitize_input_dom_string_for_type_with_context(
                         input_type,
-                        attribute_value.unwrap_or_default(),
+                        &input_context.value_attribute.cloned().unwrap_or_default(),
                         input_context,
                     ));
                 }
             }
-            ("input", "type") => {
-                // A non-dirty input value continues to follow the `value`
-                // content attribute across type changes. Sanitization can
-                // make that default observable (for example, color exposes
-                // `#000000`), but it must not turn the sanitized result into
-                // the source for a later type change.
-                let source = if self.input_value_dirty {
-                    self.input_value.as_deref().unwrap_or_default()
-                } else {
-                    input_context.value_attribute.unwrap_or_default()
-                };
-                let value =
-                    sanitize_input_value_for_type_with_context(input_type, source, input_context);
-                self.input_value = Some(value);
-                self.input_bad_input = false;
-
-                // The default/on mode exposes "on" when an empty dirty value
-                // changes into a checkable state. The filename mode likewise
-                // starts with an empty, non-dirty value.
-                if (input_type.is_checkable()
-                    && self.input_value.as_deref().is_none_or(str::is_empty))
-                    || input_type == InputType::File
-                {
-                    self.input_value_dirty = false;
-                    self.input_value_user_edited = false;
-                }
-            }
             ("input", "multiple") if input_type == InputType::Email => {
                 let source = if self.input_value_dirty {
-                    self.input_value.as_deref().unwrap_or_default()
+                    self.input_value.clone().unwrap_or_default()
                 } else {
-                    input_context.value_attribute.unwrap_or_default()
+                    input_context.value_attribute.cloned().unwrap_or_default()
                 };
-                self.input_value = Some(sanitize_input_value_for_type_with_context(
+                self.input_value = Some(sanitize_input_dom_string_for_type_with_context(
                     input_type,
-                    source,
+                    &source,
                     input_context,
                 ));
                 self.input_bad_input = false;
             }
             ("input", "min" | "max" | "step") if input_type == InputType::Range => {
-                let source = self.input_value.as_deref().unwrap_or_default();
-                self.input_value = Some(sanitize_input_value_for_type_with_context(
+                let source = self.input_value.clone().unwrap_or_default();
+                self.input_value = Some(sanitize_input_dom_string_for_type_with_context(
                     input_type,
-                    source,
+                    &source,
                     input_context,
                 ));
                 self.input_bad_input = false;
@@ -1007,6 +989,41 @@ impl ElementControlState {
             }
             _ => {}
         }
+    }
+
+    pub(super) fn change_input_type(
+        &mut self,
+        previous: InputType,
+        current: InputType,
+        context: InputValueSanitizationContext<'_>,
+    ) {
+        if previous == current {
+            return;
+        }
+        let previous_value = self.input_value.clone().unwrap_or_default();
+        let source = if current.value_mode() == InputValueMode::Value
+            && previous.value_mode() != InputValueMode::Value
+        {
+            self.input_value_dirty = false;
+            self.input_value_user_edited = false;
+            context.value_attribute.cloned().unwrap_or_default()
+        } else if current.value_mode() == InputValueMode::Filename {
+            self.selected_files.clear();
+            DomStringValue::default()
+        } else {
+            previous_value.clone()
+        };
+        let value = sanitize_input_dom_string_for_type_with_context(current, &source, context);
+        self.input_bad_input = false;
+        if current.supports_variable_length_selection() {
+            if !previous.supports_variable_length_selection() {
+                self.set_selection_range_with_direction(0, 0, "none");
+            } else if value != previous_value {
+                let end = value.utf16_units().len() as u32;
+                self.set_selection_range_with_direction(end, end, "none");
+            }
+        }
+        self.input_value = Some(value);
     }
 }
 
