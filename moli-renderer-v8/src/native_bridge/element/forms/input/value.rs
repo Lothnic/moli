@@ -1,5 +1,7 @@
 use super::super::*;
-use crate::util::utf16_len;
+use crate::dom::native::DomStringValue;
+use crate::native_bridge::element::reflection::set_reflected_attribute_utf16;
+use crate::util::v8_string_from_utf16_units;
 use crate::webidl;
 use moli_dom::forms::{
     InputStepDirection, InputStepError, InputStepOutcome, InputStepState, date_input_milliseconds,
@@ -69,43 +71,22 @@ fn input_type_setter_on_object<'s>(
     value: v8::Local<'s, v8::Value>,
 ) {
     let Some(value) =
-        form_dom_string_property_value(scope, value, "HTMLInputElement", "type", false)
+        form_dom_string_property_utf16_value(scope, value, "HTMLInputElement", "type", false)
     else {
         return;
     };
-    let canonical = InputType::from_attribute_value(Some(&value));
+    let canonical = InputType::from_attribute_value(Some(value.as_str_lossy()));
     let Ok((runtime_ptr, handle)) = node_runtime_and_handle_from_object_or_detached(scope, object)
     else {
         return;
     };
-    let previous_state: Option<(InputType, String)> = {
-        let runtime = unsafe { &*runtime_ptr };
-        runtime
-            .dom_host()
-            .node(handle)
-            .and_then(Node::as_element)
-            .map(|element| (element.input_type(), element.input_value().to_owned()))
-    };
-
-    set_reflected_attribute(scope, runtime_ptr, handle, "type", &value);
-
-    if let Some((previous_type, previous_value)) = previous_state {
-        let was_selectable = previous_type.supports_variable_length_selection();
-        let is_selectable = canonical.supports_variable_length_selection();
-        if !was_selectable && is_selectable {
-            let _ = unsafe { &mut *runtime_ptr }.set_selection_range(handle, 0, 0);
-        } else if was_selectable && is_selectable {
-            let current_value = unsafe { &*runtime_ptr }
-                .dom_host()
-                .node(handle)
-                .and_then(Node::as_element)
-                .map(Element::input_value)
-                .unwrap_or_default();
-            if current_value != previous_value {
-                reset_input_selection_to_end(unsafe { &mut *runtime_ptr }, handle);
-            }
-        }
-    }
+    set_reflected_attribute_utf16(
+        scope,
+        runtime_ptr,
+        handle,
+        "type",
+        value.utf16_units().into_owned(),
+    );
 
     if canonical == InputType::Radio {
         let checked = unsafe { &*runtime_ptr }
@@ -136,9 +117,9 @@ pub(in crate::native_bridge) fn input_value_getter_function<'s>(
         .dom_host()
         .node(handle)
         .and_then(Node::as_element)
-        .map(Element::input_value)
+        .map(Element::input_value_dom_string)
         .unwrap_or_default();
-    let Some(value) = v8_string(scope, &value) else {
+    let Some(value) = v8_string_from_utf16_units(scope, &value.utf16_units()) else {
         rv.set_null();
         return;
     };
@@ -157,7 +138,7 @@ pub(in crate::native_bridge) fn input_value_setter_function<'s>(
         return;
     };
     let Some(next_value) =
-        form_dom_string_property_value(scope, args.get(0), "HTMLInputElement", "value", true)
+        form_dom_string_property_utf16_value(scope, args.get(0), "HTMLInputElement", "value", true)
     else {
         return;
     };
@@ -167,11 +148,14 @@ pub(in crate::native_bridge) fn input_value_setter_function<'s>(
         .and_then(Node::as_element)
         .map(Element::input_type)
         .unwrap_or_default();
-    if input_type.is_checkable() {
-        // Checkbox and radio inputs use the HTML default/on value mode. Their
-        // IDL setter reflects the content attribute instead of creating a
-        // dirty, non-attribute value.
-        set_reflected_attribute(scope, runtime_ptr, handle, "value", &next_value);
+    if input_type.value_mode().reflects_content_attribute() {
+        set_reflected_attribute_utf16(
+            scope,
+            runtime_ptr,
+            handle,
+            "value",
+            next_value.utf16_units().into_owned(),
+        );
         rv.set_undefined();
         return;
     }
@@ -192,13 +176,14 @@ fn set_input_value_and_selection(
     scope: &mut v8::PinScope<'_, '_>,
     runtime_ptr: *mut JsContextHost,
     handle: DomHandle,
-    next_value: &str,
+    next_value: impl Into<DomStringValue>,
 ) {
-    let previous_value: String = unsafe { &*runtime_ptr }
+    let next_value = next_value.into();
+    let previous_value = unsafe { &*runtime_ptr }
         .dom_host()
         .node(handle)
         .and_then(Node::as_element)
-        .map(Element::input_value)
+        .map(Element::input_value_dom_string)
         .unwrap_or_default();
     let runtime = unsafe { &mut *runtime_ptr };
     let _ = runtime.set_input_value(handle, next_value);
@@ -206,7 +191,7 @@ fn set_input_value_and_selection(
         .dom_host()
         .node(handle)
         .and_then(Node::as_element)
-        .map(Element::input_value)
+        .map(Element::input_value_dom_string)
         .unwrap_or_default();
     if current_value != previous_value {
         let selection_changed = reset_input_selection_to_end(runtime, handle);
@@ -228,7 +213,7 @@ fn reset_input_selection_to_end(runtime: &mut JsContextHost, handle: DomHandle) 
         .dom_host()
         .node(handle)
         .and_then(Node::as_element)
-        .map(|element| utf16_len(&element.input_value()) as u32)
+        .map(|element| element.input_value_dom_string().utf16_units().len() as u32)
     else {
         return false;
     };
