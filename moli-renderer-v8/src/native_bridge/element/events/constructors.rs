@@ -1,7 +1,10 @@
+use crate::document_runtime::DomHandle;
+use crate::native_bridge::{JsContextHost, node_owner_document_relevant_context};
 use crate::runtime::RendererPointerEventProperties;
 use crate::util::{serialize_v8_iter_array, v8_string};
 
-use super::{construct_event, construct_intrinsic_event, event_constructor};
+use super::{construct_event, prepare_native_init};
+use crate::context_bootstrap::exposed_interfaces::ensure_intrinsic_interface_constructor;
 use moli_webapi_declare::WebApiObject;
 
 #[derive(WebApiObject)]
@@ -32,7 +35,7 @@ pub(crate) fn construct_clipboard_event<'s>(
     let init = ClipboardEventInitDeclaration::new(true, true, true, data)
         .bind(scope)
         .ok()?;
-    construct_intrinsic_event(scope, "ClipboardEvent", event_type, init)
+    construct_event(scope, "ClipboardEvent", event_type, init)
 }
 
 pub(crate) fn construct_editing_input_event<'s>(
@@ -60,7 +63,7 @@ pub(crate) fn construct_editing_input_event<'s>(
     )
     .bind(scope)
     .ok()?;
-    construct_intrinsic_event(scope, "InputEvent", event_type, init)
+    construct_event(scope, "InputEvent", event_type, init)
 }
 
 #[derive(WebApiObject)]
@@ -462,17 +465,6 @@ fn modifier_key_state(modifiers: u8) -> ModifierKeyState {
     }
 }
 
-pub(crate) fn construct_mouse_event<'s>(
-    scope: &mut v8::PinScope<'s, '_>,
-    event_type: &str,
-    x: f64,
-    y: f64,
-    button: i32,
-    buttons: i32,
-) -> Option<v8::Local<'s, v8::Object>> {
-    construct_mouse_event_with_modifiers(scope, event_type, x, y, button, buttons, 0)
-}
-
 pub(crate) fn construct_mouse_event_with_modifiers<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     event_type: &str,
@@ -744,7 +736,7 @@ pub(crate) fn construct_touch_event_with_points<'s>(
     active_points: &[TouchEventPoint<'s>],
     changed_points: &[TouchEventPoint<'s>],
 ) -> Option<v8::Local<'s, v8::Object>> {
-    let touch_ctor = event_constructor(scope, "Touch")?;
+    let touch_ctor = ensure_intrinsic_interface_constructor(scope, "Touch").ok()?;
     let touches = construct_touch_array(scope, touch_ctor, active_points)?;
     let target_touch_points = active_points
         .iter()
@@ -790,6 +782,7 @@ fn construct_touch<'s>(
     )
     .bind(scope)
     .ok()?;
+    prepare_native_init(scope, touch_init)?;
     touch_ctor.new_instance(scope, &[touch_init.into()])
 }
 
@@ -846,12 +839,7 @@ pub(crate) fn construct_focus_event<'s>(
     )
     .bind(scope)
     .ok()?;
-    // Native event initialization must not consult author Object.prototype getters.
-    let null = v8::null(scope);
-    if !init.set_prototype(scope, null.into())? {
-        return None;
-    }
-    construct_intrinsic_event(scope, "FocusEvent", event_type, init)
+    construct_event(scope, "FocusEvent", event_type, init)
 }
 
 pub(crate) fn construct_input_event<'s>(
@@ -934,16 +922,30 @@ pub(crate) fn construct_interest_event<'s>(
 
 pub(in crate::native_bridge::element) fn construct_click_event<'s>(
     scope: &mut v8::PinScope<'s, '_>,
+    runtime_ptr: *mut JsContextHost,
+    target: DomHandle,
     x: f64,
     y: f64,
     button: i32,
     buttons: i32,
 ) -> Option<v8::Local<'s, v8::Object>> {
-    construct_mouse_event(scope, "click", x, y, button, buttons)
+    construct_click_event_with_detail_and_modifiers(
+        scope,
+        runtime_ptr,
+        target,
+        x,
+        y,
+        0,
+        button,
+        buttons,
+        0,
+    )
 }
 
 pub(in crate::native_bridge::element) fn construct_click_event_with_detail_and_modifiers<'s>(
     scope: &mut v8::PinScope<'s, '_>,
+    runtime_ptr: *mut JsContextHost,
+    target: DomHandle,
     x: f64,
     y: f64,
     detail: i32,
@@ -951,6 +953,10 @@ pub(in crate::native_bridge::element) fn construct_click_event_with_detail_and_m
     buttons: i32,
     modifiers: u8,
 ) -> Option<v8::Local<'s, v8::Object>> {
+    // Activation follows the target's current Document, including adopted nodes
+    // and windowless Documents, rather than the realm of a borrowed click().
+    let context = node_owner_document_relevant_context(scope, runtime_ptr, target)?;
+    let scope = &mut v8::ContextScope::new(scope, context);
     construct_mouse_event_with_detail_and_modifiers(
         scope, "click", x, y, detail, button, buttons, modifiers,
     )
