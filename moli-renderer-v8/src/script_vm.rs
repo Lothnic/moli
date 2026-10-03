@@ -801,6 +801,7 @@ mod history_traversal;
 mod image_load_event;
 mod indexed_db_task_body;
 mod input_dispatch;
+mod input_drag;
 mod input_helpers;
 mod inspector;
 mod promise_rejection_task;
@@ -1098,6 +1099,7 @@ pub(super) struct ScriptVm {
     page_context_cancel_tx: RendererPageContextCancelSender,
     pressed_mouse_buttons: i32,
     pending_mouse_press: Option<PendingMousePress>,
+    pending_mouse_drags: BTreeMap<i32, PendingMouseDrag>,
     mouse_frame_captures: BTreeMap<i32, MouseFrameCapture>,
     hovered_mouse_handle: Option<DomHandle>,
     /// Root-frame to local-frame transform for `hovered_mouse_handle`. Blink
@@ -1113,6 +1115,7 @@ pub(super) struct ScriptVm {
     suppress_compat_mouse_events: bool,
     active_scrollbar_drag: Option<ActiveScrollbarDrag>,
     active_drag_session: Option<ActiveDragSession>,
+    suppressed_drag_pointer: Option<i32>,
     promise_reject_dispatch: PromiseRejectDispatchSlot,
     next_internal_runtime_evaluate_call_id: i32,
     next_internal_frontend_inspector_call_id: i32,
@@ -1182,8 +1185,10 @@ pub(super) struct ActiveTouchPoint {
 }
 
 pub(super) struct ActiveDragSession {
-    pub data_transfer: v8::Global<v8::Object>,
+    pub data_store: crate::context_bootstrap::DragDataStore,
     pub drop_allowed: bool,
+    native: Option<input_drag::NativeDragSource>,
+    target: Option<crate::native_bridge::element::InputHit>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -2619,6 +2624,7 @@ impl ScriptVmDefaultWorldBootstrap {
             runtime_observable_source_queue: RendererRuntimeObservableSourceQueue::default(),
             pressed_mouse_buttons: 0,
             pending_mouse_press: None,
+            pending_mouse_drags: BTreeMap::new(),
             mouse_frame_captures: BTreeMap::new(),
             hovered_mouse_handle: None,
             hovered_mouse_root_to_frame: moli_layout::LayoutTransform2D::IDENTITY,
@@ -2631,6 +2637,7 @@ impl ScriptVmDefaultWorldBootstrap {
             suppress_compat_mouse_events: false,
             active_scrollbar_drag: None,
             active_drag_session: None,
+            suppressed_drag_pointer: None,
             promise_reject_dispatch,
             next_internal_runtime_evaluate_call_id: 1,
             next_internal_frontend_inspector_call_id: -1,
