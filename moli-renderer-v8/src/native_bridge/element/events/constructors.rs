@@ -128,10 +128,13 @@ struct DragEventInitDeclaration<'scope> {
     composed: bool,
     client_x: f64,
     client_y: f64,
+    button: i32,
+    buttons: i32,
     alt_key: bool,
     ctrl_key: bool,
     meta_key: bool,
     shift_key: bool,
+    related_target: Option<v8::Local<'scope, v8::Value>>,
     data_transfer: v8::Local<'scope, v8::Value>,
 }
 
@@ -539,6 +542,7 @@ fn construct_mouse_event_with_detail_and_related_target<'s>(
 ) -> Option<v8::Local<'s, v8::Object>> {
     let init = mouse_event_init(
         scope,
+        event_type,
         x,
         y,
         detail,
@@ -552,6 +556,7 @@ fn construct_mouse_event_with_detail_and_related_target<'s>(
 
 fn mouse_event_init<'s>(
     scope: &mut v8::PinScope<'s, '_>,
+    event_type: &str,
     x: f64,
     y: f64,
     detail: i32,
@@ -561,10 +566,21 @@ fn mouse_event_init<'s>(
     related_target: Option<v8::Local<'s, v8::Value>>,
 ) -> Option<v8::Local<'s, v8::Object>> {
     let modifier_keys = modifier_key_state(modifiers);
+    let is_enter_or_leave = matches!(event_type, "mouseenter" | "mouseleave");
+    // Compatibility mouse movement and boundary events have no changed button.
+    // This native initializer is separate from authored MouseEvent dictionaries.
+    let button = if matches!(
+        event_type,
+        "mousemove" | "mouseover" | "mouseout" | "mouseenter" | "mouseleave"
+    ) {
+        0
+    } else {
+        button
+    };
     MouseEventInitDeclaration::new(
-        true,
-        true,
-        true,
+        !is_enter_or_leave,
+        !is_enter_or_leave,
+        !is_enter_or_leave,
         x,
         y,
         detail,
@@ -642,12 +658,21 @@ pub(crate) fn construct_pointer_event_with_related_target_and_modifiers<'s>(
     modifiers: u8,
 ) -> Option<v8::Local<'s, v8::Object>> {
     let is_enter_or_leave = matches!(event_type, "pointerenter" | "pointerleave");
+    let cancelable = !matches!(
+        event_type,
+        "pointerenter"
+            | "pointerleave"
+            | "pointercancel"
+            | "pointerrawupdate"
+            | "gotpointercapture"
+            | "lostpointercapture"
+    );
     let pointer_type = v8_string(scope, &pointer.pointer_type)?;
     let modifier_keys = modifier_key_state(modifiers);
     let init = PointerEventInitDeclaration::new(
         !is_enter_or_leave,
+        cancelable,
         !is_enter_or_leave,
-        true,
         x,
         y,
         button,
@@ -673,25 +698,30 @@ pub(crate) fn construct_pointer_event_with_related_target_and_modifiers<'s>(
     construct_event(scope, "PointerEvent", event_type, init)
 }
 
-pub(crate) fn construct_drag_event<'s>(
+pub(crate) fn construct_drag_event_with_related_target<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     event_type: &str,
     x: f64,
     y: f64,
+    buttons: i32,
     data_transfer: v8::Local<'s, v8::Value>,
     modifiers: u8,
+    related_target: Option<v8::Local<'s, v8::Value>>,
 ) -> Option<v8::Local<'s, v8::Object>> {
     let modifier_keys = modifier_key_state(modifiers);
     let init = DragEventInitDeclaration::new(
         true,
-        true,
+        !matches!(event_type, "dragleave" | "dragend"),
         true,
         x,
         y,
+        0,
+        buttons,
         modifier_keys.alt,
         modifier_keys.ctrl,
         modifier_keys.meta,
         modifier_keys.shift,
+        related_target,
         data_transfer,
     )
     .bind(scope)
@@ -1028,7 +1058,9 @@ pub(crate) fn construct_activation_pointer_event<'s>(
     // and windowless Documents, rather than the realm of a borrowed click().
     let context = node_owner_document_relevant_context(scope, runtime_ptr, target)?;
     let scope = &mut v8::ContextScope::new(scope, context);
-    let init = mouse_event_init(scope, x, y, detail, button, buttons, modifiers, None)?;
+    let init = mouse_event_init(
+        scope, event_type, x, y, detail, button, buttons, modifiers, None,
+    )?;
     // Activation keeps only the source pointer's identity. Pressure, tilt and all
     // other PointerEvent-specific attributes retain their dictionary defaults.
     let pointer_type = v8_string(scope, pointer.map_or("", |pointer| &pointer.pointer_type))?;
