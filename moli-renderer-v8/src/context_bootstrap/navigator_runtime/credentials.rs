@@ -8,6 +8,15 @@ use moli_webapi_declare::WebApiFunctionTemplate;
 
 use crate::{native_bridge::throw_dom_exception, util::v8str, web_api_interfaces};
 
+mod base64url;
+mod container;
+mod json_options;
+mod schema;
+mod signals;
+mod value;
+
+pub(super) use container::build as build_container;
+
 #[derive(WebApiFunctionTemplate)]
 #[webapi(interface = web_api_interfaces::Credential, enumerable, receiver)]
 struct CredentialDeclaration {
@@ -38,6 +47,16 @@ struct PublicKeyCredentialDeclaration {
     is_user_verifying_platform_authenticator_available: (),
     #[webapi(static_method, returns_promise, length = 0, callback = client_capabilities)]
     get_client_capabilities: (),
+    #[webapi(static_method = "parseCreationOptionsFromJSON", length = 1, callback = json_options::parse_creation)]
+    parse_creation_options_from_json: (),
+    #[webapi(static_method = "parseRequestOptionsFromJSON", length = 1, callback = json_options::parse_request)]
+    parse_request_options_from_json: (),
+    #[webapi(static_method, returns_promise, length = 1, callback = signals::unknown_credential)]
+    signal_unknown_credential: (),
+    #[webapi(static_method, returns_promise, length = 1, callback = signals::all_accepted_credentials)]
+    signal_all_accepted_credentials: (),
+    #[webapi(static_method, returns_promise, length = 1, callback = signals::current_user_details)]
+    signal_current_user_details: (),
 }
 
 #[derive(WebApiFunctionTemplate)]
@@ -81,6 +100,7 @@ pub(super) fn install<'s>(
     // Static members are installed on the constructor template by the derive.
     let prototype = template.prototype_template(scope);
     match interface_name {
+        "CredentialsContainer" => container::install(scope, prototype),
         "Credential" => {
             CredentialDeclaration::initialize_template(scope, template);
             CredentialDeclaration::initialize_prototype_template(scope, prototype);
