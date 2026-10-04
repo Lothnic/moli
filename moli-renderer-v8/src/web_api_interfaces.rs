@@ -266,7 +266,6 @@ interfaces! {
     DynamicsCompressorNode: AudioNode;
     Element: Node;
     ElementInternals;
-    EncodedVideoChunk;
     ErrorEvent: Event;
     Event;
     EventCounts;
