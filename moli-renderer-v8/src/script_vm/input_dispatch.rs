@@ -5,8 +5,8 @@ use std::rc::Rc;
 
 use super::input_dispatch_outcome;
 use super::input_helpers::{
-    MouseFrameCapture, MouseReleaseFollowUp, PendingMouseDrag, PendingMousePress,
-    mouse_button_mask, single_changed_mouse_button,
+    CompatibilityMouseTarget, MouseFrameCapture, MouseReleaseFollowUp, PendingMouseDrag,
+    PendingMousePress, mouse_button_mask, single_changed_mouse_button,
 };
 use super::inspector::{
     current_selection_state, is_space_key, key_target_info, option_is_disabled, radio_group_members,
@@ -22,12 +22,12 @@ use crate::native_bridge::element::{
     activate_handle_after_pointer_release, activate_handle_via_click,
     activate_handle_via_click_with_detail_and_modifiers, cache_input_files_from_selected_files,
     captured_frame_input_surface_hit_test, construct_activation_pointer_event,
-    construct_keyboard_event, construct_mouse_event_with_detail_and_modifiers,
-    construct_mouse_event_with_modifiers, construct_mouse_event_with_related_target_and_modifiers,
-    construct_pointer_event, construct_pointer_event_with_modifiers,
-    construct_pointer_event_with_related_target,
+    construct_keyboard_event, construct_mouse_event_for_target,
+    construct_mouse_event_with_detail_and_modifiers,
+    construct_mouse_event_with_related_target_for_target, construct_pointer_event,
+    construct_pointer_event_with_modifiers, construct_pointer_event_with_related_target,
     construct_pointer_event_with_related_target_and_modifiers, construct_simple_event,
-    construct_touch_event, construct_touch_event_with_points, construct_wheel_event,
+    construct_touch_event, construct_touch_event_with_points, construct_wheel_event_for_target,
     contenteditable_editing_host, dispatch_public_event, drag_start_frame_input_surface_hit_test,
     draggable_source_at_point, input_surface_hit_test, is_text_control, native_element_drag_data,
     observable_input_hit_test, perform_auxiliary_link_default_action,
@@ -873,24 +873,9 @@ impl ScriptVm {
         let mut started_native_drag = false;
         let may_start_drag = self.active_drag_session.is_none();
 
-        let follow_up = if event_name == "mouseup" {
-            match released_press {
-                Some(PendingMousePress {
-                    handle: pressed_handle,
-                    button: pressed_button,
-                }) if pressed_handle == handle && pressed_button == button => match button {
-                    0 => Some(MouseReleaseFollowUp::ActivateViaClick),
-                    1..=4 => Some(MouseReleaseFollowUp::Auxiliary),
-                    _ => None,
-                },
-                _ => None,
-            }
-        } else {
-            if event_name == "mousedown" && button >= 0 {
-                self.pending_mouse_press = Some(PendingMousePress { handle, button });
-            }
-            None
-        };
+        if event_name == "mousedown" && button >= 0 {
+            self.pending_mouse_press = Some(PendingMousePress { handle, button });
+        }
 
         let active_drag_session: *mut Option<ActiveDragSession> = &mut self.active_drag_session;
 
@@ -1035,8 +1020,10 @@ impl ScriptVm {
                 let previous_client_x = f64::from(previous_client_point.x);
                 let previous_client_y = f64::from(previous_client_point.y);
                 let related_target = related_target_value(scope, Some(handle));
-                if let Some(event) = construct_mouse_event_with_related_target_and_modifiers(
+                if let Some(event) = construct_mouse_event_with_related_target_for_target(
                     scope,
+                    runtime_ptr,
+                    previous_handle,
                     "mouseout",
                     previous_client_x,
                     previous_client_y,
@@ -1048,8 +1035,10 @@ impl ScriptVm {
                     let _ = dispatch_public_event(scope, runtime_ptr, previous_handle, event);
                 }
                 let related_target = related_target_value(scope, Some(handle));
-                if let Some(event) = construct_mouse_event_with_related_target_and_modifiers(
+                if let Some(event) = construct_mouse_event_with_related_target_for_target(
                     scope,
+                    runtime_ptr,
+                    previous_handle,
                     "mouseleave",
                     previous_client_x,
                     previous_client_y,
@@ -1063,8 +1052,10 @@ impl ScriptVm {
             }
             if let Some((previous_handle, _)) = hover_transition {
                 let related_target = related_target_value(scope, previous_handle);
-                if let Some(event) = construct_mouse_event_with_related_target_and_modifiers(
+                if let Some(event) = construct_mouse_event_with_related_target_for_target(
                     scope,
+                    runtime_ptr,
+                    handle,
                     "mouseover",
                     client_x,
                     client_y,
@@ -1076,8 +1067,10 @@ impl ScriptVm {
                     let _ = dispatch_public_event(scope, runtime_ptr, handle, event);
                 }
                 let related_target = related_target_value(scope, previous_handle);
-                if let Some(event) = construct_mouse_event_with_related_target_and_modifiers(
+                if let Some(event) = construct_mouse_event_with_related_target_for_target(
                     scope,
+                    runtime_ptr,
+                    handle,
                     "mouseenter",
                     client_x,
                     client_y,
@@ -1089,6 +1082,9 @@ impl ScriptVm {
                     let _ = dispatch_public_event(scope, runtime_ptr, handle, event);
                 }
             }
+            let compatibility_mouse_target = pointer_event_name.and_then(|_| {
+                CompatibilityMouseTarget::capture(unsafe { &*runtime_ptr }, pointer_dispatch_handle)
+            });
             if let Some(pointer_event_name) = pointer_event_name
                 && let Some(event) = construct_pointer_event_with_modifiers(
                     scope,
@@ -1134,23 +1130,48 @@ impl ScriptVm {
             let suppress_current_mouse_event =
                 suppress_compat_mouse_events && can_suppress_compat_mouse_event(event_name);
             if !suppress_current_mouse_event {
-                let event = if event_name == "wheel" {
-                    construct_wheel_event(
-                        scope, event_name, client_x, client_y, delta_x, delta_y, button, buttons,
-                        modifiers,
-                    )
+                let mouse_dispatch_handle = if pointer_event_name.is_some() {
+                    compatibility_mouse_target
+                        .as_ref()
+                        .and_then(|target| target.resolve(unsafe { &*runtime_ptr }))
                 } else {
-                    construct_mouse_event_with_modifiers(
-                        scope, event_name, client_x, client_y, button, buttons, modifiers,
-                    )
+                    Some(pointer_dispatch_handle)
                 };
-                if let Some(event) = event {
+                let event = match mouse_dispatch_handle {
+                    Some(target) if event_name == "wheel" => construct_wheel_event_for_target(
+                        scope,
+                        runtime_ptr,
+                        target,
+                        event_name,
+                        client_x,
+                        client_y,
+                        delta_x,
+                        delta_y,
+                        buttons,
+                        modifiers,
+                    ),
+                    Some(target) => construct_mouse_event_for_target(
+                        scope,
+                        runtime_ptr,
+                        target,
+                        event_name,
+                        client_x,
+                        client_y,
+                        button,
+                        buttons,
+                        modifiers,
+                    ),
+                    None => None,
+                };
+                if let Some(event) = event
+                    && let Some(mouse_dispatch_handle) = mouse_dispatch_handle
+                {
                     if event_name == "mousedown" {
                         unsafe { &mut *runtime_ptr }
-                            .notify_close_watcher_input_activation(pointer_dispatch_handle);
+                            .notify_close_watcher_input_activation(mouse_dispatch_handle);
                     }
                     let dispatched =
-                        dispatch_public_event(scope, runtime_ptr, pointer_dispatch_handle, event);
+                        dispatch_public_event(scope, runtime_ptr, mouse_dispatch_handle, event);
                     if event_name == "mousedown" {
                         mouse_down_allows_default = dispatched.allows_default();
                     }
@@ -1258,15 +1279,31 @@ impl ScriptVm {
                     }
                 }
             }
+            let follow_up = match released_press {
+                Some(press) if press.button == button => match button {
+                    0 => Some((press, MouseReleaseFollowUp::ActivateViaClick)),
+                    1..=4 => Some((press, MouseReleaseFollowUp::Auxiliary)),
+                    _ => None,
+                },
+                _ => None,
+            };
             match follow_up {
-                Some(MouseReleaseFollowUp::ActivateViaClick) => {
+                Some((press, MouseReleaseFollowUp::ActivateViaClick)) => {
                     if buttons == 0 {
                         suppress_compat_mouse_events = false;
                     }
+                    let Some(click_target) = press.click_target(
+                        unsafe { &*runtime_ptr },
+                        pointer_dispatch_handle,
+                        button,
+                        capture_handle.is_some(),
+                    ) else {
+                        return Ok(input_dispatch_outcome(true));
+                    };
                     let outcome = activate_handle_after_pointer_release(
                         scope,
                         runtime_ptr,
-                        handle,
+                        click_target,
                         client_x,
                         client_y,
                         button,
@@ -1287,11 +1324,11 @@ impl ScriptVm {
                             modifiers,
                         )
                     {
-                        let _ = dispatch_public_event(scope, runtime_ptr, handle, event);
+                        let _ = dispatch_public_event(scope, runtime_ptr, click_target, event);
                     }
                     return Ok(outcome);
                 }
-                Some(MouseReleaseFollowUp::Auxiliary) => {
+                Some((press, MouseReleaseFollowUp::Auxiliary)) => {
                     if buttons == 0 {
                         suppress_compat_mouse_events = false;
                     }
@@ -1319,10 +1356,15 @@ impl ScriptVm {
                     {
                         let _ = dispatch_public_event(scope, runtime_ptr, handle, event);
                     }
-                    if let Some(event) = construct_activation_pointer_event(
+                    if let Some(click_target) = press.click_target(
+                        unsafe { &*runtime_ptr },
+                        pointer_dispatch_handle,
+                        button,
+                        capture_handle.is_some(),
+                    ) && let Some(event) = construct_activation_pointer_event(
                         scope,
                         runtime_ptr,
-                        handle,
+                        click_target,
                         "auxclick",
                         client_x,
                         client_y,
@@ -1332,12 +1374,13 @@ impl ScriptVm {
                         modifiers,
                         Some(&pointer),
                     ) {
-                        let dispatched = dispatch_public_event(scope, runtime_ptr, handle, event);
+                        let dispatched =
+                            dispatch_public_event(scope, runtime_ptr, click_target, event);
                         if dispatched.allows_default() {
                             pending_download = perform_auxiliary_link_default_action(
                                 scope,
                                 runtime_ptr,
-                                handle,
+                                click_target,
                                 button,
                                 modifiers,
                                 &pending_child_navigations_before_event,
