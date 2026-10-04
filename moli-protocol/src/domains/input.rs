@@ -416,13 +416,13 @@ fn validate_coordinate_input_params(
             if cdp_modifiers(params.modifiers).is_err() {
                 return Err(PendingInputCommandStartError::invalid_params());
             }
-            let valid_point_count =
-                match params.r#type {
-                    CdpDispatchTouchEventType::TouchStart
-                    | CdpDispatchTouchEventType::TouchMove => !params.touch_points.is_empty(),
-                    CdpDispatchTouchEventType::TouchEnd
-                    | CdpDispatchTouchEventType::TouchCancel => params.touch_points.is_empty(),
-                };
+            let valid_point_count = match params.r#type {
+                CdpDispatchTouchEventType::TouchStart | CdpDispatchTouchEventType::TouchMove => {
+                    !params.touch_points.is_empty()
+                }
+                CdpDispatchTouchEventType::TouchEnd => true,
+                CdpDispatchTouchEventType::TouchCancel => params.touch_points.is_empty(),
+            };
             let point_ids_are_consistent = params.touch_points.is_empty()
                 || params.touch_points.iter().all(|point| point.id.is_some())
                 || params.touch_points.iter().all(|point| point.id.is_none());
@@ -1166,7 +1166,7 @@ fn start_devtools_dispatch_touch_event_command(
         command_id,
         owner,
         PendingInputCommandKind::DispatchTouchEvent,
-        |page| page.start_dispatch_touch_event_at_points_with_outcome(points, event_name, false),
+        |page| page.start_dispatch_touch_contact_updates_with_outcome(points, event_name),
     )
 }
 
