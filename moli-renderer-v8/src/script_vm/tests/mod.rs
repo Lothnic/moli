@@ -2231,6 +2231,7 @@ mod child_dynamic_inline_scripts;
 mod close_watchers;
 mod credential_interface_exposure_interfaces;
 mod convolver_interfaces;
+mod credential_container;
 mod credential_interfaces;
 mod credential_json_options;
 mod credential_signals;
