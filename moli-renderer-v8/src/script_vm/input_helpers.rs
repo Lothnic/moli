@@ -7,33 +7,197 @@ use crate::module_runtime::{ModuleGraphHandle, ModuleLoadError, ModuleLoadStage}
 use crate::native_bridge::JsContextHost;
 use crate::types::ScriptErrorValue;
 
-/// The pointer event's original ancestry, before author listeners mutate it.
-pub(super) struct CompatibilityMouseTarget {
-    document: DomHandle,
-    path: Vec<EventTargetHandle>,
+/// Native hover ancestry retained independently of later author DOM mutations.
+#[derive(Clone)]
+pub(super) struct HoverTarget {
+    pub(super) handle: DomHandle,
+    document: Option<DomHandle>,
+    pub(super) root_to_frame: moli_layout::LayoutTransform2D,
+    path: Vec<DomHandle>,
 }
 
-impl CompatibilityMouseTarget {
-    pub(super) fn capture(runtime: &JsContextHost, target: DomHandle) -> Option<Self> {
+#[derive(Clone, Copy)]
+pub(super) enum HoverBoundaryKind {
+    Out,
+    Leave,
+    Over,
+    Enter,
+}
+
+impl HoverBoundaryKind {
+    pub(super) fn event_names(self) -> (&'static str, &'static str) {
+        match self {
+            Self::Out => ("pointerout", "mouseout"),
+            Self::Leave => ("pointerleave", "mouseleave"),
+            Self::Over => ("pointerover", "mouseover"),
+            Self::Enter => ("pointerenter", "mouseenter"),
+        }
+    }
+}
+
+pub(super) struct HoverBoundary {
+    pub(super) kind: HoverBoundaryKind,
+    pub(super) handle: DomHandle,
+    pub(super) related: Option<DomHandle>,
+    pub(super) root_to_frame: moli_layout::LayoutTransform2D,
+}
+
+impl HoverTarget {
+    pub(super) fn for_input(
+        runtime: &JsContextHost,
+        handle: DomHandle,
+        hit: Option<crate::native_bridge::element::InputHit>,
+        previous: Option<&Self>,
+    ) -> Self {
+        let document = runtime.dom_host().owner_document_handle(handle);
+        let root_to_frame = hit
+            .filter(|hit| runtime.dom_host().owner_document_handle(hit.handle) == document)
+            .map(|hit| hit.root_to_frame)
+            .or_else(|| {
+                previous
+                    .filter(|previous| previous.document == document)
+                    .map(|previous| previous.root_to_frame)
+            })
+            .unwrap_or(moli_layout::LayoutTransform2D::IDENTITY);
+        Self::capture(runtime, handle, root_to_frame)
+    }
+
+    pub(super) fn capture(
+        runtime: &JsContextHost,
+        handle: DomHandle,
+        root_to_frame: moli_layout::LayoutTransform2D,
+    ) -> Self {
+        let path = runtime
+            .build_propagation_path(EventTargetHandle::Node(handle), true)
+            .into_iter()
+            .filter_map(|target| {
+                let EventTargetHandle::Node(handle) = target else {
+                    return None;
+                };
+                runtime
+                    .dom_host()
+                    .node(handle)
+                    .is_some_and(|node| node.is_element())
+                    .then_some(handle)
+            })
+            .collect();
+        Self {
+            handle,
+            document: runtime.dom_host().owner_document_handle(handle),
+            root_to_frame,
+            path,
+        }
+    }
+
+    pub(super) fn boundaries(
+        previous: Option<&Self>,
+        current: Option<&Self>,
+    ) -> Vec<HoverBoundary> {
+        if previous.map(|target| target.handle) == current.map(|target| target.handle) {
+            return Vec::new();
+        }
+        let mut boundaries = Vec::new();
+        let same_document = previous.is_some_and(|previous| {
+            previous.document.is_some()
+                && current.is_some_and(|current| previous.document == current.document)
+        });
+        if let Some(previous) = previous {
+            boundaries.push(HoverBoundary {
+                kind: HoverBoundaryKind::Out,
+                handle: previous.handle,
+                related: current
+                    .filter(|_| same_document)
+                    .map(|current| current.handle),
+                root_to_frame: previous.root_to_frame,
+            });
+            for &handle in &previous.path {
+                if current.is_none_or(|current| !current.path.contains(&handle)) {
+                    boundaries.push(HoverBoundary {
+                        kind: HoverBoundaryKind::Leave,
+                        handle,
+                        related: current
+                            .filter(|_| same_document)
+                            .map(|current| current.handle),
+                        root_to_frame: previous.root_to_frame,
+                    });
+                }
+            }
+        }
+        let Some(current) = current else {
+            return boundaries;
+        };
+        let related = previous
+            .filter(|_| same_document)
+            .map(|previous| previous.handle);
+        boundaries.push(HoverBoundary {
+            kind: HoverBoundaryKind::Over,
+            handle: current.handle,
+            related,
+            root_to_frame: current.root_to_frame,
+        });
+        for &handle in current.path.iter().rev() {
+            if previous.is_none_or(|previous| !previous.path.contains(&handle)) {
+                boundaries.push(HoverBoundary {
+                    kind: HoverBoundaryKind::Enter,
+                    handle,
+                    related,
+                    root_to_frame: current.root_to_frame,
+                });
+            }
+        }
+        boundaries
+    }
+}
+
+/// Native input ancestry saved before author listeners mutate the tree.
+pub(super) struct InputTargetPath {
+    document: DomHandle,
+    path: Vec<DomHandle>,
+}
+
+impl InputTargetPath {
+    pub(super) fn capture_composed(runtime: &JsContextHost, target: DomHandle) -> Option<Self> {
         Some(Self {
             document: runtime.dom_host().owner_document_handle(target)?,
-            path: runtime.build_propagation_path(EventTargetHandle::Node(target), true),
+            path: runtime
+                .build_propagation_path(EventTargetHandle::Node(target), true)
+                .into_iter()
+                .filter_map(|target| match target {
+                    EventTargetHandle::Node(handle) => Some(handle),
+                    _ => None,
+                })
+                .collect(),
         })
+    }
+
+    pub(super) fn capture_shadow_including(
+        runtime: &JsContextHost,
+        target: DomHandle,
+    ) -> Option<Self> {
+        let dom = runtime.dom_host();
+        let document = dom.owner_document_handle(target)?;
+        let mut path = Vec::new();
+        let mut current = Some(target);
+        while let Some(handle) = current {
+            path.push(handle);
+            // A removed slotted node belongs to its light-tree parent, not
+            // the slot that was in the preceding event's propagation path.
+            current = dom
+                .parent_node(handle)
+                .or_else(|| dom.shadow_root_host(handle));
+        }
+        Some(Self { document, path })
     }
 
     pub(super) fn resolve(&self, runtime: &JsContextHost) -> Option<DomHandle> {
         let dom = runtime.dom_host();
-        self.path.iter().find_map(|target| {
-            let EventTargetHandle::Node(handle) = *target else {
-                return None;
-            };
+        self.path.iter().copied().find(|&handle| {
             // ShadowRoot participates in propagation, but a native mouse
             // target must be a surviving element or its Document.
-            (dom.node(handle)
+            dom.node(handle)
                 .is_some_and(|node| node.is_element() || node.is_document())
                 && dom.owner_document_handle(handle) == Some(self.document)
-                && dom.is_connected_to_document(handle))
-            .then_some(handle)
+                && dom.is_connected_to_document(handle)
         })
     }
 }
@@ -142,11 +306,11 @@ pub(super) fn single_changed_mouse_button(mask: i32) -> Option<i32> {
 
 pub(super) fn clear_input_dispatch_state(vm: &mut ScriptVm) {
     vm.pressed_mouse_buttons = 0;
-    vm.pending_mouse_press = None;
+    vm.pending_mouse_presses.clear();
     vm.pending_mouse_drags.clear();
     vm.mouse_frame_captures.clear();
-    vm.hovered_mouse_handle = None;
-    vm.hovered_mouse_root_to_frame = moli_layout::LayoutTransform2D::IDENTITY;
+    vm.hovered_mouse = None;
+    vm.hovered_pointers.clear();
     vm._context_host
         .borrow()
         .dom_host()
