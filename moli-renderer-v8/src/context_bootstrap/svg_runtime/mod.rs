@@ -23,8 +23,14 @@ mod bindings;
 mod builders;
 mod callbacks;
 mod filters;
+mod number_list_attributes;
 mod path_data;
 mod rect;
+
+pub(crate) use number_list_attributes::{
+    NumberListAttributeProjection, apply_number_list_attribute_projections,
+    collect_number_list_attribute_projections,
+};
 
 const SVG_GRAPHICS_TRANSFORM_SLOT: &str = "__moliSvgGraphicsTransform";
 const SVG_GRAPHICS_REQUIRED_EXTENSIONS_SLOT: &str = "__moliSvgGraphicsRequiredExtensions";
@@ -97,6 +103,7 @@ const SVG_ANIMATED_INTEGER_PROPERTY_INDEX_SLOT: &str = "__moliSvgAnimatedInteger
 const SVG_ANIMATED_NUMBER_LIST_BASE_VAL_SLOT: &str = "__moliSvgAnimatedNumberListBaseVal";
 const SVG_ANIMATED_NUMBER_LIST_ANIM_VAL_SLOT: &str = "__moliSvgAnimatedNumberListAnimVal";
 const SVG_NUMBER_LIST_ITEMS_SLOT: &str = "__moliSvgNumberListItems";
+const SVG_NUMBER_READ_ONLY_SLOT: &str = "__moliSvgNumberReadOnly";
 const SVG_POINT_LIST_ITEMS_SLOT: &str = "__moliSvgPointListItems";
 const SVG_POINTS_SLOT: &str = "__moliSvgPoints";
 const SVG_ANIMATED_POINTS_SLOT: &str = "__moliSvgAnimatedPoints";
@@ -306,6 +313,15 @@ struct SvgListItemIndexArgs<'s> {
     item: v8::Local<'s, v8::Value>,
     #[webidl(required)]
     index: u32,
+}
+
+#[derive(webidl::WebIdlArgs)]
+#[webidl(prefix = "SVG list item/index")]
+struct SvgValueListItemIndexArgs<'s> {
+    #[webidl(required)]
+    item: v8::Local<'s, v8::Value>,
+    #[webidl(required)]
+    index: v8::Local<'s, v8::Value>,
 }
 
 #[derive(webidl::WebIdlArgs)]
