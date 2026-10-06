@@ -1,7 +1,7 @@
 use super::{
     build_dom_point_object, build_dom_rect_object,
     geometry_runtime::{
-        build_svg_point_object_with_values, dom_point_clone_data, dom_point_init_from_object,
+        build_svg_point_object_with_values, dom_point_init_from_object, set_dom_point_coordinates,
         set_svg_point_read_only,
     },
     optional_dom_point_init_arg,
@@ -154,14 +154,13 @@ const SVG_TEXT_PATH_SIDE_SLOT: &str = "__moliSvgTextPathSide";
 const SVG_ANIMATED_TRANSFORM_LIST_BASE_VAL_SLOT: &str = "__moliSvgAnimatedTransformListBaseVal";
 const SVG_ANIMATED_TRANSFORM_LIST_ANIM_VAL_SLOT: &str = "__moliSvgAnimatedTransformListAnimVal";
 const SVG_TRANSFORM_LIST_ITEMS_SLOT: &str = "__moliSvgTransformListItems";
-const SVG_TRANSFORM_LIST_OWNER_ELEMENT_SLOT: &str = "__moliSvgTransformListOwnerElement";
-const SVG_TRANSFORM_LIST_OWNER_ATTRIBUTE_SLOT: &str = "__moliSvgTransformListOwnerAttribute";
-const SVG_TRANSFORM_LIST_ITEM_OWNER_LIST_SLOT: &str = "__moliSvgTransformListItemOwnerList";
-const SVG_TRANSFORM_LIST_SYNCED_ATTRIBUTE_VALUE_SLOT: &str =
-    "__moliSvgTransformListSyncedAttributeValue";
 const SVG_TRANSFORM_TYPE_SLOT: &str = "__moliSvgTransformType";
 const SVG_TRANSFORM_ANGLE_SLOT: &str = "__moliSvgTransformAngle";
 const SVG_TRANSFORM_MATRIX_SLOT: &str = "__moliSvgTransformMatrix";
+const SVG_TRANSFORM_CENTER_X_SLOT: &str = "__moliSvgTransformCenterX";
+const SVG_TRANSFORM_CENTER_Y_SLOT: &str = "__moliSvgTransformCenterY";
+const SVG_TRANSFORM_READ_ONLY_SLOT: &str = "__moliSvgTransformReadOnly";
+const SVG_MATRIX_OWNER_TRANSFORM_SLOT: &str = "__moliSvgMatrixOwnerTransform";
 const SVG_MATRIX_A_SLOT: &str = "__moliSvgMatrixA";
 const SVG_MATRIX_B_SLOT: &str = "__moliSvgMatrixB";
 const SVG_MATRIX_C_SLOT: &str = "__moliSvgMatrixC";
@@ -186,6 +185,7 @@ enum SvgListKind {
     Length,
     Number,
     Point,
+    Transform,
 }
 
 #[derive(Clone, Copy)]
@@ -230,8 +230,6 @@ enum SvgAnimatedNumberComponent {
 #[derive(Clone, Copy)]
 struct SvgAnimatedNumberProperty {
     index: usize,
-    interface: &'static str,
-    name: &'static str,
     attribute: &'static str,
     initial_value: f64,
     component: SvgAnimatedNumberComponent,
@@ -331,30 +329,37 @@ struct SvgMatrixArg<'s> {
 #[derive(webidl::WebIdlArgs)]
 #[webidl(prefix = "SVG transform translate")]
 struct SvgTransformTranslateArgs {
-    #[webidl(required, converter = "double")]
-    tx: f64,
-    #[webidl(required, converter = "double")]
-    ty: f64,
+    #[webidl(required, converter = "float")]
+    tx: f32,
+    #[webidl(required, converter = "float")]
+    ty: f32,
 }
 
 #[derive(webidl::WebIdlArgs)]
 #[webidl(prefix = "SVG transform scale")]
 struct SvgTransformScaleArgs {
-    #[webidl(required, converter = "double")]
-    sx: f64,
-    #[webidl(required, converter = "double")]
-    sy: f64,
+    #[webidl(required, converter = "float")]
+    sx: f32,
+    #[webidl(required, converter = "float")]
+    sy: f32,
 }
 
 #[derive(webidl::WebIdlArgs)]
 #[webidl(prefix = "SVG transform rotate")]
 struct SvgTransformRotateArgs {
-    #[webidl(required, converter = "double")]
-    angle: f64,
-    #[webidl(required, converter = "double")]
-    cx: f64,
-    #[webidl(required, converter = "double")]
-    cy: f64,
+    #[webidl(required, converter = "float")]
+    angle: f32,
+    #[webidl(required, converter = "float")]
+    cx: f32,
+    #[webidl(required, converter = "float")]
+    cy: f32,
+}
+
+#[derive(webidl::WebIdlArgs)]
+#[webidl(prefix = "SVG transform skew")]
+struct SvgTransformSkewArgs {
+    #[webidl(required, converter = "float")]
+    angle: f32,
 }
 
 #[derive(webidl::WebIdlArgs)]
@@ -403,8 +408,8 @@ struct SvgMatrixRotateFromVectorArgs {
 struct SvgLengthNewValueSpecifiedUnitsArgs {
     #[webidl(required, converter = "unsigned_short")]
     unit_type: u16,
-    #[webidl(required, converter = "double")]
-    value: f64,
+    #[webidl(required, converter = "float")]
+    value: f32,
 }
 
 #[derive(webidl::WebIdlArgs)]
@@ -875,16 +880,12 @@ const SVG_ANIMATED_ENUMERATION_PROPERTIES: &[SvgAnimatedEnumerationProperty] = &
 
 const fn svg_animated_number_property(
     index: usize,
-    interface: &'static str,
-    name: &'static str,
     attribute: &'static str,
     initial_value: f64,
     component: SvgAnimatedNumberComponent,
 ) -> SvgAnimatedNumberProperty {
     SvgAnimatedNumberProperty {
         index,
-        interface,
-        name,
         attribute,
         initial_value,
         component,
@@ -892,402 +893,147 @@ const fn svg_animated_number_property(
 }
 
 const SVG_ANIMATED_NUMBER_PROPERTIES: &[SvgAnimatedNumberProperty] = &[
-    svg_animated_number_property(
-        0,
-        "SVGComponentTransferFunctionElement",
-        "slope",
-        "slope",
-        1.0,
-        SvgAnimatedNumberComponent::Scalar,
-    ),
-    svg_animated_number_property(
-        1,
-        "SVGComponentTransferFunctionElement",
-        "intercept",
-        "intercept",
-        0.0,
-        SvgAnimatedNumberComponent::Scalar,
-    ),
-    svg_animated_number_property(
-        2,
-        "SVGComponentTransferFunctionElement",
-        "amplitude",
-        "amplitude",
-        1.0,
-        SvgAnimatedNumberComponent::Scalar,
-    ),
-    svg_animated_number_property(
-        3,
-        "SVGComponentTransferFunctionElement",
-        "exponent",
-        "exponent",
-        1.0,
-        SvgAnimatedNumberComponent::Scalar,
-    ),
-    svg_animated_number_property(
-        4,
-        "SVGComponentTransferFunctionElement",
-        "offset",
-        "offset",
-        0.0,
-        SvgAnimatedNumberComponent::Scalar,
-    ),
-    svg_animated_number_property(
-        5,
-        "SVGFECompositeElement",
-        "k1",
-        "k1",
-        0.0,
-        SvgAnimatedNumberComponent::Scalar,
-    ),
-    svg_animated_number_property(
-        6,
-        "SVGFECompositeElement",
-        "k2",
-        "k2",
-        0.0,
-        SvgAnimatedNumberComponent::Scalar,
-    ),
-    svg_animated_number_property(
-        7,
-        "SVGFECompositeElement",
-        "k3",
-        "k3",
-        0.0,
-        SvgAnimatedNumberComponent::Scalar,
-    ),
-    svg_animated_number_property(
-        8,
-        "SVGFECompositeElement",
-        "k4",
-        "k4",
-        0.0,
-        SvgAnimatedNumberComponent::Scalar,
-    ),
-    svg_animated_number_property(
-        9,
-        "SVGFEConvolveMatrixElement",
-        "divisor",
-        "divisor",
-        1.0,
-        SvgAnimatedNumberComponent::Scalar,
-    ),
-    svg_animated_number_property(
-        10,
-        "SVGFEConvolveMatrixElement",
-        "bias",
-        "bias",
-        0.0,
-        SvgAnimatedNumberComponent::Scalar,
-    ),
+    svg_animated_number_property(0, "slope", 1.0, SvgAnimatedNumberComponent::Scalar),
+    svg_animated_number_property(1, "intercept", 0.0, SvgAnimatedNumberComponent::Scalar),
+    svg_animated_number_property(2, "amplitude", 1.0, SvgAnimatedNumberComponent::Scalar),
+    svg_animated_number_property(3, "exponent", 1.0, SvgAnimatedNumberComponent::Scalar),
+    svg_animated_number_property(4, "offset", 0.0, SvgAnimatedNumberComponent::Scalar),
+    svg_animated_number_property(5, "k1", 0.0, SvgAnimatedNumberComponent::Scalar),
+    svg_animated_number_property(6, "k2", 0.0, SvgAnimatedNumberComponent::Scalar),
+    svg_animated_number_property(7, "k3", 0.0, SvgAnimatedNumberComponent::Scalar),
+    svg_animated_number_property(8, "k4", 0.0, SvgAnimatedNumberComponent::Scalar),
+    svg_animated_number_property(9, "divisor", 1.0, SvgAnimatedNumberComponent::Scalar),
+    svg_animated_number_property(10, "bias", 0.0, SvgAnimatedNumberComponent::Scalar),
     svg_animated_number_property(
         11,
-        "SVGFEConvolveMatrixElement",
-        "kernelUnitLengthX",
         "kernelUnitLength",
         0.0,
         SvgAnimatedNumberComponent::PairFirst,
     ),
     svg_animated_number_property(
         12,
-        "SVGFEConvolveMatrixElement",
-        "kernelUnitLengthY",
         "kernelUnitLength",
         0.0,
         SvgAnimatedNumberComponent::PairSecondOrFirst,
     ),
-    svg_animated_number_property(
-        13,
-        "SVGFEDiffuseLightingElement",
-        "surfaceScale",
-        "surfaceScale",
-        1.0,
-        SvgAnimatedNumberComponent::Scalar,
-    ),
+    svg_animated_number_property(13, "surfaceScale", 1.0, SvgAnimatedNumberComponent::Scalar),
     svg_animated_number_property(
         14,
-        "SVGFEDiffuseLightingElement",
-        "diffuseConstant",
         "diffuseConstant",
         1.0,
         SvgAnimatedNumberComponent::Scalar,
     ),
     svg_animated_number_property(
         15,
-        "SVGFEDiffuseLightingElement",
-        "kernelUnitLengthX",
         "kernelUnitLength",
         0.0,
         SvgAnimatedNumberComponent::PairFirst,
     ),
     svg_animated_number_property(
         16,
-        "SVGFEDiffuseLightingElement",
-        "kernelUnitLengthY",
         "kernelUnitLength",
         0.0,
         SvgAnimatedNumberComponent::PairSecondOrFirst,
     ),
-    svg_animated_number_property(
-        17,
-        "SVGFEDisplacementMapElement",
-        "scale",
-        "scale",
-        0.0,
-        SvgAnimatedNumberComponent::Scalar,
-    ),
-    svg_animated_number_property(
-        18,
-        "SVGFEDistantLightElement",
-        "azimuth",
-        "azimuth",
-        0.0,
-        SvgAnimatedNumberComponent::Scalar,
-    ),
-    svg_animated_number_property(
-        19,
-        "SVGFEDistantLightElement",
-        "elevation",
-        "elevation",
-        0.0,
-        SvgAnimatedNumberComponent::Scalar,
-    ),
-    svg_animated_number_property(
-        20,
-        "SVGFEDropShadowElement",
-        "dx",
-        "dx",
-        2.0,
-        SvgAnimatedNumberComponent::Scalar,
-    ),
-    svg_animated_number_property(
-        21,
-        "SVGFEDropShadowElement",
-        "dy",
-        "dy",
-        2.0,
-        SvgAnimatedNumberComponent::Scalar,
-    ),
+    svg_animated_number_property(17, "scale", 0.0, SvgAnimatedNumberComponent::Scalar),
+    svg_animated_number_property(18, "azimuth", 0.0, SvgAnimatedNumberComponent::Scalar),
+    svg_animated_number_property(19, "elevation", 0.0, SvgAnimatedNumberComponent::Scalar),
+    svg_animated_number_property(20, "dx", 2.0, SvgAnimatedNumberComponent::Scalar),
+    svg_animated_number_property(21, "dy", 2.0, SvgAnimatedNumberComponent::Scalar),
     svg_animated_number_property(
         22,
-        "SVGFEDropShadowElement",
-        "stdDeviationX",
         "stdDeviation",
         2.0,
         SvgAnimatedNumberComponent::PairFirst,
     ),
     svg_animated_number_property(
         23,
-        "SVGFEDropShadowElement",
-        "stdDeviationY",
         "stdDeviation",
         2.0,
         SvgAnimatedNumberComponent::PairSecondOrFirst,
     ),
     svg_animated_number_property(
         24,
-        "SVGFEGaussianBlurElement",
-        "stdDeviationX",
         "stdDeviation",
         0.0,
         SvgAnimatedNumberComponent::PairFirst,
     ),
     svg_animated_number_property(
         25,
-        "SVGFEGaussianBlurElement",
-        "stdDeviationY",
         "stdDeviation",
         0.0,
         SvgAnimatedNumberComponent::PairSecondOrFirst,
     ),
-    svg_animated_number_property(
-        26,
-        "SVGFEMorphologyElement",
-        "radiusX",
-        "radius",
-        0.0,
-        SvgAnimatedNumberComponent::PairFirst,
-    ),
+    svg_animated_number_property(26, "radius", 0.0, SvgAnimatedNumberComponent::PairFirst),
     svg_animated_number_property(
         27,
-        "SVGFEMorphologyElement",
-        "radiusY",
         "radius",
         0.0,
         SvgAnimatedNumberComponent::PairSecondOrFirst,
     ),
-    svg_animated_number_property(
-        28,
-        "SVGFEOffsetElement",
-        "dx",
-        "dx",
-        0.0,
-        SvgAnimatedNumberComponent::Scalar,
-    ),
-    svg_animated_number_property(
-        29,
-        "SVGFEOffsetElement",
-        "dy",
-        "dy",
-        0.0,
-        SvgAnimatedNumberComponent::Scalar,
-    ),
-    svg_animated_number_property(
-        30,
-        "SVGFEPointLightElement",
-        "x",
-        "x",
-        0.0,
-        SvgAnimatedNumberComponent::Scalar,
-    ),
-    svg_animated_number_property(
-        31,
-        "SVGFEPointLightElement",
-        "y",
-        "y",
-        0.0,
-        SvgAnimatedNumberComponent::Scalar,
-    ),
-    svg_animated_number_property(
-        32,
-        "SVGFEPointLightElement",
-        "z",
-        "z",
-        0.0,
-        SvgAnimatedNumberComponent::Scalar,
-    ),
-    svg_animated_number_property(
-        33,
-        "SVGFESpecularLightingElement",
-        "surfaceScale",
-        "surfaceScale",
-        1.0,
-        SvgAnimatedNumberComponent::Scalar,
-    ),
+    svg_animated_number_property(28, "dx", 0.0, SvgAnimatedNumberComponent::Scalar),
+    svg_animated_number_property(29, "dy", 0.0, SvgAnimatedNumberComponent::Scalar),
+    svg_animated_number_property(30, "x", 0.0, SvgAnimatedNumberComponent::Scalar),
+    svg_animated_number_property(31, "y", 0.0, SvgAnimatedNumberComponent::Scalar),
+    svg_animated_number_property(32, "z", 0.0, SvgAnimatedNumberComponent::Scalar),
+    svg_animated_number_property(33, "surfaceScale", 1.0, SvgAnimatedNumberComponent::Scalar),
     svg_animated_number_property(
         34,
-        "SVGFESpecularLightingElement",
-        "specularConstant",
         "specularConstant",
         1.0,
         SvgAnimatedNumberComponent::Scalar,
     ),
     svg_animated_number_property(
         35,
-        "SVGFESpecularLightingElement",
-        "specularExponent",
         "specularExponent",
         1.0,
         SvgAnimatedNumberComponent::Scalar,
     ),
     svg_animated_number_property(
         36,
-        "SVGFESpecularLightingElement",
-        "kernelUnitLengthX",
         "kernelUnitLength",
         0.0,
         SvgAnimatedNumberComponent::PairFirst,
     ),
     svg_animated_number_property(
         37,
-        "SVGFESpecularLightingElement",
-        "kernelUnitLengthY",
         "kernelUnitLength",
         0.0,
         SvgAnimatedNumberComponent::PairSecondOrFirst,
     ),
-    svg_animated_number_property(
-        38,
-        "SVGFESpotLightElement",
-        "x",
-        "x",
-        0.0,
-        SvgAnimatedNumberComponent::Scalar,
-    ),
-    svg_animated_number_property(
-        39,
-        "SVGFESpotLightElement",
-        "y",
-        "y",
-        0.0,
-        SvgAnimatedNumberComponent::Scalar,
-    ),
-    svg_animated_number_property(
-        40,
-        "SVGFESpotLightElement",
-        "z",
-        "z",
-        0.0,
-        SvgAnimatedNumberComponent::Scalar,
-    ),
-    svg_animated_number_property(
-        41,
-        "SVGFESpotLightElement",
-        "pointsAtX",
-        "pointsAtX",
-        0.0,
-        SvgAnimatedNumberComponent::Scalar,
-    ),
-    svg_animated_number_property(
-        42,
-        "SVGFESpotLightElement",
-        "pointsAtY",
-        "pointsAtY",
-        0.0,
-        SvgAnimatedNumberComponent::Scalar,
-    ),
-    svg_animated_number_property(
-        43,
-        "SVGFESpotLightElement",
-        "pointsAtZ",
-        "pointsAtZ",
-        0.0,
-        SvgAnimatedNumberComponent::Scalar,
-    ),
+    svg_animated_number_property(38, "x", 0.0, SvgAnimatedNumberComponent::Scalar),
+    svg_animated_number_property(39, "y", 0.0, SvgAnimatedNumberComponent::Scalar),
+    svg_animated_number_property(40, "z", 0.0, SvgAnimatedNumberComponent::Scalar),
+    svg_animated_number_property(41, "pointsAtX", 0.0, SvgAnimatedNumberComponent::Scalar),
+    svg_animated_number_property(42, "pointsAtY", 0.0, SvgAnimatedNumberComponent::Scalar),
+    svg_animated_number_property(43, "pointsAtZ", 0.0, SvgAnimatedNumberComponent::Scalar),
     svg_animated_number_property(
         44,
-        "SVGFESpotLightElement",
-        "specularExponent",
         "specularExponent",
         1.0,
         SvgAnimatedNumberComponent::Scalar,
     ),
     svg_animated_number_property(
         45,
-        "SVGFESpotLightElement",
-        "limitingConeAngle",
         "limitingConeAngle",
         0.0,
         SvgAnimatedNumberComponent::Scalar,
     ),
     svg_animated_number_property(
         46,
-        "SVGFETurbulenceElement",
-        "baseFrequencyX",
         "baseFrequency",
         0.0,
         SvgAnimatedNumberComponent::PairFirst,
     ),
     svg_animated_number_property(
         47,
-        "SVGFETurbulenceElement",
-        "baseFrequencyY",
         "baseFrequency",
         0.0,
         SvgAnimatedNumberComponent::PairSecondOrFirst,
     ),
-    svg_animated_number_property(
-        48,
-        "SVGFETurbulenceElement",
-        "seed",
-        "seed",
-        0.0,
-        SvgAnimatedNumberComponent::Scalar,
-    ),
+    svg_animated_number_property(48, "seed", 0.0, SvgAnimatedNumberComponent::Scalar),
     svg_animated_number_property(
         49,
-        "SVGStopElement",
-        "offset",
         "offset",
         0.0,
         SvgAnimatedNumberComponent::NumberOrPercentage,
@@ -1493,6 +1239,13 @@ pub(in crate::context_bootstrap) fn install_svg_template_bindings<'s>(
         "SVGSVGElement" => bindings::install_svg_svg_element_bindings(scope, template),
         _ => {}
     }
+}
+
+pub(in crate::context_bootstrap) fn sync_svg_point_from_owner_list<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    point: v8::Local<'s, v8::Object>,
+) {
+    builders::sync_svg_value_list_item_from_owner_list(scope, point, SvgListKind::Point);
 }
 
 pub(in crate::context_bootstrap) fn reflect_svg_point_mutation<'s>(

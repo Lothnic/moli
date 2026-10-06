@@ -95,7 +95,7 @@ struct SvgAngleTemplateMethodsDeclaration {
 }
 
 #[derive(WebApiFunctionTemplate)]
-#[webapi(interface = web_api_interfaces::SVGLengthList, enumerable)]
+#[webapi(interface = web_api_interfaces::SVGLengthList, enumerable, receiver)]
 struct SvgLengthListTemplateMethodsDeclaration {
     #[webapi(method = "clear", length = 0, callback = svg_length_list_clear_callback)]
     clear: (),
@@ -140,7 +140,7 @@ struct SvgLengthListTemplateMethodsDeclaration {
 }
 
 #[derive(WebApiFunctionTemplate)]
-#[webapi(interface = web_api_interfaces::SVGNumberList, enumerable)]
+#[webapi(interface = web_api_interfaces::SVGNumberList, enumerable, receiver)]
 struct SvgNumberListTemplateMethodsDeclaration {
     #[webapi(method = "clear", length = 0, callback = svg_number_list_clear_callback)]
     clear: (),
@@ -185,7 +185,7 @@ struct SvgNumberListTemplateMethodsDeclaration {
 }
 
 #[derive(WebApiFunctionTemplate)]
-#[webapi(interface = web_api_interfaces::SVGPointList, enumerable)]
+#[webapi(interface = web_api_interfaces::SVGPointList, enumerable, receiver)]
 struct SvgPointListTemplateMethodsDeclaration {
     #[webapi(method = "clear", length = 0, callback = svg_point_list_clear_callback)]
     clear: (),
@@ -275,7 +275,7 @@ struct SvgStringListTemplateMethodsDeclaration {
 }
 
 #[derive(WebApiFunctionTemplate)]
-#[webapi(interface = web_api_interfaces::SVGTransformList, enumerable)]
+#[webapi(interface = web_api_interfaces::SVGTransformList, enumerable, receiver)]
 struct SvgTransformListTemplateMethodsDeclaration {
     #[webapi(method = "clear", length = 0, callback = svg_transform_list_clear_callback)]
     clear: (),
@@ -334,7 +334,7 @@ struct SvgTransformListTemplateMethodsDeclaration {
 }
 
 #[derive(WebApiFunctionTemplate)]
-#[webapi(interface = web_api_interfaces::SVGTransform, enumerable)]
+#[webapi(interface = web_api_interfaces::SVGTransform, enumerable, receiver)]
 struct SvgTransformTemplateMethodsDeclaration {
     #[webapi(
         constant = "SVG_TRANSFORM_UNKNOWN",
@@ -957,7 +957,7 @@ struct SvgSvgElementTemplateMethodsDeclaration {
 }
 
 #[derive(WebApiFunctionTemplate)]
-#[webapi(interface = web_api_interfaces::SVGLength, enumerable)]
+#[webapi(interface = web_api_interfaces::SVGLength, enumerable, receiver)]
 struct SvgLengthTemplateAccessorsDeclaration {
     #[webapi(
         accessor_property = "unitType",
@@ -1168,7 +1168,7 @@ struct SvgNumberTemplateAccessorsDeclaration {
 }
 
 #[derive(WebApiFunctionTemplate)]
-#[webapi(interface = web_api_interfaces::SVGAnimatedLengthList, enumerable)]
+#[webapi(interface = web_api_interfaces::SVGAnimatedLengthList, enumerable, receiver)]
 struct SvgAnimatedLengthListTemplateAccessorsDeclaration {
     #[webapi(
         accessor_property = "baseVal",
@@ -1186,7 +1186,7 @@ struct SvgAnimatedLengthListTemplateAccessorsDeclaration {
 }
 
 #[derive(WebApiFunctionTemplate)]
-#[webapi(interface = web_api_interfaces::SVGAnimatedNumber, enumerable)]
+#[webapi(interface = web_api_interfaces::SVGAnimatedNumber, enumerable, receiver)]
 struct SvgAnimatedNumberTemplateAccessorsDeclaration {
     #[webapi(
         accessor_property = "baseVal",
@@ -1224,7 +1224,7 @@ struct SvgAnimatedIntegerTemplateAccessorsDeclaration {
 }
 
 #[derive(WebApiFunctionTemplate)]
-#[webapi(interface = web_api_interfaces::SVGAnimatedNumberList, enumerable)]
+#[webapi(interface = web_api_interfaces::SVGAnimatedNumberList, enumerable, receiver)]
 struct SvgAnimatedNumberListTemplateAccessorsDeclaration {
     #[webapi(
         accessor_property = "baseVal",
@@ -1261,7 +1261,7 @@ struct SvgAnimatedEnumerationTemplateAccessorsDeclaration {
 }
 
 #[derive(WebApiFunctionTemplate)]
-#[webapi(interface = web_api_interfaces::SVGLengthList, enumerable)]
+#[webapi(interface = web_api_interfaces::SVGLengthList, enumerable, receiver)]
 struct SvgLengthListTemplateAccessorsDeclaration {
     #[webapi(accessor_property = "length", getter = svg_length_list_length_getter)]
     length: (),
@@ -1274,7 +1274,7 @@ struct SvgLengthListTemplateAccessorsDeclaration {
 }
 
 #[derive(WebApiFunctionTemplate)]
-#[webapi(interface = web_api_interfaces::SVGNumberList, enumerable)]
+#[webapi(interface = web_api_interfaces::SVGNumberList, enumerable, receiver)]
 struct SvgNumberListTemplateAccessorsDeclaration {
     #[webapi(accessor_property = "length", getter = svg_number_list_length_getter)]
     length: (),
@@ -1287,7 +1287,7 @@ struct SvgNumberListTemplateAccessorsDeclaration {
 }
 
 #[derive(WebApiFunctionTemplate)]
-#[webapi(interface = web_api_interfaces::SVGPointList, enumerable)]
+#[webapi(interface = web_api_interfaces::SVGPointList, enumerable, receiver)]
 struct SvgPointListTemplateAccessorsDeclaration {
     #[webapi(accessor_property = "length", getter = svg_point_list_length_getter)]
     length: (),
@@ -1313,7 +1313,7 @@ struct SvgStringListTemplateAccessorsDeclaration {
 }
 
 #[derive(WebApiFunctionTemplate)]
-#[webapi(interface = web_api_interfaces::SVGAnimatedTransformList, enumerable)]
+#[webapi(interface = web_api_interfaces::SVGAnimatedTransformList, enumerable, receiver)]
 struct SvgAnimatedTransformListTemplateAccessorsDeclaration {
     #[webapi(
         accessor_property = "baseVal",
@@ -1331,7 +1331,7 @@ struct SvgAnimatedTransformListTemplateAccessorsDeclaration {
 }
 
 #[derive(WebApiFunctionTemplate)]
-#[webapi(interface = web_api_interfaces::SVGTransformList, enumerable)]
+#[webapi(interface = web_api_interfaces::SVGTransformList, enumerable, receiver)]
 struct SvgTransformListTemplateAccessorsDeclaration {
     #[webapi(accessor_property = "length", getter = svg_transform_list_length_getter)]
     length: (),
@@ -1344,7 +1344,7 @@ struct SvgTransformListTemplateAccessorsDeclaration {
 }
 
 #[derive(WebApiFunctionTemplate)]
-#[webapi(interface = web_api_interfaces::SVGTransform, enumerable)]
+#[webapi(interface = web_api_interfaces::SVGTransform, enumerable, receiver)]
 struct SvgTransformTemplateAccessorsDeclaration {
     #[webapi(
         accessor_property = "type",
@@ -1369,7 +1369,7 @@ struct SvgTransformTemplateAccessorsDeclaration {
 }
 
 #[derive(WebApiFunctionTemplate)]
-#[webapi(interface = web_api_interfaces::SVGMatrix, enumerable)]
+#[webapi(interface = web_api_interfaces::SVGMatrix, enumerable, receiver)]
 struct SvgMatrixTemplateAccessorsDeclaration {
     #[webapi(
         accessor_property = "a",
@@ -1423,11 +1423,11 @@ struct SvgMatrixTemplateAccessorsDeclaration {
 macro_rules! define_svg_animated_number_accessors {
     (
         $declaration:ident,
-        $interface:literal,
+        $interface:ident,
         $(($field:ident, $name:literal, $index:literal)),+ $(,)?
     ) => {
         #[derive(WebApiFunctionTemplate)]
-        #[webapi(name = $interface, enumerable)]
+        #[webapi(interface = web_api_interfaces::$interface, enumerable, receiver)]
         struct $declaration {
             $(
                 #[webapi(
@@ -1443,7 +1443,7 @@ macro_rules! define_svg_animated_number_accessors {
 
 define_svg_animated_number_accessors!(
     SvgComponentTransferFunctionAnimatedNumberAccessorsDeclaration,
-    "SVGComponentTransferFunctionElement",
+    SVGComponentTransferFunctionElement,
     (slope, "slope", 0),
     (intercept, "intercept", 1),
     (amplitude, "amplitude", 2),
@@ -1453,7 +1453,7 @@ define_svg_animated_number_accessors!(
 
 define_svg_animated_number_accessors!(
     SvgFeCompositeAnimatedNumberAccessorsDeclaration,
-    "SVGFECompositeElement",
+    SVGFECompositeElement,
     (k1, "k1", 5),
     (k2, "k2", 6),
     (k3, "k3", 7),
@@ -1462,7 +1462,7 @@ define_svg_animated_number_accessors!(
 
 define_svg_animated_number_accessors!(
     SvgFeConvolveMatrixAnimatedNumberAccessorsDeclaration,
-    "SVGFEConvolveMatrixElement",
+    SVGFEConvolveMatrixElement,
     (divisor, "divisor", 9),
     (bias, "bias", 10),
     (kernel_unit_length_x, "kernelUnitLengthX", 11),
@@ -1471,7 +1471,7 @@ define_svg_animated_number_accessors!(
 
 define_svg_animated_number_accessors!(
     SvgFeDiffuseLightingAnimatedNumberAccessorsDeclaration,
-    "SVGFEDiffuseLightingElement",
+    SVGFEDiffuseLightingElement,
     (surface_scale, "surfaceScale", 13),
     (diffuse_constant, "diffuseConstant", 14),
     (kernel_unit_length_x, "kernelUnitLengthX", 15),
@@ -1480,20 +1480,20 @@ define_svg_animated_number_accessors!(
 
 define_svg_animated_number_accessors!(
     SvgFeDisplacementMapAnimatedNumberAccessorsDeclaration,
-    "SVGFEDisplacementMapElement",
+    SVGFEDisplacementMapElement,
     (scale, "scale", 17),
 );
 
 define_svg_animated_number_accessors!(
     SvgFeDistantLightAnimatedNumberAccessorsDeclaration,
-    "SVGFEDistantLightElement",
+    SVGFEDistantLightElement,
     (azimuth, "azimuth", 18),
     (elevation, "elevation", 19),
 );
 
 define_svg_animated_number_accessors!(
     SvgFeDropShadowAnimatedNumberAccessorsDeclaration,
-    "SVGFEDropShadowElement",
+    SVGFEDropShadowElement,
     (dx, "dx", 20),
     (dy, "dy", 21),
     (std_deviation_x, "stdDeviationX", 22),
@@ -1502,28 +1502,28 @@ define_svg_animated_number_accessors!(
 
 define_svg_animated_number_accessors!(
     SvgFeGaussianBlurAnimatedNumberAccessorsDeclaration,
-    "SVGFEGaussianBlurElement",
+    SVGFEGaussianBlurElement,
     (std_deviation_x, "stdDeviationX", 24),
     (std_deviation_y, "stdDeviationY", 25),
 );
 
 define_svg_animated_number_accessors!(
     SvgFeMorphologyAnimatedNumberAccessorsDeclaration,
-    "SVGFEMorphologyElement",
+    SVGFEMorphologyElement,
     (radius_x, "radiusX", 26),
     (radius_y, "radiusY", 27),
 );
 
 define_svg_animated_number_accessors!(
     SvgFeOffsetAnimatedNumberAccessorsDeclaration,
-    "SVGFEOffsetElement",
+    SVGFEOffsetElement,
     (dx, "dx", 28),
     (dy, "dy", 29),
 );
 
 define_svg_animated_number_accessors!(
     SvgFePointLightAnimatedNumberAccessorsDeclaration,
-    "SVGFEPointLightElement",
+    SVGFEPointLightElement,
     (x, "x", 30),
     (y, "y", 31),
     (z, "z", 32),
@@ -1531,7 +1531,7 @@ define_svg_animated_number_accessors!(
 
 define_svg_animated_number_accessors!(
     SvgFeSpecularLightingAnimatedNumberAccessorsDeclaration,
-    "SVGFESpecularLightingElement",
+    SVGFESpecularLightingElement,
     (surface_scale, "surfaceScale", 33),
     (specular_constant, "specularConstant", 34),
     (specular_exponent, "specularExponent", 35),
@@ -1541,7 +1541,7 @@ define_svg_animated_number_accessors!(
 
 define_svg_animated_number_accessors!(
     SvgFeSpotLightAnimatedNumberAccessorsDeclaration,
-    "SVGFESpotLightElement",
+    SVGFESpotLightElement,
     (x, "x", 38),
     (y, "y", 39),
     (z, "z", 40),
@@ -1554,7 +1554,7 @@ define_svg_animated_number_accessors!(
 
 define_svg_animated_number_accessors!(
     SvgFeTurbulenceAnimatedNumberAccessorsDeclaration,
-    "SVGFETurbulenceElement",
+    SVGFETurbulenceElement,
     (base_frequency_x, "baseFrequencyX", 46),
     (base_frequency_y, "baseFrequencyY", 47),
     (seed, "seed", 48),
@@ -1562,7 +1562,7 @@ define_svg_animated_number_accessors!(
 
 define_svg_animated_number_accessors!(
     SvgStopAnimatedNumberAccessorsDeclaration,
-    "SVGStopElement",
+    SVGStopElement,
     (offset, "offset", 49),
 );
 
@@ -1800,6 +1800,8 @@ struct SvgSvgElementPrototypeAccessorsDeclaration {
 #[derive(WebApiFunctionTemplate)]
 #[webapi(interface = web_api_interfaces::SVGClipPathElement, enumerable, receiver)]
 struct SvgClipPathElementPrototypeAccessorsDeclaration {
+    #[webapi(accessor_property = "transform", getter = svg_graphics_transform_getter)]
+    transform: (),
     #[webapi(
         accessor_property = "clipPathUnits",
         getter = svg_element_animated_enumeration_getter,
@@ -2441,6 +2443,12 @@ pub(super) fn install_svg_value_list_bindings<'s>(
             SvgPointListTemplateAccessorsDeclaration::initialize_prototype_template(scope, proto);
             SvgPointListTemplateMethodsDeclaration::initialize_prototype_template(scope, proto);
         }
+        SvgListKind::Transform => {
+            SvgTransformListTemplateAccessorsDeclaration::initialize_prototype_template(
+                scope, proto,
+            );
+            SvgTransformListTemplateMethodsDeclaration::initialize_prototype_template(scope, proto);
+        }
     }
 }
 
@@ -2458,9 +2466,7 @@ pub(super) fn install_svg_transform_list_bindings<'s>(
     scope: &mut v8::PinScope<'s, '_, ()>,
     template: v8::Local<'s, v8::FunctionTemplate>,
 ) {
-    let proto = template.prototype_template(scope);
-    SvgTransformListTemplateAccessorsDeclaration::initialize_prototype_template(scope, proto);
-    SvgTransformListTemplateMethodsDeclaration::initialize_prototype_template(scope, proto);
+    install_svg_value_list_bindings(scope, template, SvgListKind::Transform);
 }
 
 pub(super) fn install_svg_transform_bindings<'s>(
