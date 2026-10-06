@@ -8,7 +8,9 @@ use super::headers::{
 };
 use super::*;
 
-pub(crate) use self::bindings::request_constructor_callback;
+pub(crate) use self::bindings::{
+    build_cached_request_object, cached_request_from_native, request_constructor_callback,
+};
 pub(crate) use self::error::{FetchArgumentError, RequestUrlError};
 pub(in crate::network_host) use self::init::request_credentials_mode_label;
 pub(crate) use self::init::{
@@ -19,6 +21,6 @@ pub(crate) use self::init::{parse_request_redirect_mode_label, request_redirect_
 pub(in crate::network_host) use self::input::{RequestMethodError, normalize_request_method};
 pub(crate) use self::input::{
     mark_request_input_body_used_for_fetch, request_headers_guard_for_mode, request_input_snapshot,
-    try_resolve_request_constructor_url, try_resolve_request_constructor_url_for_base,
-    try_resolve_request_constructor_url_for_child, validate_request_url_credentials,
+    try_resolve_request_constructor_url_for_base, try_resolve_request_constructor_url_for_child,
+    validate_request_url_credentials,
 };
