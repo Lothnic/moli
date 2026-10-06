@@ -37,6 +37,13 @@ impl Default for InterfaceOptions {
     }
 }
 
+/// WebIDL Uint8Array conversion policy. Resizable and growable buffers are
+/// rejected; fixed shared storage requires an explicit `[AllowShared]` opt-in.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Uint8ArrayOptions {
+    pub allow_shared: bool,
+}
+
 /// WebIDL `DOMString` represented at the Rust boundary as UTF-8 `String`.
 ///
 /// This intentionally follows Deno's practical boundary model rather than
@@ -258,6 +265,16 @@ pub struct UnsignedLong(pub u32);
 
 impl From<UnsignedLong> for u32 {
     fn from(value: UnsignedLong) -> Self {
+        value.0
+    }
+}
+
+/// WebIDL `[Clamp] unsigned long`, with saturation and ties-to-even rounding.
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub struct ClampedUnsignedLong(pub u32);
+
+impl From<ClampedUnsignedLong> for u32 {
+    fn from(value: ClampedUnsignedLong) -> Self {
         value.0
     }
 }
