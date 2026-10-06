@@ -2326,6 +2326,7 @@ mod service_worker_interfaces;
 mod storage_dense_name_arrays;
 mod streams;
 mod string_timers;
+mod svg_animated_number;
 mod svg_element_receivers;
 mod svg_filter_interfaces;
 mod svg_geometry_methods;
