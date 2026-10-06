@@ -178,7 +178,7 @@ struct DomMatrixJsonDeclaration {
 }
 
 #[derive(WebApiFunctionTemplate)]
-#[webapi(interface = web_api_interfaces::DOMPoint)]
+#[webapi(interface = web_api_interfaces::DOMPoint, receiver)]
 struct DomPointPrototypeAccessorsDeclaration {
     #[webapi(
         accessor_property,
@@ -215,7 +215,7 @@ struct DomPointPrototypeAccessorsDeclaration {
 }
 
 #[derive(WebApiFunctionTemplate)]
-#[webapi(interface = web_api_interfaces::DOMPointReadOnly, enumerable)]
+#[webapi(interface = web_api_interfaces::DOMPointReadOnly, enumerable, receiver)]
 struct DomPointReadOnlyPrototypeMethodsDeclaration {
     #[webapi(
         method = "matrixTransform",
@@ -229,7 +229,7 @@ struct DomPointReadOnlyPrototypeMethodsDeclaration {
 }
 
 #[derive(WebApiFunctionTemplate)]
-#[webapi(interface = web_api_interfaces::DOMPointReadOnly)]
+#[webapi(interface = web_api_interfaces::DOMPointReadOnly, receiver)]
 struct DomPointReadOnlyPrototypeAccessorsDeclaration {
     #[webapi(accessor_property, getter = dom_point_getter_callback, data = callback_data_index_value(scope, 0), enumerable)]
     x: (),
@@ -583,7 +583,7 @@ struct DomMatrixInit {
 
 #[derive(Default, webidl::WebIdlDictionary)]
 #[webidl(prefix = "DOMMatrix2DInit")]
-struct DomMatrix2DInit {
+pub(in crate::context_bootstrap) struct DomMatrix2DInit {
     a: Option<f64>,
     b: Option<f64>,
     c: Option<f64>,
@@ -837,6 +837,16 @@ pub(in crate::context_bootstrap) fn build_svg_point_object_with_values<'s>(
     object
 }
 
+pub(in crate::context_bootstrap) fn set_dom_point_coordinates<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    point: v8::Local<'s, v8::Object>,
+    coordinates: [f64; 4],
+) {
+    for (slot, value) in DOM_POINT_ATTRIBUTE_SLOTS.iter().copied().zip(coordinates) {
+        set_private_value(scope, point, slot, v8::Number::new(scope, value).into());
+    }
+}
+
 pub(in crate::context_bootstrap) fn set_svg_point_read_only<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     point: v8::Local<'s, v8::Object>,
@@ -948,13 +958,10 @@ fn dom_point_getter_callback<'s>(
         rv.set_undefined();
         return;
     };
-    if !dom_point_receiver_branded(scope, args.this()) {
-        throw_type_error(scope, "Illegal invocation");
-        return;
-    }
-    rv.set(
-        get_private_value(scope, args.this(), slot).unwrap_or_else(|| v8::undefined(scope).into()),
-    );
+    let point = moli_webapi_declare::web_api_object_target(scope, args.this())
+        .expect("validated DOMPointReadOnly receiver");
+    super::svg_runtime::sync_svg_point_from_owner_list(scope, point);
+    rv.set(get_private_value(scope, point, slot).unwrap_or_else(|| v8::undefined(scope).into()));
 }
 
 fn dom_point_setter_callback<'s>(
@@ -967,23 +974,10 @@ fn dom_point_setter_callback<'s>(
         rv.set_undefined();
         return;
     };
-    if !web_api_interfaces::DOMPoint::is_instance(scope, args.this()) {
-        throw_type_error(scope, "Illegal invocation");
-        return;
-    }
-    if get_private_value(scope, args.this(), DOM_POINT_READ_ONLY_SLOT)
-        .is_some_and(|value| value.boolean_value(scope))
-    {
-        throw_dom_exception(
-            scope,
-            "NoModificationAllowedError",
-            7,
-            "The SVG point is read-only.",
-        );
-        return;
-    }
+    let point = moli_webapi_declare::web_api_object_target(scope, args.this())
+        .expect("validated DOMPoint receiver");
     let context = webidl::Context::member("DOMPoint", slot);
-    let value = if get_private_value(scope, args.this(), DOM_POINT_RESTRICTED_NUMBER_SLOT)
+    let value = if get_private_value(scope, point, DOM_POINT_RESTRICTED_NUMBER_SLOT)
         .is_some_and(|value| value.boolean_value(scope))
     {
         match webidl::convert::<webidl::Double>(scope, args.get(0), context) {
@@ -999,13 +993,20 @@ fn dom_point_setter_callback<'s>(
         };
         value
     };
-    set_private_value(
-        scope,
-        args.this(),
-        slot,
-        v8::Number::new(scope, value).into(),
-    );
-    super::svg_runtime::reflect_svg_point_mutation(scope, args.this());
+    super::svg_runtime::sync_svg_point_from_owner_list(scope, point);
+    if get_private_value(scope, point, DOM_POINT_READ_ONLY_SLOT)
+        .is_some_and(|value| value.boolean_value(scope))
+    {
+        throw_dom_exception(
+            scope,
+            "NoModificationAllowedError",
+            7,
+            "The SVG point is read-only.",
+        );
+        return;
+    }
+    set_private_value(scope, point, slot, v8::Number::new(scope, value).into());
+    super::svg_runtime::reflect_svg_point_mutation(scope, point);
     rv.set_undefined();
 }
 
@@ -1098,20 +1099,19 @@ fn dom_point_matrix_transform_callback<'s>(
     args: v8::FunctionCallbackArguments<'s>,
     mut rv: v8::ReturnValue<'_, v8::Value>,
 ) {
-    if !dom_point_receiver_branded(scope, args.this()) {
-        throw_type_error(scope, "Illegal invocation");
-        return;
-    }
+    let receiver = moli_webapi_declare::web_api_object_target(scope, args.this())
+        .expect("validated DOMPointReadOnly receiver");
     let Some(matrix) = dom_matrix_init_arg(scope, &args, 0, "DOMPointReadOnly.matrixTransform")
     else {
         return;
     };
     let matrix = matrix.components;
+    super::svg_runtime::sync_svg_point_from_owner_list(scope, receiver);
     let point = DomPointInit {
-        x: dom_point_slot(scope, args.this(), DOM_POINT_X_SLOT, 0.0),
-        y: dom_point_slot(scope, args.this(), DOM_POINT_Y_SLOT, 0.0),
-        z: dom_point_slot(scope, args.this(), DOM_POINT_Z_SLOT, 0.0),
-        w: dom_point_slot(scope, args.this(), DOM_POINT_W_SLOT, 1.0),
+        x: dom_point_slot(scope, receiver, DOM_POINT_X_SLOT, 0.0),
+        y: dom_point_slot(scope, receiver, DOM_POINT_Y_SLOT, 0.0),
+        z: dom_point_slot(scope, receiver, DOM_POINT_Z_SLOT, 0.0),
+        w: dom_point_slot(scope, receiver, DOM_POINT_W_SLOT, 1.0),
     };
     rv.set(
         build_dom_point_object(
@@ -1155,8 +1155,18 @@ pub(in crate::context_bootstrap) fn dom_matrix_2d_init_arg<'s>(
     index: i32,
     prefix: &'static str,
 ) -> Option<[f64; 6]> {
+    let init = dom_matrix_2d_init_dictionary_arg(scope, args, index, prefix)?;
+    validated_dom_matrix_2d_init(scope, init)
+}
+
+pub(in crate::context_bootstrap) fn dom_matrix_2d_init_dictionary_arg<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    args: &v8::FunctionCallbackArguments<'s>,
+    index: i32,
+    prefix: &'static str,
+) -> Option<DomMatrix2DInit> {
     if index >= args.length() || args.get(index).is_undefined() {
-        return Some([1.0, 0.0, 0.0, 1.0, 0.0, 0.0]);
+        return Some(DomMatrix2DInit::default());
     }
     let init = match webidl::parse_dictionary::<DomMatrix2DInit>(
         scope,
@@ -1170,6 +1180,13 @@ pub(in crate::context_bootstrap) fn dom_matrix_2d_init_arg<'s>(
             return None;
         }
     };
+    Some(init)
+}
+
+pub(in crate::context_bootstrap) fn validated_dom_matrix_2d_init(
+    scope: &mut v8::PinScope<'_, '_>,
+    init: DomMatrix2DInit,
+) -> Option<[f64; 6]> {
     Some([
         validated_dom_matrix_alias(scope, "DOMMatrix2DInit", "a", init.a, "m11", init.m11, 1.0)?,
         validated_dom_matrix_alias(scope, "DOMMatrix2DInit", "b", init.b, "m12", init.m12, 0.0)?,
@@ -1366,10 +1383,9 @@ fn dom_point_to_json_callback<'s>(
     mut rv: v8::ReturnValue<'_, v8::Value>,
 ) {
     let this = args.this();
-    if !dom_point_receiver_branded(scope, this) {
-        throw_type_error(scope, "Illegal invocation");
-        return;
-    }
+    let this = moli_webapi_declare::web_api_object_target(scope, this)
+        .expect("validated DOMPointReadOnly receiver");
+    super::svg_runtime::sync_svg_point_from_owner_list(scope, this);
     let declaration = DomPointJsonDeclaration {
         x: dom_point_slot(scope, this, DOM_POINT_X_SLOT, 0.0),
         y: dom_point_slot(scope, this, DOM_POINT_Y_SLOT, 0.0),
@@ -1397,6 +1413,7 @@ pub(super) fn dom_point_init_from_object<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     object: v8::Local<'s, v8::Object>,
 ) -> DomPointInit {
+    super::svg_runtime::sync_svg_point_from_owner_list(scope, object);
     DomPointInit {
         x: dom_point_slot(scope, object, DOM_POINT_X_SLOT, 0.0),
         y: dom_point_slot(scope, object, DOM_POINT_Y_SLOT, 0.0),
@@ -1419,6 +1436,8 @@ pub(super) fn dom_point_clone_data<'s>(
     if !dom_point_receiver_branded(scope, object) {
         return None;
     }
+    let object = moli_webapi_declare::web_api_object_target(scope, object)?;
+    super::svg_runtime::sync_svg_point_from_owner_list(scope, object);
     let mutable = web_api_interfaces::DOMPoint::is_instance(scope, object);
     Some((
         mutable,
