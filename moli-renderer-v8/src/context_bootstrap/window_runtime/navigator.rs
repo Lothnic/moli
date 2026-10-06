@@ -1,7 +1,7 @@
 use super::*;
 use crate::web_api_interfaces;
 use moli_browser_profile::BrowserIdentityProfile;
-use moli_webapi_declare::{ObjectLiteralDeclaration, WebApiFunctionTemplate, WebApiObject};
+use moli_webapi_declare::{WebApiFunctionTemplate, WebApiObject};
 
 use crate::context_bootstrap::navigator_runtime::{
     STORAGE_BUCKET_MANAGER_CHILD_HANDLE_SLOT, STORAGE_BUCKET_MANAGER_POPUP_ID_SLOT,
@@ -22,6 +22,10 @@ use crate::util::{get_private_value, set_private_value};
 use crate::webidl;
 
 mod cache_add;
+mod cache_query;
+mod cache_results;
+use cache_query::CacheQueryOptions;
+use moli_storage_service::StorageBucketCacheName;
 mod legacy_storage_quota;
 
 pub(crate) use legacy_storage_quota::{
@@ -53,10 +57,7 @@ const STORAGE_BUCKET_CACHE_PUT_BUCKET_STORAGE_KEY_SLOT: &str =
 const STORAGE_BUCKET_CACHE_PUT_CACHE_NAME_SLOT: &str = "__moliStorageBucketCachePutCacheName";
 const STORAGE_BUCKET_CACHE_PUT_CACHE_ID_SLOT: &str = "__moliStorageBucketCachePutCacheId";
 const STORAGE_BUCKET_CACHE_PUT_REQUEST_KEY_SLOT: &str = "__moliStorageBucketCachePutRequestKey";
-const STORAGE_BUCKET_CACHE_PUT_REQUEST_METHOD_SLOT: &str =
-    "__moliStorageBucketCachePutRequestMethod";
-const STORAGE_BUCKET_CACHE_PUT_REQUEST_HEADERS_SLOT: &str =
-    "__moliStorageBucketCachePutRequestHeaders";
+const STORAGE_BUCKET_CACHE_PUT_REQUEST_SLOT: &str = "__moliStorageBucketCachePutRequest";
 const STORAGE_BUCKET_CACHE_PUT_RESPONSE_TYPE_SLOT: &str = "__moliStorageBucketCachePutResponseType";
 const STORAGE_BUCKET_CACHE_PUT_RESPONSE_URL_SLOT: &str = "__moliStorageBucketCachePutResponseUrl";
 const STORAGE_BUCKET_CACHE_PUT_RESPONSE_REDIRECTED_SLOT: &str =
@@ -121,7 +122,7 @@ struct StorageBucketCacheObjectDeclaration<'scope> {
     #[webapi(prototype)]
     prototype: v8::Local<'scope, v8::Object>,
     #[webapi(slot = STORAGE_BUCKET_CACHE_NAME_SLOT)]
-    cache_name: String,
+    cache_name: v8::Local<'scope, v8::String>,
     #[webapi(slot = STORAGE_BUCKET_CACHE_ID_SLOT)]
     cache_id: String,
 }
@@ -339,23 +340,14 @@ struct StorageBucketHandle {
 #[derive(Debug, Clone)]
 struct StorageBucketCacheHandle {
     bucket: StorageBucketHandle,
-    cache_name: String,
+    cache_name: StorageBucketCacheName,
     cache_id: StorageBucketCacheId,
 }
 
 #[derive(Debug)]
 struct CacheRequestInfo {
     url: String,
-    method: String,
-    headers: Vec<(String, String)>,
-}
-
-#[derive(Debug, Default)]
-struct CacheQueryOptions {
-    ignore_search: bool,
-    ignore_method: bool,
-    ignore_vary: bool,
-    cache_name: Option<String>,
+    request: StorageBucketCachedRequest,
 }
 
 #[derive(WebApiObject)]
@@ -377,7 +369,7 @@ struct StorageBucketCachePutPendingDataDeclaration<'scope> {
     bucket_storage_key: String,
 
     #[webapi(slot = STORAGE_BUCKET_CACHE_PUT_CACHE_NAME_SLOT)]
-    cache_name: String,
+    cache_name: v8::Local<'scope, v8::String>,
 
     #[webapi(slot = STORAGE_BUCKET_CACHE_PUT_CACHE_ID_SLOT)]
     cache_id: String,
@@ -385,11 +377,8 @@ struct StorageBucketCachePutPendingDataDeclaration<'scope> {
     #[webapi(slot = STORAGE_BUCKET_CACHE_PUT_REQUEST_KEY_SLOT)]
     request_key: String,
 
-    #[webapi(slot = STORAGE_BUCKET_CACHE_PUT_REQUEST_METHOD_SLOT)]
-    request_method: String,
-
-    #[webapi(slot = STORAGE_BUCKET_CACHE_PUT_REQUEST_HEADERS_SLOT)]
-    request_headers_json: String,
+    #[webapi(slot = STORAGE_BUCKET_CACHE_PUT_REQUEST_SLOT)]
+    request_json: String,
 
     #[webapi(slot = STORAGE_BUCKET_CACHE_PUT_RESPONSE_TYPE_SLOT)]
     response_type: String,
@@ -1498,11 +1487,11 @@ fn storage_bucket_cache_storage_open_callback<'s>(
     else {
         return;
     };
-    let Some(cache_name) = required_dom_string_argument(scope, &args, 0, "open", "CacheStorage")
-    else {
-        reject_type_error(scope, resolver, "CacheStorage.open requires a cache name.");
+    let Some(cache_name) = cache_query::name_argument(scope, &args, resolver) else {
         return;
     };
+    let (owner, resolver) = cache_results::owner_resolver(scope, args.this(), resolver, &mut rv);
+    let scope = &mut v8::ContextScope::new(scope, owner);
     let Some(handle) =
         storage_bucket_cache_storage_live_handle(scope, args.this(), resolver, "open")
     else {
@@ -1537,37 +1526,29 @@ fn storage_bucket_cache_storage_match_callback<'s>(
     else {
         return;
     };
-    let request = match cache_request_info_argument(scope, &args, 0) {
-        Ok(Some(request)) => request,
-        Ok(None) => {
-            reject_type_error(
-                scope,
-                resolver,
-                "CacheStorage.match requires a request key.",
-            );
-            return;
-        }
-        Err(error) => {
-            reject_type_error(scope, resolver, &error.to_string());
-            return;
-        }
-    };
-    let Some(options) = cache_query_options(scope, &args, 1) else {
-        reject_type_error(scope, resolver, "CacheStorage.match options are invalid.");
+    let Some(parsed) =
+        cache_query::query_arguments(scope, &args, resolver, cache_query::QueryKind::Storage)
+    else {
         return;
     };
+    let options = parsed.options;
+    let request = parsed.request.expect("required RequestInfo was converted");
     let query = storage_bucket_cache_query(request, &options);
+    let (owner, resolver) = cache_results::owner_resolver(scope, args.this(), resolver, &mut rv);
+    let scope = &mut v8::ContextScope::new(scope, owner);
     let Some(handle) =
         storage_bucket_cache_storage_live_handle(scope, args.this(), resolver, "match")
     else {
         return;
     };
     let matched = with_storage_bucket_store_entry(scope, |store| {
-        let cache_names = match options.cache_name.as_ref() {
-            Some(cache_name) => vec![cache_name.clone()],
-            None => store.cache_names_for_identity(&handle.identity)?,
-        };
+        let cache_names = store.cache_names_for_identity(&handle.identity)?;
         for cache_name in cache_names {
+            if let Some(expected) = parsed.cache_name.as_ref()
+                && expected != &cache_name
+            {
+                continue;
+            }
             if let Some(response) = store
                 .match_cache_entries_for_identity(&handle.identity, &cache_name, &query)?
                 .into_iter()
@@ -1612,11 +1593,11 @@ fn storage_bucket_cache_storage_has_callback<'s>(
     let Some(resolver) = storage_bucket_cache_storage_resolver(scope, &args, &mut rv, "has") else {
         return;
     };
-    let Some(cache_name) = required_dom_string_argument(scope, &args, 0, "has", "CacheStorage")
-    else {
-        reject_type_error(scope, resolver, "CacheStorage.has requires a cache name.");
+    let Some(cache_name) = cache_query::name_argument(scope, &args, resolver) else {
         return;
     };
+    let (owner, resolver) = cache_results::owner_resolver(scope, args.this(), resolver, &mut rv);
+    let scope = &mut v8::ContextScope::new(scope, owner);
     let Some(handle) =
         storage_bucket_cache_storage_live_handle(scope, args.this(), resolver, "has")
     else {
@@ -1648,6 +1629,8 @@ fn storage_bucket_cache_storage_keys_callback<'s>(
     else {
         return;
     };
+    let (owner, resolver) = cache_results::owner_resolver(scope, args.this(), resolver, &mut rv);
+    let scope = &mut v8::ContextScope::new(scope, owner);
     let Some(handle) =
         storage_bucket_cache_storage_live_handle(scope, args.this(), resolver, "keys")
     else {
@@ -1658,7 +1641,15 @@ fn storage_bucket_cache_storage_keys_callback<'s>(
     });
     match names {
         Some(Some(names)) => {
-            let array = strings_to_array(scope, &names);
+            let values = names
+                .iter()
+                .map(|name| {
+                    crate::util::v8_string_from_utf16_units(scope, name.as_utf16())
+                        .expect("cache name should allocate")
+                        .into()
+                })
+                .collect::<Vec<v8::Local<v8::Value>>>();
+            let array = v8::Array::new_with_elements(scope, &values);
             let _ = resolver.resolve(scope, array.into());
         }
         Some(None) => reject_storage_bucket_unknown_error(scope, resolver, "caches.keys"),
@@ -1679,15 +1670,11 @@ fn storage_bucket_cache_storage_delete_callback<'s>(
     else {
         return;
     };
-    let Some(cache_name) = required_dom_string_argument(scope, &args, 0, "delete", "CacheStorage")
-    else {
-        reject_type_error(
-            scope,
-            resolver,
-            "CacheStorage.delete requires a cache name.",
-        );
+    let Some(cache_name) = cache_query::name_argument(scope, &args, resolver) else {
         return;
     };
+    let (owner, resolver) = cache_results::owner_resolver(scope, args.this(), resolver, &mut rv);
+    let scope = &mut v8::ContextScope::new(scope, owner);
     let Some(handle) =
         storage_bucket_cache_storage_live_handle(scope, args.this(), resolver, "delete")
     else {
@@ -1720,32 +1707,33 @@ fn storage_bucket_cache_put_callback<'s>(
     let Some(resolver) = storage_bucket_cache_resolver(scope, &args, &mut rv, "put") else {
         return;
     };
-    let request = match cache_request_info_argument(scope, &args, 0) {
-        Ok(Some(request)) => request,
-        Ok(None) => {
-            reject_type_error(scope, resolver, "Cache.put requires a request key.");
-            return;
-        }
-        Err(error) => {
-            reject_type_error(scope, resolver, &error.to_string());
-            return;
-        }
+    let Some((request, response)) = cache_query::rejecting_conversion(scope, resolver, |scope| {
+        let parsed = webidl::try_parse_args::<cache_query::PutArgs>(scope, &args)?;
+        let request = cache_query::materialize_request(scope, parsed.request)?;
+        Ok((request, parsed.response))
+    }) else {
+        return;
     };
-    if !request.method.eq_ignore_ascii_case("GET") {
-        reject_type_error(scope, resolver, "Cache.put only accepts GET requests.");
+    if !url::Url::parse(&request.url).is_ok_and(|url| matches!(url.scheme(), "http" | "https"))
+        || request.request.method != "GET"
+    {
+        reject_type_error(
+            scope,
+            resolver,
+            "Cache.put requires an HTTP(S) GET request.",
+        );
         return;
     }
-    if args.length() <= 1 || args.get(1).is_null_or_undefined() {
-        reject_type_error(scope, resolver, "Cache.put requires a response.");
-        return;
-    }
-    let Some(response) = storage_bucket_cached_response_from_value(scope, args.get(1), resolver)
+    let Some(response) =
+        storage_bucket_cached_response_from_value(scope, response.into(), resolver)
     else {
         return;
     };
     let Some(handle) = storage_bucket_cache_live_handle(scope, args.this(), resolver, "put") else {
         return;
     };
+    let (owner, resolver) = cache_results::owner_resolver(scope, args.this(), resolver, &mut rv);
+    let scope = &mut v8::ContextScope::new(scope, owner);
     match response {
         StorageBucketCachedResponseMaterialization::Ready(response) => {
             storage_bucket_cache_put_store_response(scope, resolver, handle, request, response);
@@ -1795,10 +1783,7 @@ fn storage_bucket_cache_put_store_response<'s>(
             &handle.cache_name,
             handle.cache_id,
             &request.url,
-            StorageBucketCachedRequest {
-                method: request.method,
-                headers: request.headers,
-            },
+            request.request,
             response,
             usage_bytes,
             non_cache_usage,
@@ -1847,12 +1832,12 @@ fn storage_bucket_cache_put_pending_body<'s>(
         bucket_name: handle.bucket.identity.name().to_owned(),
         bucket_id: handle.bucket.identity.bucket_id().get().to_string(),
         bucket_storage_key: handle.bucket.indexed_db_storage_key,
-        cache_name: handle.cache_name,
+        cache_name: crate::util::v8_string_from_utf16_units(scope, handle.cache_name.as_utf16())
+            .expect("cache name should allocate"),
         cache_id: handle.cache_id.get().to_string(),
         request_key: request.url,
-        request_method: request.method,
-        request_headers_json: serde_json::to_string(&request.headers)
-            .unwrap_or_else(|_| "[]".to_owned()),
+        request_json: serde_json::to_string(&request.request)
+            .expect("materialized Cache Request state is serializable"),
         response_type: head.response_type,
         response_url: head
             .final_url
@@ -1986,18 +1971,19 @@ fn storage_bucket_cache_put_pending_data<'s>(
         data,
         STORAGE_BUCKET_CACHE_PUT_BUCKET_STORAGE_KEY_SLOT,
     )?;
-    let cache_name = data_private_string(scope, data, STORAGE_BUCKET_CACHE_PUT_CACHE_NAME_SLOT)?;
+    let cache_name =
+        cache_query::name_from_private_slot(scope, data, STORAGE_BUCKET_CACHE_PUT_CACHE_NAME_SLOT)?;
     let cache_id = data_private_string(scope, data, STORAGE_BUCKET_CACHE_PUT_CACHE_ID_SLOT)?
         .parse::<u64>()
         .ok()
         .map(StorageBucketCacheId::from_raw)?;
     let request_key = data_private_string(scope, data, STORAGE_BUCKET_CACHE_PUT_REQUEST_KEY_SLOT)?;
-    let request_method =
-        data_private_string(scope, data, STORAGE_BUCKET_CACHE_PUT_REQUEST_METHOD_SLOT)?;
-    let request_headers_json =
-        data_private_string(scope, data, STORAGE_BUCKET_CACHE_PUT_REQUEST_HEADERS_SLOT)?;
-    let request_headers =
-        serde_json::from_str::<Vec<(String, String)>>(&request_headers_json).unwrap_or_default();
+    let request = serde_json::from_str::<StorageBucketCachedRequest>(&data_private_string(
+        scope,
+        data,
+        STORAGE_BUCKET_CACHE_PUT_REQUEST_SLOT,
+    )?)
+    .ok()?;
     let response_type =
         data_private_string(scope, data, STORAGE_BUCKET_CACHE_PUT_RESPONSE_TYPE_SLOT)?;
     let response_url =
@@ -2041,8 +2027,7 @@ fn storage_bucket_cache_put_pending_data<'s>(
         },
         request: CacheRequestInfo {
             url: request_key,
-            method: request_method,
-            headers: request_headers,
+            request,
         },
         response_type,
         response_url,
@@ -2079,22 +2064,16 @@ fn storage_bucket_cache_match_callback<'s>(
     let Some(resolver) = storage_bucket_cache_resolver(scope, &args, &mut rv, "match") else {
         return;
     };
-    let request = match cache_request_info_argument(scope, &args, 0) {
-        Ok(Some(request)) => request,
-        Ok(None) => {
-            reject_type_error(scope, resolver, "Cache.match requires a request key.");
-            return;
-        }
-        Err(error) => {
-            reject_type_error(scope, resolver, &error.to_string());
-            return;
-        }
-    };
-    let Some(options) = cache_query_options(scope, &args, 1) else {
-        reject_type_error(scope, resolver, "Cache.match options are invalid.");
+    let Some(parsed) =
+        cache_query::query_arguments(scope, &args, resolver, cache_query::QueryKind::Cache)
+    else {
         return;
     };
+    let options = parsed.options;
+    let request = parsed.request.expect("required RequestInfo was converted");
     let query = storage_bucket_cache_query(request, &options);
+    let (owner, resolver) = cache_results::owner_resolver(scope, args.this(), resolver, &mut rv);
+    let scope = &mut v8::ContextScope::new(scope, owner);
     let Some(handle) = storage_bucket_cache_live_handle(scope, args.this(), resolver, "match")
     else {
         return;
@@ -2138,18 +2117,19 @@ fn storage_bucket_cache_match_all_callback<'s>(
     let Some(resolver) = storage_bucket_cache_resolver(scope, &args, &mut rv, "matchAll") else {
         return;
     };
-    let request = match cache_request_info_argument(scope, &args, 0) {
-        Ok(request) => request,
-        Err(error) => {
-            reject_type_error(scope, resolver, &error.to_string());
-            return;
-        }
-    };
-    let Some(options) = cache_query_options(scope, &args, 1) else {
-        reject_type_error(scope, resolver, "Cache.matchAll options are invalid.");
+    let Some(parsed) = cache_query::query_arguments(
+        scope,
+        &args,
+        resolver,
+        cache_query::QueryKind::OptionalRequest,
+    ) else {
         return;
     };
+    let options = parsed.options;
+    let request = parsed.request;
     let query = request.map(|request| storage_bucket_cache_query(request, &options));
+    let (owner, resolver) = cache_results::owner_resolver(scope, args.this(), resolver, &mut rv);
+    let scope = &mut v8::ContextScope::new(scope, owner);
     let Some(handle) = storage_bucket_cache_live_handle(scope, args.this(), resolver, "matchAll")
     else {
         return;
@@ -2190,6 +2170,14 @@ fn storage_bucket_cache_match_all_callback<'s>(
                     return;
                 }
             }
+            let Some(responses) = cache_results::freeze_array(scope, responses) else {
+                reject_type_error(
+                    scope,
+                    resolver,
+                    "Cache.matchAll failed to freeze its result.",
+                );
+                return;
+            };
             let _ = resolver.resolve(scope, responses.into());
         }
         Some(None) => reject_storage_bucket_unknown_error(scope, resolver, "cache.matchAll"),
@@ -2209,18 +2197,19 @@ fn storage_bucket_cache_keys_callback<'s>(
     let Some(resolver) = storage_bucket_cache_resolver(scope, &args, &mut rv, "keys") else {
         return;
     };
-    let request = match cache_request_info_argument(scope, &args, 0) {
-        Ok(request) => request,
-        Err(error) => {
-            reject_type_error(scope, resolver, &error.to_string());
-            return;
-        }
-    };
-    let Some(options) = cache_query_options(scope, &args, 1) else {
-        reject_type_error(scope, resolver, "Cache.keys options are invalid.");
+    let Some(parsed) = cache_query::query_arguments(
+        scope,
+        &args,
+        resolver,
+        cache_query::QueryKind::OptionalRequest,
+    ) else {
         return;
     };
+    let options = parsed.options;
+    let request = parsed.request;
     let query = request.map(|request| storage_bucket_cache_query(request, &options));
+    let (owner, resolver) = cache_results::owner_resolver(scope, args.this(), resolver, &mut rv);
+    let scope = &mut v8::ContextScope::new(scope, owner);
     let Some(handle) = storage_bucket_cache_live_handle(scope, args.this(), resolver, "keys")
     else {
         return;
@@ -2263,22 +2252,16 @@ fn storage_bucket_cache_delete_callback<'s>(
     let Some(resolver) = storage_bucket_cache_resolver(scope, &args, &mut rv, "delete") else {
         return;
     };
-    let request = match cache_request_info_argument(scope, &args, 0) {
-        Ok(Some(request)) => request,
-        Ok(None) => {
-            reject_type_error(scope, resolver, "Cache.delete requires a request key.");
-            return;
-        }
-        Err(error) => {
-            reject_type_error(scope, resolver, &error.to_string());
-            return;
-        }
-    };
-    let Some(options) = cache_query_options(scope, &args, 1) else {
-        reject_type_error(scope, resolver, "Cache.delete options are invalid.");
+    let Some(parsed) =
+        cache_query::query_arguments(scope, &args, resolver, cache_query::QueryKind::Cache)
+    else {
         return;
     };
+    let options = parsed.options;
+    let request = parsed.request.expect("required RequestInfo was converted");
     let query = storage_bucket_cache_query(request, &options);
+    let (owner, resolver) = cache_results::owner_resolver(scope, args.this(), resolver, &mut rv);
+    let scope = &mut v8::ContextScope::new(scope, owner);
     let Some(handle) = storage_bucket_cache_live_handle(scope, args.this(), resolver, "delete")
     else {
         return;
@@ -2521,18 +2504,17 @@ fn build_storage_bucket_cache_storage_object<'s>(
 fn build_storage_bucket_cache_object<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     bucket: &StorageBucketHandle,
-    cache_name: &str,
+    cache_name: &StorageBucketCacheName,
     cache_id: StorageBucketCacheId,
 ) -> v8::Local<'s, v8::Object> {
     let prototype = crate::context_bootstrap::ensure_intrinsic_interface_prototype(scope, "Cache")
         .expect("Cache intrinsic prototype should be available");
-    let object = StorageBucketCacheObjectDeclaration::new(
-        prototype,
-        cache_name.to_owned(),
-        cache_id.get().to_string(),
-    )
-    .bind(scope)
-    .expect("Cache declaration should bind");
+    let cache_name = crate::util::v8_string_from_utf16_units(scope, cache_name.as_utf16())
+        .expect("cache name should allocate");
+    let object =
+        StorageBucketCacheObjectDeclaration::new(prototype, cache_name, cache_id.get().to_string())
+            .bind(scope)
+            .expect("Cache declaration should bind");
     set_storage_bucket_handle_slots(scope, object, bucket);
     if let Some(store) = current_storage_bucket_store(scope) {
         let identity = bucket.identity.clone();
@@ -2683,9 +2665,8 @@ fn storage_bucket_cache_live_handle<'s>(
         reject_type_error(scope, resolver, &message);
         return None;
     };
-    let Some(cache_name) = get_private_value(scope, cache, STORAGE_BUCKET_CACHE_NAME_SLOT)
-        .and_then(|value| value.to_string(scope))
-        .map(|value| value.to_rust_string_lossy(scope))
+    let Some(cache_name) =
+        cache_query::name_from_private_slot(scope, cache, STORAGE_BUCKET_CACHE_NAME_SLOT)
     else {
         let message = format!("Cache.{method} cache name is unavailable.");
         reject_type_error(scope, resolver, &message);
@@ -2909,98 +2890,14 @@ fn storage_bucket_cached_response_from_head_body(
     }
 }
 
-fn cache_request_info_argument<'s>(
-    scope: &mut v8::PinScope<'s, '_>,
-    args: &v8::FunctionCallbackArguments<'s>,
-    index: i32,
-) -> Result<Option<CacheRequestInfo>, crate::network_host::RequestUrlError> {
-    if args.length() <= index {
-        return Ok(None);
-    }
-    let value = args.get(index);
-    if let Ok(object) = v8::Local::<v8::Object>::try_from(value)
-        && crate::network_host::is_branded_request_object(scope, object)
-        && let Some(url) = crate::network_host::request_slot_string(
-            scope,
-            object,
-            crate::network_host::REQUEST_URL_SLOT,
-        )
-    {
-        let method = crate::network_host::request_method(scope, object);
-        let headers = crate::network_host::request_headers_entries(scope, object);
-        return Ok(Some(CacheRequestInfo {
-            url,
-            method,
-            headers,
-        }));
-    }
-    let Some(input) = value
-        .to_string(scope)
-        .map(|value| value.to_rust_string_lossy(scope))
-    else {
-        return Ok(None);
-    };
-    crate::network_host::try_resolve_request_constructor_url(scope, &input).map(|url| {
-        Some(CacheRequestInfo {
-            url,
-            method: "GET".to_owned(),
-            headers: Vec::new(),
-        })
-    })
-}
-
-fn cache_query_options<'s>(
-    scope: &mut v8::PinScope<'s, '_>,
-    args: &v8::FunctionCallbackArguments<'s>,
-    index: i32,
-) -> Option<CacheQueryOptions> {
-    if args.length() <= index || args.get(index).is_null_or_undefined() {
-        return Some(CacheQueryOptions::default());
-    }
-    let options = args.get(index).to_object(scope)?;
-    let cache_name = cache_query_cache_name_option(scope, options)?;
-    let ignore_method = cache_query_boolean_option(scope, options, "ignoreMethod")?;
-    let ignore_search = cache_query_boolean_option(scope, options, "ignoreSearch")?;
-    let ignore_vary = cache_query_boolean_option(scope, options, "ignoreVary")?;
-    Some(CacheQueryOptions {
-        ignore_search,
-        ignore_method,
-        ignore_vary,
-        cache_name,
-    })
-}
-
-fn cache_query_boolean_option(
-    scope: &mut v8::PinScope<'_, '_>,
-    options: v8::Local<'_, v8::Object>,
-    name: &str,
-) -> Option<bool> {
-    options
-        .get(scope, v8_string(scope, name)?.into())
-        .map(|value| value.boolean_value(scope))
-}
-
-fn cache_query_cache_name_option(
-    scope: &mut v8::PinScope<'_, '_>,
-    options: v8::Local<'_, v8::Object>,
-) -> Option<Option<String>> {
-    let value = options.get(scope, v8str(scope, "cacheName").into())?;
-    if value.is_undefined() {
-        return Some(None);
-    }
-    value
-        .to_string(scope)
-        .map(|value| Some(value.to_rust_string_lossy(scope)))
-}
-
 fn storage_bucket_cache_query(
     request: CacheRequestInfo,
     options: &CacheQueryOptions,
 ) -> StorageBucketCacheQuery {
     StorageBucketCacheQuery {
         request_url: request.url,
-        method: request.method,
-        headers: request.headers,
+        method: request.request.method,
+        headers: request.request.headers,
         ignore_search: options.ignore_search,
         ignore_method: options.ignore_method,
         ignore_vary: options.ignore_vary,
@@ -3030,14 +2927,6 @@ fn build_storage_bucket_cached_response_object<'s>(
     } else {
         crate::blob::array_buffer_from_bytes(scope, response.body)?.into()
     };
-    let init = ObjectLiteralDeclaration::bind(scope);
-    init.set_string_property(
-        scope,
-        "status",
-        v8::Integer::new(scope, response.status as i32).into(),
-    );
-    let status_text = v8_string(scope, &response.status_text)?;
-    init.set_string_property(scope, "statusText", status_text.into());
     let public_headers = response
         .headers
         .iter()
@@ -3054,15 +2943,16 @@ fn build_storage_bucket_cached_response_object<'s>(
         })
         .cloned()
         .collect::<Vec<_>>();
-    let headers =
-        headers_entries_to_init_array(scope, &moli_fetch::headers_to_byte_strings(&public_headers));
-    init.set_string_property(scope, "headers", headers.into());
-    let global = scope.get_current_context().global(scope);
-    let constructor = global
-        .get(scope, v8str(scope, "Response").into())
-        .and_then(|value| v8::Local::<v8::Function>::try_from(value).ok())?;
-    let response_obj = constructor.new_instance(scope, &[body, init.into_value()])?;
-    crate::network_host::mark_response_headers_immutable(scope, response_obj);
+    let init = cache_results::response_init(scope, response.status, &response.status_text)?;
+    let constructor =
+        crate::context_bootstrap::ensure_intrinsic_interface_constructor(scope, "Response").ok()?;
+    let response_obj =
+        crate::script_execution::construct(scope, constructor, &[body, init.into()])?;
+    crate::network_host::set_cached_response_headers(
+        scope,
+        response_obj,
+        &moli_fetch::headers_to_byte_strings(&public_headers),
+    );
     if matches!(response.response_type.as_str(), "basic" | "cors") {
         crate::network_host::set_filtered_response_internal_head(
             scope,
@@ -3097,42 +2987,19 @@ fn cache_entries_to_request_array<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     entries: &[StorageBucketCacheMatch],
 ) -> Option<v8::Local<'s, v8::Array>> {
-    let global = scope.get_current_context().global(scope);
-    let constructor = global
-        .get(scope, v8str(scope, "Request").into())
-        .and_then(|value| v8::Local::<v8::Function>::try_from(value).ok())?;
+    crate::context_bootstrap::ensure_intrinsic_interface_constructor(scope, "Request").ok()?;
     let requests = v8::Array::new(scope, entries.len() as i32);
     for (index, entry) in entries.iter().enumerate() {
-        let request_url = v8_string(scope, &entry.request_url)?;
-        let init = ObjectLiteralDeclaration::bind(scope);
-        let method = v8_string(scope, &entry.request.method)?;
-        init.set_string_property(scope, "method", method.into());
-        let headers = headers_entries_to_init_array(scope, &entry.request.headers);
-        init.set_string_property(scope, "headers", headers.into());
-        let request = constructor.new_instance(scope, &[request_url.into(), init.into_value()])?;
+        let request = crate::network_host::build_cached_request_object(
+            scope,
+            &entry.request_url,
+            &entry.request,
+        )?;
         if requests.set_index(scope, index as u32, request.into()) != Some(true) {
             return None;
         }
     }
-    Some(requests)
-}
-
-fn headers_entries_to_init_array<'s>(
-    scope: &mut v8::PinScope<'s, '_>,
-    entries: &[(String, String)],
-) -> v8::Local<'s, v8::Array> {
-    let array = v8::Array::new(scope, entries.len() as i32);
-    for (index, (name, value)) in entries.iter().enumerate() {
-        let pair = v8::Array::new(scope, 2);
-        if let Some(name) = v8_string(scope, name) {
-            let _ = pair.set_index(scope, 0, name.into());
-        }
-        if let Some(value) = v8_string(scope, value) {
-            let _ = pair.set_index(scope, 1, value.into());
-        }
-        let _ = array.set_index(scope, index as u32, pair.into());
-    }
-    array
+    cache_results::freeze_array(scope, requests)
 }
 
 fn cache_entry_usage_bytes(
@@ -3140,9 +3007,11 @@ fn cache_entry_usage_bytes(
     response: &StorageBucketCachedResponse,
 ) -> u64 {
     (request.url.len() as u64)
-        .saturating_add(request.method.len() as u64)
+        .saturating_add(request.request.method.len() as u64)
+        .saturating_add(request.request.metadata.estimated_size_bytes())
         .saturating_add(
             request
+                .request
                 .headers
                 .iter()
                 .map(|(name, value)| name.len().saturating_add(value.len()) as u64)
