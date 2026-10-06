@@ -105,7 +105,7 @@ pub(in crate::network_host) use self::fetch_surface::{
 };
 pub(crate) use self::fetch_surface::{
     REQUEST_URL_SLOT, is_branded_request_object, request_headers_entries, request_method,
-    request_slot_string, set_response_slot_bool,
+    request_slot_string, set_cached_response_headers, set_response_slot_bool,
 };
 pub(crate) use self::fetch_surface::{
     RESPONSE_BODY_SLOT, RESPONSE_BODY_USED_SLOT, RESPONSE_HEADERS_SLOT, RESPONSE_OK_SLOT,
@@ -141,17 +141,19 @@ pub(crate) use self::media::{
     start_media_element_resource_fetch,
 };
 pub(in crate::network_host) use self::preflight_events::CorsPreflightNetworkObserver;
-pub(crate) use self::request::request_constructor_callback;
-pub(crate) use self::request::{FetchArgumentError, RequestUrlError};
+pub(crate) use self::request::FetchArgumentError;
 pub(in crate::network_host) use self::request::{RequestMethodError, normalize_request_method};
+pub(crate) use self::request::{
+    build_cached_request_object, cached_request_from_native, request_constructor_callback,
+};
 pub(crate) use self::request::{
     convert_fetch_arguments, parse_fetch_init, parse_request_redirect_mode_label,
     request_object_credentials_mode, validate_fetch_body,
 };
 pub(crate) use self::request::{
     mark_request_input_body_used_for_fetch, request_headers_guard_for_mode, request_input_snapshot,
-    try_resolve_request_constructor_url, try_resolve_request_constructor_url_for_base,
-    try_resolve_request_constructor_url_for_child, validate_request_url_credentials,
+    try_resolve_request_constructor_url_for_base, try_resolve_request_constructor_url_for_child,
+    validate_request_url_credentials,
 };
 pub(in crate::network_host) use self::request_scope::{
     XHR_CHILD_CONTEXT_HANDLE_SLOT, active_subresource_network_partition_key,
