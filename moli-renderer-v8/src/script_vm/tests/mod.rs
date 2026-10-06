@@ -2328,6 +2328,7 @@ mod service_worker_interfaces;
 mod storage_dense_name_arrays;
 mod streams;
 mod string_timers;
+mod svg_animated_number;
 mod svg_animation_interfaces;
 mod svg_element_receivers;
 mod svg_filter_interfaces;
@@ -2365,3 +2366,6 @@ mod window_scheduling_receivers;
 mod window_scroll_methods;
 mod window_sync_method_receivers;
 mod worklet_interfaces;
+
+mod svg_transform_lists;
+mod svg_value_lists;
