@@ -21,6 +21,7 @@ use crate::document_runtime::DomHandle;
 use crate::util::{get_private_value, set_private_value};
 use crate::webidl;
 
+mod cache_add;
 mod legacy_storage_quota;
 
 pub(crate) use legacy_storage_quota::{
@@ -128,6 +129,10 @@ struct StorageBucketCacheObjectDeclaration<'scope> {
 #[derive(WebApiFunctionTemplate)]
 #[webapi(interface = web_api_interfaces::Cache, enumerable)]
 struct CachePrototypeDeclaration {
+    #[webapi(method, callback = cache_add::add_callback, length = 1)]
+    add: (),
+    #[webapi(method = "addAll", callback = cache_add::add_all_callback, length = 1)]
+    add_all: (),
     #[webapi(method, callback = storage_bucket_cache_put_callback, length = 2)]
     put: (),
     #[webapi(method, callback = storage_bucket_cache_match_callback, length = 1)]
@@ -325,13 +330,13 @@ struct NavigatorBatteryStatusObjectDeclaration {
 #[webapi(interface = web_api_interfaces::StorageBucket)]
 struct StorageBucketObjectDeclaration {}
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct StorageBucketHandle {
     identity: StorageBucketIdentity,
     indexed_db_storage_key: String,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct StorageBucketCacheHandle {
     bucket: StorageBucketHandle,
     cache_name: String,
@@ -1806,6 +1811,14 @@ fn storage_bucket_cache_put_store_response<'s>(
         Some(Ok(StorageBucketCachePutOutcome::Stale)) => {
             reject_storage_bucket_unknown_error(scope, resolver, "cache.put");
         }
+        Some(Ok(StorageBucketCachePutOutcome::Duplicate)) => {
+            let error = new_dom_exception_value(
+                scope,
+                "Cache batch contains duplicate requests.",
+                "InvalidStateError",
+            );
+            let _ = resolver.reject(scope, error);
+        }
         Some(Ok(StorageBucketCachePutOutcome::QuotaExceeded { quota, requested })) => {
             reject_storage_bucket_quota_exceeded(scope, resolver, quota, requested);
         }
@@ -1937,17 +1950,7 @@ fn storage_bucket_cache_put_body_rejected_callback<'s>(
     let Some(pending) = storage_bucket_cache_put_pending_data(scope, args.data()) else {
         return;
     };
-    let reason = args
-        .get(0)
-        .to_string(scope)
-        .map(|value| value.to_rust_string_lossy(scope))
-        .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| "unknown rejection".to_owned());
-    reject_type_error(
-        scope,
-        pending.resolver,
-        &format!("Cache.put failed to materialize Response body: {reason}"),
-    );
+    let _ = pending.resolver.reject(scope, args.get(0));
 }
 
 struct StorageBucketCachePutPendingData<'scope> {
@@ -2864,17 +2867,24 @@ fn storage_bucket_cached_response_from_value<'s>(
                 return None;
             }
         };
-    let body =
-        match crate::network_host::materialize_response_object_body(scope, response, "Cache.put") {
-            crate::network_host::MaterializedResponseBody::Ready(body) => body,
-            crate::network_host::MaterializedResponseBody::Pending(promise) => {
-                return Some(StorageBucketCachedResponseMaterialization::Pending { head, promise });
-            }
-            crate::network_host::MaterializedResponseBody::Failure(error) => {
-                reject_type_error(scope, resolver, &error);
-                return None;
-            }
-        };
+    let body = match crate::network_host::materialize_response_object_body_preserving_error(
+        scope,
+        response,
+        "Cache.put",
+    ) {
+        Ok(crate::network_host::MaterializedResponseBody::Ready(body)) => body,
+        Ok(crate::network_host::MaterializedResponseBody::Pending(promise)) => {
+            return Some(StorageBucketCachedResponseMaterialization::Pending { head, promise });
+        }
+        Ok(crate::network_host::MaterializedResponseBody::Failure(error)) => {
+            reject_type_error(scope, resolver, &error);
+            return None;
+        }
+        Err(reason) => {
+            let _ = resolver.reject(scope, reason);
+            return None;
+        }
+    };
     Some(StorageBucketCachedResponseMaterialization::Ready(
         storage_bucket_cached_response_from_head_body(head, body),
     ))
