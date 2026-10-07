@@ -607,7 +607,6 @@ interfaces! {
     SVGPolygonElement: SVGGeometryElement;
     SVGPolylineElement: SVGGeometryElement;
     SVGRadialGradientElement: SVGGradientElement;
-    SVGRect;
     SVGRectElement: SVGGeometryElement;
     SVGSVGElement: SVGGraphicsElement;
     SVGScriptElement: SVGElement;
