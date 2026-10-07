@@ -2145,6 +2145,7 @@ mod child_dynamic_inline_scripts;
 mod credential_interface_exposure_interfaces;
 mod credential_interfaces;
 mod device_events;
+mod document_svg_root;
 
 mod gamepad_interfaces;
 
