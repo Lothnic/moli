@@ -2276,10 +2276,10 @@ mod media_recorder_shell;
 mod performance_observer_contract;
 mod performance_receiver_consolidation;
 mod svg_animation_interfaces;
-mod svg_computed_path_precision;
 mod svg_detached_lengths;
 mod svg_transform_sync_consolidation;
 mod audio_value_owner_interface_exposure_interfaces;
+
 mod hyperlink_null_url_protocol;
 mod iframe_reinsertion;
 mod iir_filter_interfaces;
