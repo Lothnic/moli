@@ -640,9 +640,20 @@ pub(crate) fn paint_fragment(
             shape,
             brush,
             transform,
+            fill_rule,
         } => {
             let shape = to_backend_shape(shape);
-            paint_fill(scene, &shape, brush, device_transform(*transform, scale));
+            let rule = match fill_rule {
+                moli_layout::PaintFillRule::NonZero => Fill::NonZero,
+                moli_layout::PaintFillRule::EvenOdd => Fill::EvenOdd,
+            };
+            paint_fill(
+                scene,
+                &shape,
+                brush,
+                device_transform(*transform, scale),
+                rule,
+            );
         }
         PaintFragment::Stroke(stroke) => paint_stroke(scene, stroke, scale),
         PaintFragment::Border {
@@ -1665,15 +1676,17 @@ fn paint_stroke(scene: &mut impl PaintScene, stroke: &PaintStroke, scale: f64) {
     );
 }
 
-fn paint_fill(scene: &mut impl PaintScene, shape: &BezPath, brush: &PaintBrush, transform: Affine) {
+fn paint_fill(
+    scene: &mut impl PaintScene,
+    shape: &BezPath,
+    brush: &PaintBrush,
+    transform: Affine,
+    rule: Fill,
+) {
     match brush {
-        PaintBrush::Solid(color) => scene.fill(
-            Fill::NonZero,
-            transform,
-            to_backend_color(*color),
-            None,
-            shape,
-        ),
+        PaintBrush::Solid(color) => {
+            scene.fill(rule, transform, to_backend_color(*color), None, shape)
+        }
         PaintBrush::LinearGradient(gradient) => {
             let gradient = Gradient::new_linear(
                 (f64::from(gradient.start.x), f64::from(gradient.start.y)),
@@ -1687,7 +1700,7 @@ fn paint_fill(scene: &mut impl PaintScene, shape: &BezPath, brush: &PaintBrush, 
                 gradient.interpolation.hue_direction,
             ))
             .with_stops(backend_gradient_stops(&gradient.stops).as_slice());
-            scene.fill(Fill::NonZero, transform, &gradient, None, shape);
+            scene.fill(rule, transform, &gradient, None, shape);
         }
         PaintBrush::RadialGradient(gradient) => {
             let gradient_brush = Gradient::new_two_point_radial(
@@ -1711,7 +1724,7 @@ fn paint_fill(scene: &mut impl PaintScene, shape: &BezPath, brush: &PaintBrush, 
             ))
             .with_stops(backend_gradient_stops(&gradient.stops).as_slice());
             scene.fill(
-                Fill::NonZero,
+                rule,
                 transform,
                 &gradient_brush,
                 Some(to_backend_transform(gradient.transform)),
@@ -1733,7 +1746,7 @@ fn paint_fill(scene: &mut impl PaintScene, shape: &BezPath, brush: &PaintBrush, 
             ))
             .with_stops(backend_gradient_stops(&gradient.stops).as_slice());
             scene.fill(
-                Fill::NonZero,
+                rule,
                 transform,
                 &gradient_brush,
                 Some(to_backend_transform(gradient.transform)),

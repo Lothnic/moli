@@ -346,6 +346,7 @@ fn project_selection(
                     && local_cull.is_none_or(|cull| rects_intersect(rect, cull))
                 {
                     snapshot.push_fragment(PaintFragment::Fill {
+                        fill_rule: crate::PaintFillRule::NonZero,
                         shape: PaintShape::Rect(rect),
                         brush: PaintBrush::Solid(SELECTION_COLOR),
                         transform,
@@ -377,6 +378,7 @@ fn project_selection(
                 && local_cull.is_none_or(|cull| rects_intersect(rect, cull))
             {
                 snapshot.push_fragment(PaintFragment::Fill {
+                    fill_rule: crate::PaintFillRule::NonZero,
                     shape: PaintShape::Rect(rect),
                     brush: PaintBrush::Solid(*color),
                     transform,
