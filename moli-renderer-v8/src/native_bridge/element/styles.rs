@@ -400,10 +400,10 @@ fn live_computed_style_viewport<'s>(
             if let Some(frame) = computed_style_target_child_frame_handle(scope, runtime, handle) {
                 return iframe_handle_viewport(runtime, frame);
             }
-            if !computed_style_target_is_in_flat_tree(runtime, handle) {
+            let document = runtime.dom_host().owner_document_handle(handle)?;
+            if !computed_style_target_is_in_document_flat_tree(runtime, handle, document) {
                 return None;
             }
-            let document = runtime.dom_host().owner_document_handle(handle)?;
             Some(style_viewport_for_document(runtime, document))
         }
         ComputedStyleTargetKey::ChildFrame(frame)
@@ -509,6 +509,9 @@ fn style_object_read_document<'s>(
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ComputedStyleTargetContext {
     ActiveDocument,
+    PopupDocument {
+        document_handle: DomHandle,
+    },
     ChildFrameDocument {
         frame_handle: DomHandle,
         rendered: bool,
@@ -519,7 +522,7 @@ pub(crate) enum ComputedStyleTargetContext {
 impl ComputedStyleTargetContext {
     pub(crate) fn returns_empty_style(self) -> bool {
         match self {
-            Self::ActiveDocument => false,
+            Self::ActiveDocument | Self::PopupDocument { .. } => false,
             Self::ChildFrameDocument { rendered, .. } => !rendered,
             Self::EmptyForDetached => true,
         }
@@ -530,7 +533,7 @@ impl ComputedStyleTargetContext {
             Self::ChildFrameDocument { frame_handle, .. } => {
                 iframe_handle_viewport(host, frame_handle).unwrap_or_default()
             }
-            Self::ActiveDocument => host.style_viewport(),
+            Self::ActiveDocument | Self::PopupDocument { .. } => host.style_viewport(),
             Self::EmptyForDetached => StyleViewport::default(),
         }
     }
@@ -566,6 +569,13 @@ pub(crate) fn computed_style_target_context(
     }
     if document == host.document_handle() {
         ComputedStyleTargetContext::ActiveDocument
+    } else if host
+        .lightweight_popup_id_for_document_handle(document)
+        .is_some_and(|popup_id| host.lightweight_popup_is_open(popup_id))
+    {
+        ComputedStyleTargetContext::PopupDocument {
+            document_handle: document,
+        }
     } else {
         ComputedStyleTargetContext::EmptyForDetached
     }
@@ -609,7 +619,11 @@ pub(crate) fn style_viewport_for_document(
     host: &JsContextHost,
     document: DomHandle,
 ) -> StyleViewport {
-    if document == host.document_handle() {
+    if document == host.document_handle()
+        || host
+            .lightweight_popup_id_for_document_handle(document)
+            .is_some_and(|popup_id| host.lightweight_popup_is_open(popup_id))
+    {
         return host.style_viewport();
     }
     host.child_browsing_context_host_for_document_handle(document)
@@ -848,10 +862,6 @@ fn iframe_handle_viewport_with_depth(
                 .with_device_pixel_ratio(parent_viewport.device_pixel_ratio)
         }),
     )
-}
-
-fn computed_style_target_is_in_flat_tree(host: &JsContextHost, handle: DomHandle) -> bool {
-    computed_style_target_is_in_document_flat_tree(host, handle, host.document_handle())
 }
 
 fn computed_style_target_is_in_document_flat_tree(
