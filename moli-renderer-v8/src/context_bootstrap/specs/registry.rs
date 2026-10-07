@@ -5,11 +5,7 @@ use std::collections::HashSet;
 
 const CONSTRUCTOR_SPECS_BEFORE_STREAMS: &[ConstructorSpec] = &[
     ConstructorSpec {
-        interface: web_api_interfaces::PictureInPictureEvent::DESCRIPTOR,
-        kind: ConstructorKind::PictureInPictureEvent,
-    },
-    ConstructorSpec {
-        interface: web_api_interfaces::PictureInPictureWindow::DESCRIPTOR,
+        interface: web_api_interfaces::TimeEvent::DESCRIPTOR,
         kind: ConstructorKind::Illegal,
     },
     ConstructorSpec {
@@ -158,7 +154,7 @@ const CONSTRUCTOR_SPECS_BEFORE_STREAMS: &[ConstructorSpec] = &[
     },
     ConstructorSpec {
         interface: web_api_interfaces::PictureInPictureEvent::DESCRIPTOR,
-        kind: ConstructorKind::Shell { length: 2 },
+        kind: ConstructorKind::PictureInPictureEvent,
     },
     ConstructorSpec {
         interface: web_api_interfaces::PictureInPictureWindow::DESCRIPTOR,
