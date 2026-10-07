@@ -70,6 +70,7 @@ mod css_style_value_parse;
 mod css_transforms;
 mod css_unparsed;
 mod cssom_flat_tree;
+mod cssom_identity;
 mod nested_document_invalidation;
 mod properties_and_selectors;
 mod stylesheet_and_document_lifecycle;
