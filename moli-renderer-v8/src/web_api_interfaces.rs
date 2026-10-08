@@ -552,12 +552,12 @@ interfaces! {
     SVGAnimatedNumberList;
     SVGAnimatedTransformList;
     SVGCircleElement: SVGGeometryElement;
+    SVGDefsElement: SVGGraphicsElement;
+    SVGDescElement: SVGElement;
     SVGClipPathElement: SVGElement;
     SVGFilterElement: SVGElement;
     SVGMaskElement: SVGElement;
     SVGViewElement: SVGElement;
-    SVGDefsElement: SVGGraphicsElement;
-    SVGDescElement: SVGElement;
     SVGComponentTransferFunctionElement: SVGElement;
     SVGFEFuncAElement: SVGComponentTransferFunctionElement;
     SVGFEFuncBElement: SVGComponentTransferFunctionElement;
@@ -618,6 +618,7 @@ interfaces! {
     SVGTextElement: SVGTextPositioningElement;
     SVGTextPositioningElement: SVGTextContentElement;
     SVGTitleElement: SVGElement;
+    SVGUnitTypes;
     SVGPointList;
     SVGStringList;
     SVGTransform;
