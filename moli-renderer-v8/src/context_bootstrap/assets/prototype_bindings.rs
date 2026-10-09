@@ -440,6 +440,7 @@ pub(super) fn install_constructor_template_bindings<'s>(
         spec.interface.name(),
     );
     super::super::media_streams::install(scope, template, spec.interface.name());
+    super::super::media_recorder::install(scope, template, spec.interface.name());
     install_message_port_template_bindings(scope, template, spec.interface.name());
     if spec.interface.name() == "BroadcastChannel" {
         install_broadcast_channel_template_bindings(scope, template);
