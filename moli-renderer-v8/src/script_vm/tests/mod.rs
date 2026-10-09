@@ -2253,6 +2253,7 @@ mod cross_origin_window_names;
 mod device_events;
 mod document_svg_root;
 mod payment_events;
+mod reporting_observer;
 
 mod gamepad_interfaces;
 
