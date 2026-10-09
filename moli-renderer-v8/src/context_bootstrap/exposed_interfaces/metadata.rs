@@ -185,12 +185,6 @@ pub(in crate::context_bootstrap) const WORKER_SHARED_INTERFACE_NAMES: &[&str] = 
 ];
 
 const SECURE_CONTEXT_ONLY_INTERFACE_NAMES: &[&str] = &[
-    "AuthenticatorAssertionResponse",
-    "AuthenticatorAttestationResponse",
-    "AuthenticatorResponse",
-    "PublicKeyCredential",
-    "Credential",
-    "CredentialsContainer",
     "MIDIPort",
     "MIDIAccess",
     "MIDIInput",
@@ -208,6 +202,11 @@ const SECURE_CONTEXT_ONLY_INTERFACE_NAMES: &[&str] = &[
     "MediaKeys",
     "MediaDeviceInfo",
     "InputDeviceInfo",
+    "AuthenticatorAssertionResponse",
+    "AuthenticatorAttestationResponse",
+    "AuthenticatorResponse",
+    "PublicKeyCredential",
+    "Credential",
     "CredentialsContainer",
     "Lock",
     "LockManager",
