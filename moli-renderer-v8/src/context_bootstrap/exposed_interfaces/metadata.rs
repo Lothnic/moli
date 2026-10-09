@@ -143,8 +143,6 @@ pub(in crate::context_bootstrap) const WORKER_SHARED_INTERFACE_NAMES: &[&str] = 
     "TextMetrics",
     "OffscreenCanvas",
     "OffscreenCanvasRenderingContext2D",
-    "VideoDecoder",
-    "VideoEncoder",
     "WebGLRenderingContext",
     "WebGL2RenderingContext",
     "WebGLObject",
@@ -183,11 +181,6 @@ pub(in crate::context_bootstrap) const WORKER_SHARED_INTERFACE_NAMES: &[&str] = 
 ];
 
 const SECURE_CONTEXT_ONLY_INTERFACE_NAMES: &[&str] = &[
-    "AuthenticatorAssertionResponse",
-    "AuthenticatorAttestationResponse",
-    "AuthenticatorResponse",
-    "PublicKeyCredential",
-    "Credential",
     "MIDIPort",
     "MIDIAccess",
     "MIDIInput",
@@ -201,6 +194,11 @@ const SECURE_CONTEXT_ONLY_INTERFACE_NAMES: &[&str] = &[
     "WebTransportDatagramDuplexStream",
     "MediaDeviceInfo",
     "InputDeviceInfo",
+    "AuthenticatorAssertionResponse",
+    "AuthenticatorAttestationResponse",
+    "AuthenticatorResponse",
+    "PublicKeyCredential",
+    "Credential",
     "CredentialsContainer",
     "Lock",
     "LockManager",
@@ -244,8 +242,6 @@ const SECURE_CONTEXT_ONLY_INTERFACE_NAMES: &[&str] = &[
     "IdleDetector",
     "Clipboard",
     "ClipboardItem",
-    "VideoDecoder",
-    "VideoEncoder",
 ];
 const WORKER_ONLY_INTERFACE_NAMES: &[&str] = &["WorkerNavigator", "WorkerLocation"];
 const WINDOW_DEDICATED_AND_SHARED_WORKER_INTERFACE_NAMES: &[&str] = &[
@@ -552,7 +548,6 @@ fn exposure_for_name(name: &str) -> ExposureSet {
         _ if DEDICATED_AND_SHARED_WORKER_INTERFACE_NAMES.contains(&name) => {
             ExposureSet::DEDICATED_AND_SHARED_WORKER
         }
-        "VideoDecoder" | "VideoEncoder" => ExposureSet::WINDOW_AND_DEDICATED_WORKER,
         _ if WORKER_ONLY_INTERFACE_NAMES.contains(&name) => ExposureSet::WORKERS,
         _ if STORAGE_INTERFACE_NAMES.contains(&name)
             || WORKER_SHARED_INTERFACE_NAMES.contains(&name)
