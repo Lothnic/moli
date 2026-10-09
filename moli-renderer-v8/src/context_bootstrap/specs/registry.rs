@@ -749,22 +749,6 @@ const CONSTRUCTOR_SPECS_BEFORE_STREAMS: &[ConstructorSpec] = &[
         kind: ConstructorKind::TouchEvent,
     },
     ConstructorSpec {
-        interface: web_api_interfaces::GamepadEvent::DESCRIPTOR,
-        kind: ConstructorKind::GamepadEvent,
-    },
-    ConstructorSpec {
-        interface: web_api_interfaces::Gamepad::DESCRIPTOR,
-        kind: ConstructorKind::Illegal,
-    },
-    ConstructorSpec {
-        interface: web_api_interfaces::GamepadButton::DESCRIPTOR,
-        kind: ConstructorKind::Illegal,
-    },
-    ConstructorSpec {
-        interface: web_api_interfaces::GamepadHapticActuator::DESCRIPTOR,
-        kind: ConstructorKind::Illegal,
-    },
-    ConstructorSpec {
         interface: web_api_interfaces::MessageEvent::DESCRIPTOR,
         kind: ConstructorKind::MessageEvent,
     },
@@ -843,14 +827,6 @@ const CONSTRUCTOR_SPECS_BEFORE_STREAMS: &[ConstructorSpec] = &[
     ConstructorSpec {
         interface: web_api_interfaces::DOMException::DESCRIPTOR,
         kind: ConstructorKind::DomException,
-    },
-    ConstructorSpec {
-        interface: web_api_interfaces::RTCError::DESCRIPTOR,
-        kind: ConstructorKind::RtcError,
-    },
-    ConstructorSpec {
-        interface: web_api_interfaces::RTCErrorEvent::DESCRIPTOR,
-        kind: ConstructorKind::RtcErrorEvent,
     },
     ConstructorSpec {
         interface: web_api_interfaces::DOMError::DESCRIPTOR,
@@ -1171,14 +1147,6 @@ const CONSTRUCTOR_SPECS_BEFORE_STREAMS: &[ConstructorSpec] = &[
     ConstructorSpec {
         interface: web_api_interfaces::MediaCapabilities::DESCRIPTOR,
         kind: ConstructorKind::Illegal,
-    },
-    ConstructorSpec {
-        interface: web_api_interfaces::VideoDecoder::DESCRIPTOR,
-        kind: ConstructorKind::Shell { length: 1 },
-    },
-    ConstructorSpec {
-        interface: web_api_interfaces::VideoEncoder::DESCRIPTOR,
-        kind: ConstructorKind::Shell { length: 1 },
     },
     ConstructorSpec {
         interface: web_api_interfaces::Touch::DESCRIPTOR,
@@ -1522,10 +1490,6 @@ const CONSTRUCTOR_SPECS_AFTER_STREAMS: &[ConstructorSpec] = &[
     ConstructorSpec {
         interface: web_api_interfaces::RTCDataChannelEvent::DESCRIPTOR,
         kind: ConstructorKind::RtcDataChannelEvent,
-    },
-    ConstructorSpec {
-        interface: web_api_interfaces::RTCPeerConnectionIceErrorEvent::DESCRIPTOR,
-        kind: ConstructorKind::RtcPeerConnectionIceErrorEvent,
     },
     ConstructorSpec {
         interface: web_api_interfaces::RTCRtpReceiver::DESCRIPTOR,
