@@ -13,6 +13,7 @@ pub(crate) enum ConverterKind {
     BufferSource,
     CallbackFunction,
     CallbackInterface,
+    Octet,
     Long,
     LongLong,
     EnforceRangeLong,
@@ -49,6 +50,7 @@ impl ConverterKind {
             "buffer_source" => Ok(Self::BufferSource),
             "callback_function" => Ok(Self::CallbackFunction),
             "callback_interface" => Ok(Self::CallbackInterface),
+            "octet" => Ok(Self::Octet),
             "long" => Ok(Self::Long),
             "long_long" => Ok(Self::LongLong),
             "enforce_range_long" => Ok(Self::EnforceRangeLong),
@@ -83,6 +85,7 @@ impl ConverterKind {
             Self::BufferSource => quote!(::moli_webidl::BufferSource),
             Self::CallbackFunction => quote!(::moli_webidl::WebIdlCallbackFunction),
             Self::CallbackInterface => quote!(::moli_webidl::WebIdlCallbackInterface),
+            Self::Octet => quote!(::moli_webidl::Octet),
             Self::Long => quote!(::moli_webidl::Long),
             Self::LongLong => quote!(::moli_webidl::LongLong),
             Self::EnforceRangeLong => quote!(::moli_webidl::EnforceRangeLong),
@@ -125,6 +128,7 @@ impl ConverterKind {
             }
             Self::BufferSource => quote!(::moli_webidl::BufferSource::from(#expr)),
             Self::CallbackFunction | Self::CallbackInterface => quote!(#expr),
+            Self::Octet => quote!(::moli_webidl::Octet(#expr)),
             Self::Long => quote!(::moli_webidl::Long(#expr)),
             Self::LongLong => quote!(::moli_webidl::LongLong(#expr)),
             Self::EnforceRangeLong => quote!(::moli_webidl::EnforceRangeLong(#expr)),
@@ -162,6 +166,7 @@ impl ConverterKind {
             Self::CallbackFunction | Self::CallbackInterface => value,
             Self::DomString
             | Self::UsvString
+            | Self::Octet
             | Self::Long
             | Self::LongLong
             | Self::EnforceRangeLong
@@ -366,6 +371,9 @@ fn infer_converter_kind(ty: &Type) -> Option<ConverterKind> {
     // domain enums must opt into `converter = "enum"` so invalid-token errors
     // get the correct WebIDL enum name.
     let ty = option_inner_type(ty).unwrap_or(ty);
+    if is_type_ident(ty, "u8") {
+        return Some(ConverterKind::Octet);
+    }
     if is_type_ident(ty, "u32") {
         return Some(ConverterKind::UnsignedLong);
     }
