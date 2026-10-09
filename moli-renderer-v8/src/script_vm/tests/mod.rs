@@ -2317,6 +2317,7 @@ mod observer_element_arguments;
 mod observer_receivers;
 mod offline_audio_context_interfaces;
 mod offline_audio_float;
+mod offscreen_canvas_blob;
 mod payment_response_interfaces;
 mod performance_measurement_interfaces;
 mod performance_receivers;
