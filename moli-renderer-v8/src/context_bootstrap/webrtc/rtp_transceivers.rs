@@ -710,6 +710,10 @@ pub(crate) fn apply_task<'s>(
     kind: RendererPageWebRtcTaskKind,
 ) -> bool {
     let (event_type, listeners) = match kind {
+        RendererPageWebRtcTaskKind::StartDataChannelClose
+        | RendererPageWebRtcTaskKind::DataChannelClosed => {
+            return super::data_channel::apply_close_task(scope, object, kind);
+        }
         RendererPageWebRtcTaskKind::GetStats => return super::stats::apply(scope, object),
         RendererPageWebRtcTaskKind::CreateOffer
         | RendererPageWebRtcTaskKind::SetLocalDescription
@@ -742,9 +746,13 @@ pub(crate) fn apply_task<'s>(
                 )
                 .expect("PC state")
                 .strict_equals(v8str(scope, "stable").into())
-                || !entries(scope, object)
+                || (!flag(
+                    scope,
+                    object,
+                    super::RTC_PEER_CONNECTION_HAS_DATA_CHANNEL_SLOT,
+                ) && !entries(scope, object)
                     .iter()
-                    .any(|entry| !flag(scope, *entry, STOPPING))
+                    .any(|entry| !flag(scope, *entry, STOPPING)))
             {
                 return false;
             }
