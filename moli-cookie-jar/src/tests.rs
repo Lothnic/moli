@@ -902,6 +902,131 @@ fn document_cookie_utc_expires_does_not_leave_empty_host_only_shadow() {
 }
 
 #[test]
+fn document_cookie_multibyte_expires_is_ignored() {
+    let url = parse("https://example.com/cookies");
+
+    for expires in [
+        "é",
+        "éé",
+        "時)",
+        "😀",
+        "2026年10月11日 12時00分00秒 (日本標準時)",
+        "時) \t",
+    ] {
+        let mut store = BrowserCookieStore::default();
+        let cookie = format!("sid=client; Expires={expires}; Path=/");
+
+        let report = store.set_document_cookie_with_report(&url, &cookie);
+
+        assert!(report.is_accepted(), "{expires:?}: {report:?}");
+        assert_eq!(store.document_cookie(&url), "sid=client", "{expires:?}");
+        let cookies = store.cookies();
+        assert_eq!(cookies.len(), 1, "{expires:?}");
+        assert!(cookies[0].expires.is_none(), "{expires:?}");
+    }
+}
+
+#[test]
+fn response_cookie_multibyte_expires_is_ignored() {
+    let url = parse("https://example.com/cookies");
+
+    for expires in [
+        "é",
+        "éé",
+        "時)",
+        "😀",
+        "2026年10月11日 12時00分00秒 (日本標準時)",
+        "時) \t",
+    ] {
+        let mut store = BrowserCookieStore::default();
+        let headers = vec![(
+            "set-cookie".to_owned(),
+            format!("sid=server; Expires={expires}; Path=/").into_bytes(),
+        )];
+
+        let reports = store.store_response_headers_with_reports(&url, &headers);
+
+        assert_eq!(reports.len(), 1, "{expires:?}");
+        assert!(reports[0].is_accepted(), "{expires:?}: {reports:?}");
+        assert_eq!(
+            store.cookie_header(&url).as_deref(),
+            Some("sid=server"),
+            "{expires:?}"
+        );
+        let cookies = store.cookies();
+        assert_eq!(cookies.len(), 1, "{expires:?}");
+        assert!(cookies[0].expires.is_none(), "{expires:?}");
+    }
+}
+
+#[test]
+fn cookie_dates_use_browser_parsing_for_document_and_response_writes() {
+    let url = parse("https://example.com/cookies");
+    let expected = time::Date::from_calendar_date(2037, time::Month::June, 9)
+        .unwrap()
+        .with_hms(19, 21, 5)
+        .unwrap()
+        .assume_utc();
+
+    for expires in [
+        "Tue, 09 Jun 2037 19:21:05 GMT",
+        "Tue, 09 Jun 2037 19:21:05 UTC",
+        "Tue, 09 Jun 2037 19:21:05",
+        "Tue Jun 09 2037 19:21:05 GMT+0900 (日本標準時)",
+        "Tue, 09 Jun 2037 19:21:05 (😀)",
+    ] {
+        for via_response_headers in [false, true] {
+            let mut store = BrowserCookieStore::default();
+            let cookie = format!("sid=value; Expires={expires}; Path=/");
+            if via_response_headers {
+                let reports = store.store_response_headers_with_reports(
+                    &url,
+                    &[("set-cookie".to_owned(), cookie.into_bytes())],
+                );
+                assert!(reports[0].is_accepted(), "{expires:?}: {reports:?}");
+            } else {
+                let report = store.set_document_cookie_with_report(&url, &cookie);
+                assert!(report.is_accepted(), "{expires:?}: {report:?}");
+            }
+            assert_eq!(store.document_cookie(&url), "sid=value", "{expires:?}");
+            let cookies = store.cookies();
+            assert_eq!(cookies.len(), 1, "{expires:?}");
+            assert_eq!(
+                cookies[0].expires,
+                Some(expected),
+                "{expires:?}, response={via_response_headers}"
+            );
+        }
+    }
+}
+
+#[test]
+fn cookie_named_expires_keeps_its_value() {
+    let url = parse("https://example.com/cookies");
+
+    for value in ["UTC", "Tue, 09 Jun 2037 19:21:05"] {
+        for via_response_headers in [false, true] {
+            let mut store = BrowserCookieStore::default();
+            let cookie = format!("expires={value}; Path=/");
+            if via_response_headers {
+                let reports = store.store_response_headers_with_reports(
+                    &url,
+                    &[("set-cookie".to_owned(), cookie.into_bytes())],
+                );
+                assert!(reports[0].is_accepted(), "{reports:?}");
+            } else {
+                let report = store.set_document_cookie_with_report(&url, &cookie);
+                assert!(report.is_accepted(), "{report:?}");
+            }
+            assert_eq!(store.document_cookie(&url), format!("expires={value}"));
+            let cookies = store.cookies();
+            assert_eq!(cookies.len(), 1);
+            assert!(cookies[0].expires.is_none());
+        }
+    }
+}
+
+#[test]
 fn document_cookie_expires_without_timezone_is_treated_as_gmt() {
     let mut store = BrowserCookieStore::default();
     let document_url = parse("https://example.com/cookies");

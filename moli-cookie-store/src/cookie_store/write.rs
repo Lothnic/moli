@@ -1,4 +1,4 @@
-use cookie::{Cookie as RawCookie, SameSite};
+use cookie::SameSite;
 use url::Url;
 
 use crate::cookie::{CanonicalCookieInput, Cookie};
@@ -45,7 +45,7 @@ impl CookieStore {
         context: &InsertContext<'_>,
     ) -> CookieSetAccessResult {
         let sanitized = sanitize_cookie_line_for_browser_parse(cookie_str);
-        match RawCookie::parse(sanitized.line.as_ref())
+        match crate::cookie_date::parse_cookie(sanitized.line.as_ref())
             .map_err(CookieError::from)
             .and_then(|cookie| {
                 Cookie::try_from_raw_cookie(&cookie, context.url).map(Cookie::into_owned)

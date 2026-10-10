@@ -168,11 +168,10 @@ impl BrowserCookieStore {
         }
 
         let normalized = match cookie.split_once(';') {
-            Some((first, rest)) if !first.contains('=') => format!("{first}=;{rest}"),
-            None if !cookie.contains('=') => format!("{cookie}="),
-            _ => cookie.to_owned(),
+            Some((first, rest)) if !first.contains('=') => Cow::Owned(format!("{first}=;{rest}")),
+            None if !cookie.contains('=') => Cow::Owned(format!("{cookie}=")),
+            _ => Cow::Borrowed(cookie),
         };
-        let normalized = normalize_expires_utc_timezone(&normalized);
         let effective_document_url = effective_document_cookie_url(document_url);
         let report =
             stored_set_report_from_core(self.full_core.set_response_cookie_str_with_access_result(
@@ -227,12 +226,9 @@ impl BrowserCookieStore {
             .filter(|(name, _)| name.eq_ignore_ascii_case("set-cookie"))
         {
             let value = moli_header_field::decode_header_value(value);
-            let normalized = normalize_expires_utc_timezone(&value);
             reports.push(stored_set_report_from_core(
-                self.full_core.set_response_cookie_str_with_access_result(
-                    normalized.as_ref(),
-                    &insert_context,
-                ),
+                self.full_core
+                    .set_response_cookie_str_with_access_result(value.as_ref(), &insert_context),
             ));
         }
         if reports.iter().any(StoredCookieSetReport::is_accepted) {
@@ -486,79 +482,6 @@ impl BrowserCookieStore {
     fn bump_document_cookie_generation(&mut self) {
         self.document_cookie_generation = self.document_cookie_generation.wrapping_add(1);
     }
-}
-
-fn normalize_expires_utc_timezone(raw: &str) -> Cow<'_, str> {
-    let mut changed = false;
-    let segments = raw
-        .split(';')
-        .map(|segment| {
-            let trimmed = segment.trim_start();
-            let Some(eq_index) = trimmed.find('=') else {
-                return segment.to_owned();
-            };
-            let (name, value_with_equals) = trimmed.split_at(eq_index);
-            if !name.eq_ignore_ascii_case("expires") {
-                return segment.to_owned();
-            }
-            let value = &value_with_equals[1..];
-            let value_trimmed = value.trim_end();
-            if value_trimmed.len() < 3
-                || !value_trimmed[value_trimmed.len() - 3..].eq_ignore_ascii_case("UTC")
-            {
-                if !looks_like_http_date_without_timezone(value_trimmed) {
-                    return segment.to_owned();
-                }
-                let leading = &segment[..segment.len() - trimmed.len()];
-                let trailing = &value[value_trimmed.len()..];
-                changed = true;
-                return format!("{leading}{name}={value_trimmed} GMT{trailing}");
-            }
-            let leading = &segment[..segment.len() - trimmed.len()];
-            let trailing = &value[value_trimmed.len()..];
-            changed = true;
-            format!(
-                "{leading}{name}={}GMT{trailing}",
-                &value_trimmed[..value_trimmed.len() - 3]
-            )
-        })
-        .collect::<Vec<_>>();
-    if changed {
-        Cow::Owned(segments.join(";"))
-    } else {
-        Cow::Borrowed(raw)
-    }
-}
-
-fn looks_like_http_date_without_timezone(value: &str) -> bool {
-    let parts = value.split_ascii_whitespace().collect::<Vec<_>>();
-    if parts.len() != 5 {
-        return false;
-    }
-    let [weekday, day, month, year, time] = parts.as_slice() else {
-        return false;
-    };
-    weekday.ends_with(',')
-        && weekday[..weekday.len() - 1]
-            .chars()
-            .all(|ch| ch.is_ascii_alphabetic())
-        && day.len() <= 2
-        && day.chars().all(|ch| ch.is_ascii_digit())
-        && month.len() == 3
-        && month.chars().all(|ch| ch.is_ascii_alphabetic())
-        && year.len() == 4
-        && year.chars().all(|ch| ch.is_ascii_digit())
-        && looks_like_http_time(time)
-}
-
-fn looks_like_http_time(value: &str) -> bool {
-    let parts = value.split(':').collect::<Vec<_>>();
-    if parts.len() != 3 {
-        return false;
-    }
-    parts
-        .iter()
-        .all(|part| part.len() == 2 && part.chars().all(|ch| ch.is_ascii_digit()))
 }
 
 fn canonical_cookie_input_from_stored_cookie(

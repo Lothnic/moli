@@ -336,7 +336,7 @@ impl<'a> Cookie<'a> {
     where
         S: Into<Cow<'a, str>>,
     {
-        Cookie::try_from_raw_cookie(&RawCookie::parse(cookie_str)?, request_url)
+        Cookie::try_from_raw_cookie(&crate::cookie_date::parse_cookie(cookie_str)?, request_url)
     }
 
     /// Create a canonical cookie from structured fields.
