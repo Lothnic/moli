@@ -2395,6 +2395,8 @@ mod webidl_fetch;
 mod webidl_receivers;
 mod webidl_trusted_types;
 mod webrtc_event_init;
+mod webrtc_local_description;
+mod webrtc_signaling_state;
 mod websocket;
 mod window_cross_origin_getters;
 mod window_event_receivers;
