@@ -225,6 +225,171 @@ async fn command_dispatch_completes_live_browser_permission_without_legacy_fallb
     assert_eq!(conn.permission_overrides.len(), 1);
 }
 
+async fn browser_permission_fixture_connection() -> CdpConnection {
+    let mut conn = CdpConnection::new();
+    let mut context = BrowserContext::new("BID-permission-owner".to_owned());
+    context.set_active_target_id("TID-permission-owner".to_owned());
+    conn.install_browser_context_fixture_for_test(context);
+    let seed = json!({
+        "id": 90,
+        "method": "Browser.setPermission",
+        "params": {"permission": {"name": "geolocation"}, "setting": "prompt"}
+    })
+    .to_string();
+    assert_eq!(
+        complete_messages(conn.start_command_dispatch(&seed)),
+        vec![json!({"id": 90, "result": {}})]
+    );
+    let page = conn
+        .load_page_via_runtime_async("data:text/html,<p>permission owner</p>")
+        .await
+        .expect("permission owner should load");
+    conn.browser_context
+        .as_mut()
+        .expect("browser context")
+        .active_page_target_mut()
+        .runtime_slot
+        .set_loaded_page_for_test(page);
+    conn
+}
+
+fn browser_permission_owner_cases() -> [(&'static str, Value, Option<&'static str>); 3] {
+    [
+        (
+            "Browser.setPermission",
+            json!({"permission": {"name": "geolocation"}, "setting": "denied"}),
+            Some("denied"),
+        ),
+        (
+            "Browser.grantPermissions",
+            json!({"permissions": ["geolocation"]}),
+            Some("granted"),
+        ),
+        ("Browser.resetPermissions", json!({}), None),
+    ]
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn command_dispatch_completes_browser_permissions_after_page_closes() {
+    for (method, params, expected_setting) in browser_permission_owner_cases() {
+        let mut conn = browser_permission_fixture_connection().await;
+        let raw = json!({"id": 91, "method": method, "params": params}).to_string();
+        let pending = match conn.start_command_dispatch(&raw) {
+            CdpCommandTaskStep::Pending(pending) => pending,
+            CdpCommandTaskStep::Complete(_) => panic!("{method} should dispatch to the owner"),
+        };
+        let completed = pending.wait().await;
+        let old_page = conn
+            .browser_context
+            .as_mut()
+            .expect("browser context")
+            .active_page_target_mut()
+            .runtime_slot
+            .clear_loaded_page_for_test_fixture();
+        assert!(old_page.is_some());
+        drop(old_page);
+
+        let step = conn.complete_pending_command_dispatch(completed).await;
+        assert_eq!(
+            complete_messages(step),
+            vec![json!({"id": 91, "result": {}})],
+            "a settled {method} must survive removal of its renderer Page"
+        );
+        assert_eq!(
+            conn.permission_overrides
+                .last()
+                .map(|entry| entry.setting.as_str()),
+            expected_setting,
+            "the browser retains the requested permission policy"
+        );
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn command_dispatch_completes_browser_permissions_when_owner_closes_before_reply() {
+    for (method, params, expected_setting) in browser_permission_owner_cases() {
+        let mut conn = browser_permission_fixture_connection().await;
+        let raw = json!({"id": 93, "method": method, "params": params}).to_string();
+        let pending = match conn.start_command_dispatch(&raw) {
+            CdpCommandTaskStep::Pending(pending) => pending,
+            CdpCommandTaskStep::Complete(_) => panic!("{method} should dispatch to the owner"),
+        };
+        let old_page = conn
+            .browser_context
+            .as_mut()
+            .expect("browser context")
+            .active_page_target_mut()
+            .runtime_slot
+            .clear_loaded_page_for_test_fixture();
+        assert!(old_page.is_some());
+        drop(old_page);
+
+        let completed = pending.wait().await;
+        let step = conn.complete_pending_command_dispatch(completed).await;
+        assert_eq!(
+            complete_messages(step),
+            vec![json!({"id": 93, "result": {}})],
+            "closing a renderer must not cancel the committed {method} policy"
+        );
+        assert_eq!(
+            conn.permission_overrides
+                .last()
+                .map(|entry| entry.setting.as_str()),
+            expected_setting
+        );
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn command_dispatch_does_not_replay_browser_permission_snapshot_on_replacement() {
+    for (method, params, expected_setting) in browser_permission_owner_cases() {
+        let mut conn = browser_permission_fixture_connection().await;
+        let raw = json!({"id": 92, "method": method, "params": params}).to_string();
+        let pending = match conn.start_command_dispatch(&raw) {
+            CdpCommandTaskStep::Pending(pending) => pending,
+            CdpCommandTaskStep::Complete(_) => panic!("{method} should dispatch to the owner"),
+        };
+        let completed = pending.wait().await;
+        let replacement_url = "data:text/html,<p>replacement permission owner</p>";
+        let replacement = conn
+            .load_page_via_runtime_async(replacement_url)
+            .await
+            .expect("replacement should load");
+        let replacement_id = replacement.page_id();
+        conn.browser_context
+            .as_mut()
+            .expect("browser context")
+            .active_page_target_mut()
+            .runtime_slot
+            .set_loaded_page_for_test(replacement);
+
+        let step = conn.complete_pending_command_dispatch(completed).await;
+        assert_eq!(
+            complete_messages(step),
+            vec![json!({"id": 92, "result": {}})]
+        );
+        let page = conn
+            .browser_context
+            .as_ref()
+            .expect("browser context")
+            .active_page_target()
+            .loaded_page()
+            .expect("replacement should remain loaded");
+        assert_eq!(page.page_id(), replacement_id);
+        assert_eq!(
+            page.requested_url().as_str(),
+            replacement_url,
+            "{method} must not install the old PageState on the replacement"
+        );
+        assert_eq!(
+            conn.permission_overrides
+                .last()
+                .map(|entry| entry.setting.as_str()),
+            expected_setting
+        );
+    }
+}
+
 #[tokio::test]
 async fn command_dispatch_completes_target_startup_commands_without_legacy_fallback() {
     let mut conn = CdpConnection::new();
