@@ -506,7 +506,6 @@ interfaces! {
     ReadableStreamBYOBRequest;
     ReadableStreamDefaultController;
     ReadableStreamDefaultReader;
-    ReportBody;
     Request;
     ResizeObserver;
     ResizeObserverEntry;
