@@ -6,6 +6,11 @@
 
 use moli_webapi_declare::WebApiFunctionTemplate;
 
+mod base64url;
+mod json_options;
+mod schema;
+mod value;
+
 use crate::{native_bridge::throw_dom_exception, util::v8str, web_api_interfaces};
 
 #[derive(WebApiFunctionTemplate)]
@@ -38,6 +43,10 @@ struct PublicKeyCredentialDeclaration {
     is_user_verifying_platform_authenticator_available: (),
     #[webapi(static_method, returns_promise, length = 0, callback = client_capabilities)]
     get_client_capabilities: (),
+    #[webapi(static_method = "parseCreationOptionsFromJSON", length = 1, callback = json_options::parse_creation)]
+    parse_creation_options_from_json: (),
+    #[webapi(static_method = "parseRequestOptionsFromJSON", length = 1, callback = json_options::parse_request)]
+    parse_request_options_from_json: (),
 }
 
 #[derive(WebApiFunctionTemplate)]

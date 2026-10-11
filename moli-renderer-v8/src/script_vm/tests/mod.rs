@@ -1,3 +1,4 @@
+mod credential_json_options;
 use super::post_parse::dynamic_script_execute_is_runnable_before_dom_content_loaded;
 use super::{
     PostParseDriverStep, PostParseLifecycleAdvance, PostParseLifecycleCompletionAction,
