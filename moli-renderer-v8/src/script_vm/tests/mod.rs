@@ -2144,6 +2144,8 @@ mod canvas_webgl;
 mod child_dynamic_inline_scripts;
 mod credential_interface_exposure_interfaces;
 mod credential_interfaces;
+mod css_keyframes_mutations;
+mod css_keyframes_receivers;
 mod device_events;
 
 mod gamepad_interfaces;
