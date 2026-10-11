@@ -1668,10 +1668,6 @@ const CONSTRUCTOR_SPECS_AFTER_STREAMS: &[ConstructorSpec] = &[
         kind: ConstructorKind::XmlSerializer,
     },
     ConstructorSpec {
-        interface: web_api_interfaces::ReportBody::DESCRIPTOR,
-        kind: ConstructorKind::Illegal,
-    },
-    ConstructorSpec {
         interface: web_api_interfaces::ResizeObserver::DESCRIPTOR,
         kind: ConstructorKind::ResizeObserver,
     },

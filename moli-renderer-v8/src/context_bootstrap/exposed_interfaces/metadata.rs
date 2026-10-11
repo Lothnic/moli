@@ -71,7 +71,6 @@ pub(in crate::context_bootstrap) const WORKER_SHARED_INTERFACE_NAMES: &[&str] = 
     "Subscriber",
     "Headers",
     "Request",
-    "ReportBody",
     "Response",
     "ServiceWorker",
     "ServiceWorkerContainer",
