@@ -269,22 +269,16 @@ pub(in crate::context_bootstrap) fn suppress_pending_read_unhandled_rejection<'s
 }
 
 pub(in crate::context_bootstrap) fn suppress_promise_unhandled_rejection<'s>(
-    scope: &mut v8::PinScope<'s, '_>,
+    _: &mut v8::PinScope<'s, '_>,
     promise: v8::Local<'s, v8::Value>,
 ) {
     let Ok(promise) = v8::Local::<v8::Promise>::try_from(promise) else {
         return;
     };
-    let Some(noop) = v8::Function::builder(promise_return_undefined_callback).build(scope) else {
-        return;
-    };
-    let Some(catch) = promise
-        .get(scope, v8str(scope, "catch").into())
-        .and_then(|value| v8::Local::<v8::Function>::try_from(value).ok())
-    else {
-        return;
-    };
-    let _ = catch.call(scope, promise.into(), &[noop.into()]);
+    // Streams algorithms mark their internal promises handled directly. An
+    // author can replace catch, its getter, or the Promise species constructor.
+    // Looking them up here would add observable script to the native algorithm.
+    promise.mark_as_handled();
 }
 
 pub(in crate::context_bootstrap) fn value_buffer_source_bytes(
