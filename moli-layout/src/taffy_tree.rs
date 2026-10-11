@@ -673,26 +673,33 @@ fn finish_form_control_contents<N>(world: &mut LayoutWorld<N>)
 where
     N: Copy + Debug + Eq + Hash,
 {
-    let contents = (0..world.boxes.len())
-        .map(LayoutBoxId::from_index)
-        .filter(|id| {
+    let contents = world
+        .boxes
+        .iter()
+        .flat_map(|layout_box| layout_box.children.iter().copied().enumerate())
+        .filter(|(_, id)| {
             world.boxes[id.index()].anonymous_reason
                 == Some(crate::LayoutAnonymousReason::FormControlContent)
                 && world.boxes[id.index()].kind == LayoutBoxKind::AnonymousBlock
         })
         .collect::<Vec<_>>();
-    for content in contents {
+    for (row, content) in contents {
         let Some(control) = world.boxes[content.index()].layout_parent else {
             continue;
         };
         let control_layout = world.boxes[control.index()].unrounded_layout;
         let parent_writing_mode = world.boxes[control.index()].style.writing_mode();
+        let listbox = world.boxes[control.index()]
+            .element_semantics
+            .as_ref()
+            .is_some_and(crate::LayoutElementSemantics::is_select_listbox);
+        let inline_padding = if listbox { 2.0 } else { 4.0 };
         let content_width = (control_layout.size.width
             - control_layout.border.left
             - control_layout.border.right
             - control_layout.padding.left
             - control_layout.padding.right
-            - 8.0)
+            - 2.0 * inline_padding)
             .max(0.0);
         let inputs = LayoutInput {
             known_dimensions: Size::NONE,
@@ -714,9 +721,17 @@ where
             vertical_margins_are_collapsible: Line::FALSE,
         };
         let output = world.compute_child_layout(content.to_taffy(), inputs);
-        let x = control_layout.border.left + control_layout.padding.left + 4.0;
-        let y = ((control_layout.size.height - output.size.height) * 0.5)
-            .max(control_layout.border.top + control_layout.padding.top);
+        let x = control_layout.border.left + control_layout.padding.left + inline_padding;
+        let y = if listbox {
+            let style = &world.boxes[control.index()].style;
+            control_layout.border.top
+                + control_layout.padding.top
+                + row as f32
+                    * crate::form::select_row_height(style.font_size(), style.line_height())
+        } else {
+            ((control_layout.size.height - output.size.height) * 0.5)
+                .max(control_layout.border.top + control_layout.padding.top)
+        };
         world.set_inline_child_layout(
             content,
             Point { x, y },

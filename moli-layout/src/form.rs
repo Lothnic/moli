@@ -17,53 +17,64 @@ where
     let controls = (0..world.boxes.len())
         .map(LayoutBoxId::from_index)
         .filter_map(|id| {
-            form_control_text(&world.boxes[id.index()].element_semantics).map(|text| (id, text))
+            form_control_texts(&world.boxes[id.index()].element_semantics).map(|texts| (id, texts))
         })
-        .filter(|(_, text)| !text.is_empty())
+        .filter(|(_, texts)| !texts.is_empty())
         .collect::<Vec<_>>();
-    for (control, text) in controls {
+    for (control, texts) in controls {
         let Some(owner) = world.boxes[control.index()].source else {
             continue;
         };
+        if world.boxes[control.index()]
+            .element_semantics
+            .as_ref()
+            .is_some_and(LayoutElementSemantics::is_select_listbox)
+        {
+            world.boxes[control.index()]
+                .style
+                .clip_form_control_contents();
+        }
         let owner_label = world.boxes[control.index()].source_label.clone();
         let wrapper_style = ResolvedLayoutStyle::anonymous_from(
             &world.boxes[control.index()].style,
             LayoutDisplay::Block,
         );
         let text_style = ResolvedLayoutStyle::text_leaf_from(&wrapper_style);
-        let mut wrapper = LayoutWorld::new_box(
-            None,
-            Some(owner),
-            None,
-            format!("form-content({owner_label})"),
-            Some(owner_label.clone()),
-            None,
-            Some(LayoutAnonymousReason::FormControlContent),
-            LayoutBoxKind::AnonymousBlock,
-            wrapper_style,
-            None,
-        );
-        wrapper.inline_formatting_context = true;
-        let wrapper_id = world.allocate(wrapper);
-        let text_id = world.allocate(LayoutWorld::new_box(
-            None,
-            Some(owner),
-            None,
-            format!("form-content({owner_label})::text"),
-            Some(owner_label),
-            None,
-            Some(LayoutAnonymousReason::FormControlContent),
-            LayoutBoxKind::Text,
-            text_style,
-            Some(Arc::from(text)),
-        ));
-        world.append_synthesized_child(wrapper_id, text_id)?;
-        world.append_synthesized_child(control, wrapper_id)?;
+        for (row, text) in texts.into_iter().enumerate() {
+            let mut wrapper = LayoutWorld::new_box(
+                None,
+                Some(owner),
+                None,
+                format!("form-content({owner_label})[{row}]"),
+                Some(owner_label.clone()),
+                None,
+                Some(LayoutAnonymousReason::FormControlContent),
+                LayoutBoxKind::AnonymousBlock,
+                wrapper_style.clone(),
+                None,
+            );
+            wrapper.inline_formatting_context = true;
+            let wrapper_id = world.allocate(wrapper);
+            let text_id = world.allocate(LayoutWorld::new_box(
+                None,
+                Some(owner),
+                None,
+                format!("form-content({owner_label})[{row}]::text"),
+                Some(owner_label.clone()),
+                None,
+                Some(LayoutAnonymousReason::FormControlContent),
+                LayoutBoxKind::Text,
+                text_style.clone(),
+                Some(text),
+            ));
+            world.append_synthesized_child(wrapper_id, text_id)?;
+            world.append_synthesized_child(control, wrapper_id)?;
+        }
     }
     Ok(())
 }
 
-fn form_control_text(semantics: &Option<LayoutElementSemantics>) -> Option<String> {
+fn form_control_texts(semantics: &Option<LayoutElementSemantics>) -> Option<Vec<Arc<str>>> {
     let semantics = semantics.as_ref()?;
     let LayoutElementCategory::FormControl(kind) = semantics.category else {
         return None;
@@ -77,6 +88,9 @@ fn form_control_text(semantics: &Option<LayoutElementSemantics>) -> Option<Strin
         .as_ref()
         .cloned()
         .unwrap_or_default();
+    if semantics.is_select_listbox() {
+        return Some(data.option_labels);
+    }
     let text = match kind {
         LayoutFormControlKind::Input(input) => match input {
             LayoutInputControlKind::Button => data.value.to_string(),
@@ -142,7 +156,15 @@ fn form_control_text(semantics: &Option<LayoutElementSemantics>) -> Option<Strin
         | LayoutFormControlKind::Progress
         | LayoutFormControlKind::Meter => String::new(),
     };
-    Some(text)
+    Some(if text.is_empty() {
+        Vec::new()
+    } else {
+        vec![text.into()]
+    })
+}
+
+pub(crate) fn select_row_height(font_size: f32, line_height: f32) -> f32 {
+    line_height.max(font_size) + 5.0
 }
 
 pub(crate) fn form_control_context(
@@ -229,11 +251,8 @@ pub(crate) fn form_control_context(
             height: f32::from(data.rows) * line_height.max(font_size),
         },
         LayoutFormControlKind::Select => {
-            let rows = data
-                .size
-                .unwrap_or(if data.multiple { 4 } else { 1 })
-                .max(1);
-            let listbox = data.multiple || rows > 1;
+            let rows = data.select_rows();
+            let listbox = rows > 1;
             let characters = data
                 .maximum_option_characters
                 .max(u16::try_from(data.value.chars().count()).unwrap_or(u16::MAX))
@@ -241,7 +260,11 @@ pub(crate) fn form_control_context(
             Size {
                 width: text_width(usize::from(characters)) + if listbox { 4.0 } else { 18.0 },
                 height: f32::from(rows)
-                    * (line_height.max(font_size) + if listbox { 5.0 } else { 0.0 }),
+                    * if listbox {
+                        select_row_height(font_size, line_height)
+                    } else {
+                        single_line_height
+                    },
             }
         }
         LayoutFormControlKind::Progress | LayoutFormControlKind::Meter => Size {

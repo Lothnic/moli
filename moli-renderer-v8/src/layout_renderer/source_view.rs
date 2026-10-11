@@ -465,19 +465,22 @@ fn layout_element_semantics_for_source(
     element: &crate::dom::native::Element,
 ) -> LayoutElementSemantics {
     let mut semantics = layout_element_semantics(element);
+    let mut option_labels = Vec::new();
     let (selected_text, maximum_option_characters) = if element.is_html_select() {
         let options = host.select_option_elements(node);
         let option_text = |option| {
             host.node(option)
                 .and_then(Node::as_element)
-                .and_then(|option| option.attribute("label"))
-                .map(str::to_owned)
-                .or_else(|| host.text_content(option))
+                .map(|element| element.option_label(host.dom(), option))
                 .unwrap_or_default()
         };
-        let maximum = options
+        option_labels = options
             .iter()
-            .map(|option| option_text(*option).chars().count())
+            .map(|option| option_text(*option).into())
+            .collect::<Vec<std::sync::Arc<str>>>();
+        let maximum = option_labels
+            .iter()
+            .map(|label| label.chars().count())
             .max()
             .unwrap_or_default();
         let selected = host
@@ -496,6 +499,9 @@ fn layout_element_semantics_for_source(
         selected_text,
         maximum_option_characters,
     );
+    if let Some(data) = semantics.metadata.form_control.as_mut() {
+        data.option_labels = option_labels;
+    }
     semantics
 }
 
@@ -550,6 +556,7 @@ fn layout_element_metadata(
             metadata.form_control = Some(LayoutFormControlData {
                 value: value.into(),
                 placeholder: element.attribute("placeholder").unwrap_or("").into(),
+                option_labels: Vec::new(),
                 size: optional_positive_u16_attribute(element, "size", 1, 65_535),
                 columns: positive_u16_attribute(element, "cols", 20, 65_535),
                 rows: positive_u16_attribute(element, "rows", 2, 65_535),

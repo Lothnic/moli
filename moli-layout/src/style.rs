@@ -1687,6 +1687,11 @@ impl ResolvedLayoutStyle {
         self.overflow_clips
     }
 
+    /// Native controls have an internal viewport even when their CSS overflow is visible.
+    pub(crate) fn clip_form_control_contents(&mut self) {
+        self.overflow_clips = true;
+    }
+
     pub(crate) fn establishes_scroll_container(&self) -> bool {
         // `overflow: clip` clips paint but deliberately does not create the
         // scrolling mechanism that selects a sticky scrollport.

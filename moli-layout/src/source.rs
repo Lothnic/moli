@@ -252,6 +252,8 @@ pub struct LayoutListData {
 pub struct LayoutFormControlData {
     pub value: Arc<str>,
     pub placeholder: Arc<str>,
+    /// Display labels in option order, independently of selectedness.
+    pub option_labels: Vec<Arc<str>>,
     pub size: Option<u16>,
     pub columns: u16,
     pub rows: u16,
@@ -266,6 +268,7 @@ impl Default for LayoutFormControlData {
         Self {
             value: Arc::from(""),
             placeholder: Arc::from(""),
+            option_labels: Vec::new(),
             size: None,
             columns: 20,
             rows: 2,
@@ -274,6 +277,14 @@ impl Default for LayoutFormControlData {
             disabled: false,
             multiple: false,
         }
+    }
+}
+
+impl LayoutFormControlData {
+    pub(crate) fn select_rows(&self) -> u16 {
+        self.size
+            .unwrap_or(if self.multiple { 4 } else { 1 })
+            .max(1)
     }
 }
 
@@ -339,6 +350,17 @@ impl LayoutElementSemantics {
 
     pub const fn is_replaced(&self) -> bool {
         self.replaced.is_some()
+    }
+
+    pub(crate) fn is_select_listbox(&self) -> bool {
+        matches!(
+            self.category,
+            LayoutElementCategory::FormControl(LayoutFormControlKind::Select)
+        ) && self
+            .metadata
+            .form_control
+            .as_ref()
+            .is_some_and(|data| data.select_rows() > 1)
     }
 
     pub(crate) fn is_html_element(&self, local_name: &str) -> bool {
