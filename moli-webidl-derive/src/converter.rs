@@ -64,6 +64,7 @@ impl ConverterKind {
             "unrestricted_double" => Ok(Self::UnrestrictedDouble),
             "boolean" => Ok(Self::Boolean),
             "enum" => Ok(Self::Enum),
+            "dictionary" => Ok(Self::Dictionary),
             "raw" => Ok(Self::Raw),
             _ => Err(Error::new(value.span(), "unsupported converter kind")),
         }
