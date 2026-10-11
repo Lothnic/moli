@@ -104,8 +104,6 @@ html/browsers/windows/auxiliary-browsing-contexts/opener-noopener.html
 html/browsers/windows/auxiliary-browsing-contexts/opener-noreferrer.html
 html/browsers/windows/browsing-context-names/choose-_blank-002.html
 html/browsers/windows/browsing-context-names/choose-_blank-003.html
-html/browsers/windows/browsing-context-names/choose-_parent-001.html
-html/browsers/windows/browsing-context-names/choose-_parent-002.html
 html/browsers/windows/browsing-context-names/choose-_top-001.html
 html/browsers/windows/browsing-context-names/choose-_top-002.html
 html/browsers/windows/browsing-context-names/choose-_top-003.html

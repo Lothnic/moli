@@ -11,7 +11,6 @@ html/browsers/the-window-object/open-close/open-features-is-popup-condition.html
 html/browsers/the-window-object/window-open-popup-behavior.html
 html/browsers/the-window-object/window-open-windowfeatures-values.html
 html/browsers/windows/auxiliary-browsing-contexts/opener-setter.html
-html/browsers/windows/browsing-context-names/choose-_parent-004.html
 html/browsers/windows/noreferrer-window-name.html
 html/semantics/embedded-content/the-img-element/decode/image-decode-iframe.html
 html/semantics/embedded-content/the-object-element/object-events.html

@@ -5875,7 +5875,10 @@ html/browsers/the-windowproxy-exotic-object/windowproxy-prototype-setting-same-o
 html/browsers/windows/auxiliary-browsing-contexts/opener-multiple.html
 html/browsers/windows/auxiliary-browsing-contexts/opener.html
 html/browsers/windows/browsing-context-names/choose-_blank-001.html
+html/browsers/windows/browsing-context-names/choose-_parent-001.html
+html/browsers/windows/browsing-context-names/choose-_parent-002.html
 html/browsers/windows/browsing-context-names/choose-_parent-003.html
+html/browsers/windows/browsing-context-names/choose-_parent-004.html
 html/browsers/windows/browsing-context-names/choose-_self-001.html
 html/browsers/windows/browsing-context-names/choose-_self-002.html
 html/browsers/windows/browsing-context-names/choose-default-001.html
