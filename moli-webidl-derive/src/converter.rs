@@ -14,6 +14,7 @@ pub(crate) enum ConverterKind {
     CallbackFunction,
     CallbackInterface,
     Long,
+    LongLong,
     EnforceRangeLong,
     Short,
     UnsignedShort,
@@ -49,6 +50,7 @@ impl ConverterKind {
             "callback_function" => Ok(Self::CallbackFunction),
             "callback_interface" => Ok(Self::CallbackInterface),
             "long" => Ok(Self::Long),
+            "long_long" => Ok(Self::LongLong),
             "enforce_range_long" => Ok(Self::EnforceRangeLong),
             "short" => Ok(Self::Short),
             "unsigned_short" => Ok(Self::UnsignedShort),
@@ -81,6 +83,7 @@ impl ConverterKind {
             Self::CallbackFunction => quote!(::moli_webidl::WebIdlCallbackFunction),
             Self::CallbackInterface => quote!(::moli_webidl::WebIdlCallbackInterface),
             Self::Long => quote!(::moli_webidl::Long),
+            Self::LongLong => quote!(::moli_webidl::LongLong),
             Self::EnforceRangeLong => quote!(::moli_webidl::EnforceRangeLong),
             Self::Short => quote!(::moli_webidl::Short),
             Self::UnsignedShort => quote!(::moli_webidl::UnsignedShort),
@@ -122,6 +125,7 @@ impl ConverterKind {
             Self::BufferSource => quote!(::moli_webidl::BufferSource::from(#expr)),
             Self::CallbackFunction | Self::CallbackInterface => quote!(#expr),
             Self::Long => quote!(::moli_webidl::Long(#expr)),
+            Self::LongLong => quote!(::moli_webidl::LongLong(#expr)),
             Self::EnforceRangeLong => quote!(::moli_webidl::EnforceRangeLong(#expr)),
             Self::Short => quote!(::moli_webidl::Short(#expr)),
             Self::UnsignedShort => quote!(::moli_webidl::UnsignedShort(#expr)),
@@ -158,6 +162,7 @@ impl ConverterKind {
             Self::DomString
             | Self::UsvString
             | Self::Long
+            | Self::LongLong
             | Self::EnforceRangeLong
             | Self::Short
             | Self::UnsignedShort
@@ -371,6 +376,9 @@ fn infer_converter_kind(ty: &Type) -> Option<ConverterKind> {
     }
     if is_type_ident(ty, "i16") {
         return Some(ConverterKind::Short);
+    }
+    if is_type_ident(ty, "i64") {
+        return Some(ConverterKind::LongLong);
     }
     if is_type_ident(ty, "u64") {
         return Some(ConverterKind::UnsignedLongLong);
