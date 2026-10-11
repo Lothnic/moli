@@ -2385,14 +2385,14 @@ fn resolve_stylo_2d_transform(
             // precision even if they are widened again for LayoutTransform2D.
             .to_transform_3d_matrix_f64(Some(&reference_box))
         {
-            Ok((_matrix, true)) => {
-                has_unsupported_3d = true;
-                None
-            }
-            Ok((matrix, false)) => Some(LayoutTransform2D::new([
+            // Stylo's boolean reports 3D function syntax, not whether the
+            // resulting matrix needs 3D geometry. In particular, popovers
+            // commonly center with translate3d(-50%, 0, 0). Keep every matrix
+            // that is exactly representable in our 2D coordinate space.
+            Ok((matrix, _)) if matrix.is_2d() => Some(LayoutTransform2D::new([
                 matrix.m11, matrix.m12, matrix.m21, matrix.m22, matrix.m41, matrix.m42,
             ])),
-            Err(_) => {
+            Ok(_) | Err(_) => {
                 has_unsupported_3d = true;
                 None
             }

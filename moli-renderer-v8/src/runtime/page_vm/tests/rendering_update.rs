@@ -1,5 +1,6 @@
 use super::*;
 
+mod planar_transforms;
 mod print;
 mod transform_precision;
 
