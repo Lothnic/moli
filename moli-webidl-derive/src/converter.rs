@@ -17,7 +17,6 @@ pub(crate) enum ConverterKind {
     CallbackInterface,
     Octet,
     Long,
-    LongLong,
     EnforceRangeLong,
     LongLong,
     EnforceRangeLongLong,
@@ -58,7 +57,6 @@ impl ConverterKind {
             "callback_interface" => Ok(Self::CallbackInterface),
             "octet" => Ok(Self::Octet),
             "long" => Ok(Self::Long),
-            "long_long" => Ok(Self::LongLong),
             "enforce_range_long" => Ok(Self::EnforceRangeLong),
             "long_long" => Ok(Self::LongLong),
             "enforce_range_long_long" => Ok(Self::EnforceRangeLongLong),
@@ -97,7 +95,6 @@ impl ConverterKind {
             Self::CallbackInterface => quote!(::moli_webidl::WebIdlCallbackInterface),
             Self::Octet => quote!(::moli_webidl::Octet),
             Self::Long => quote!(::moli_webidl::Long),
-            Self::LongLong => quote!(::moli_webidl::LongLong),
             Self::EnforceRangeLong => quote!(::moli_webidl::EnforceRangeLong),
             Self::LongLong => quote!(::moli_webidl::LongLong),
             Self::EnforceRangeLongLong => quote!(::moli_webidl::EnforceRangeLongLong),
@@ -146,7 +143,6 @@ impl ConverterKind {
             Self::CallbackFunction | Self::CallbackInterface => quote!(#expr),
             Self::Octet => quote!(::moli_webidl::Octet(#expr)),
             Self::Long => quote!(::moli_webidl::Long(#expr)),
-            Self::LongLong => quote!(::moli_webidl::LongLong(#expr)),
             Self::EnforceRangeLong => quote!(::moli_webidl::EnforceRangeLong(#expr)),
             Self::LongLong => quote!(::moli_webidl::LongLong(#expr)),
             Self::EnforceRangeLongLong => quote!(::moli_webidl::EnforceRangeLongLong(#expr)),
@@ -190,7 +186,6 @@ impl ConverterKind {
             | Self::UsvString
             | Self::Octet
             | Self::Long
-            | Self::LongLong
             | Self::EnforceRangeLong
             | Self::LongLong
             | Self::EnforceRangeLongLong
