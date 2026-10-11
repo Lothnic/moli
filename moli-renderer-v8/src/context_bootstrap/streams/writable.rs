@@ -17,14 +17,8 @@ pub(in crate::context_bootstrap) fn writable_stream_get_writer_callback<'s>(
     args: v8::FunctionCallbackArguments<'s>,
     mut rv: v8::ReturnValue<'_, v8::Value>,
 ) {
-    if !is_writable_stream_object(scope, args.this()) {
-        throw_type_error(
-            scope,
-            "WritableStream.getWriter called on incompatible receiver",
-        );
-        return;
-    }
-    let stream = args.this();
+    let stream = moli_webapi_declare::web_api_object_target(scope, args.this())
+        .expect("validated WritableStream receiver");
     if writable_stream_snapshot(scope, stream).plan_acquire_writer()
         == AcquireWriterPlan::RejectLocked
     {
@@ -43,18 +37,12 @@ pub(in crate::context_bootstrap) fn writable_stream_abort_callback<'s>(
     args: v8::FunctionCallbackArguments<'s>,
     mut rv: v8::ReturnValue<'_, v8::Value>,
 ) {
-    if !is_writable_stream_object(scope, args.this()) {
-        set_rejected_writable_stream_type_error(
-            scope,
-            &mut rv,
-            "WritableStream.abort called on incompatible receiver",
-        );
-        return;
-    }
+    let stream = moli_webapi_declare::web_api_object_target(scope, args.this())
+        .expect("validated WritableStream receiver");
     let Some(parsed) = webidl::parse_args::<WritableStreamAbortArgs<'s>>(scope, &args) else {
         return;
     };
-    if writable_stream_snapshot(scope, args.this()).plan_unlocked_abort_entry()
+    if writable_stream_snapshot(scope, stream).plan_unlocked_abort_entry()
         == UnlockedEntryPlan::RejectLocked
     {
         let message = v8::String::new(scope, "WritableStream is locked").unwrap();
@@ -65,7 +53,7 @@ pub(in crate::context_bootstrap) fn writable_stream_abort_callback<'s>(
         return;
     }
     let reason = parsed.reason.unwrap_or_else(|| v8::undefined(scope).into());
-    if let Some(promise) = writable_stream_abort_promise(scope, args.this(), reason) {
+    if let Some(promise) = writable_stream_abort_promise(scope, stream, reason) {
         rv.set(promise);
     } else {
         rv.set_undefined();
@@ -77,15 +65,9 @@ pub(in crate::context_bootstrap) fn writable_stream_close_callback<'s>(
     args: v8::FunctionCallbackArguments<'s>,
     mut rv: v8::ReturnValue<'_, v8::Value>,
 ) {
-    if !is_writable_stream_object(scope, args.this()) {
-        set_rejected_writable_stream_type_error(
-            scope,
-            &mut rv,
-            "WritableStream.close called on incompatible receiver",
-        );
-        return;
-    }
-    match writable_stream_snapshot(scope, args.this()).plan_unlocked_close_entry() {
+    let stream = moli_webapi_declare::web_api_object_target(scope, args.this())
+        .expect("validated WritableStream receiver");
+    match writable_stream_snapshot(scope, stream).plan_unlocked_close_entry() {
         UnlockedCloseEntryPlan::RejectLocked => {
             let message = v8::String::new(scope, "WritableStream is locked").unwrap();
             let error = v8::Exception::type_error(scope, message);
@@ -104,7 +86,7 @@ pub(in crate::context_bootstrap) fn writable_stream_close_callback<'s>(
         }
         UnlockedCloseEntryPlan::Continue => {}
     }
-    if let Some(close_result) = writable_stream_close_internal(scope, args.this()) {
+    if let Some(close_result) = writable_stream_close_internal(scope, stream) {
         rv.set(close_result);
         return;
     }
@@ -116,14 +98,9 @@ pub(in crate::context_bootstrap) fn writable_stream_locked_getter<'s>(
     args: v8::FunctionCallbackArguments<'s>,
     mut rv: v8::ReturnValue<'_, v8::Value>,
 ) {
-    if !is_writable_stream_object(scope, args.this()) {
-        throw_type_error(
-            scope,
-            "WritableStream.locked called on incompatible receiver",
-        );
-        return;
-    }
-    let locked = writable_stream_snapshot(scope, args.this()).locked();
+    let stream = moli_webapi_declare::web_api_object_target(scope, args.this())
+        .expect("validated WritableStream receiver");
+    let locked = writable_stream_snapshot(scope, stream).locked();
     rv.set(v8::Boolean::new(scope, locked).into());
 }
 
@@ -157,17 +134,6 @@ fn transform_stream_writable_getter_callback<'s>(
         return;
     };
     rv.set(writable.into());
-}
-
-fn set_rejected_writable_stream_type_error(
-    scope: &mut v8::PinScope<'_, '_>,
-    rv: &mut v8::ReturnValue<'_, v8::Value>,
-    message: &'static str,
-) {
-    let error = v8::Exception::type_error(scope, v8str(scope, message));
-    if let Some(promise) = rejected_promise_value(scope, error) {
-        rv.set(promise);
-    }
 }
 
 #[derive(WebApiFunctionTemplate)]
