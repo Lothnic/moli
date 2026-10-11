@@ -19,6 +19,7 @@ pub(crate) enum ConverterKind {
     EnforceRangeLong,
     Short,
     UnsignedShort,
+    EnforceRangeUnsignedShort,
     ClampedUnsignedShort,
     UnsignedLong,
     EnforceRangeUnsignedLong,
@@ -56,6 +57,7 @@ impl ConverterKind {
             "enforce_range_long" => Ok(Self::EnforceRangeLong),
             "short" => Ok(Self::Short),
             "unsigned_short" => Ok(Self::UnsignedShort),
+            "enforce_range_unsigned_short" => Ok(Self::EnforceRangeUnsignedShort),
             "clamped_unsigned_short" => Ok(Self::ClampedUnsignedShort),
             "unsigned_long" => Ok(Self::UnsignedLong),
             "enforce_range_unsigned_long" => Ok(Self::EnforceRangeUnsignedLong),
@@ -91,6 +93,7 @@ impl ConverterKind {
             Self::EnforceRangeLong => quote!(::moli_webidl::EnforceRangeLong),
             Self::Short => quote!(::moli_webidl::Short),
             Self::UnsignedShort => quote!(::moli_webidl::UnsignedShort),
+            Self::EnforceRangeUnsignedShort => quote!(::moli_webidl::EnforceRangeUnsignedShort),
             Self::ClampedUnsignedShort => quote!(::moli_webidl::ClampedUnsignedShort),
             Self::UnsignedLong => quote!(::moli_webidl::UnsignedLong),
             Self::EnforceRangeUnsignedLong => {
@@ -134,6 +137,9 @@ impl ConverterKind {
             Self::EnforceRangeLong => quote!(::moli_webidl::EnforceRangeLong(#expr)),
             Self::Short => quote!(::moli_webidl::Short(#expr)),
             Self::UnsignedShort => quote!(::moli_webidl::UnsignedShort(#expr)),
+            Self::EnforceRangeUnsignedShort => {
+                quote!(::moli_webidl::EnforceRangeUnsignedShort(#expr))
+            }
             Self::ClampedUnsignedShort => {
                 quote!(::moli_webidl::ClampedUnsignedShort(#expr))
             }
@@ -172,6 +178,7 @@ impl ConverterKind {
             | Self::EnforceRangeLong
             | Self::Short
             | Self::UnsignedShort
+            | Self::EnforceRangeUnsignedShort
             | Self::ClampedUnsignedShort
             | Self::UnsignedLong
             | Self::EnforceRangeUnsignedLong
