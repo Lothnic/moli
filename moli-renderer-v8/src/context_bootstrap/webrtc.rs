@@ -99,6 +99,8 @@ struct RtcPeerConnectionObjectDeclaration<'scope> {
     last_offer_options: (),
     #[webapi(slot = RTC_PEER_CONNECTION_HAS_DATA_CHANNEL_SLOT, init = false)]
     has_data_channel: (),
+    #[webapi(slot = transports::SCTP, init = "null")]
+    sctp: (),
     #[webapi(slot = rtp_transceivers::NEGOTIATION_HANDLER, init = "null")]
     onnegotiationneeded: (),
     #[webapi(slot = SIMPLE_EVENT_TARGET_SLOT, value = RTC_PEER_CONNECTION_LISTENERS_SLOT)]
@@ -127,6 +129,8 @@ struct RtcPeerConnectionPrototypeDeclaration {
     ice_connection_state: (),
     #[webapi(accessor_property = "connectionState", getter = rtc_peer_connection_state_getter, data = callback_data_index_value(scope, 3))]
     connection_state: (),
+    #[webapi(accessor_property, getter = transports::sctp_getter)]
+    sctp: (),
 
     #[webapi(method = "createDataChannel", length = 1, callback = data_channel::create)]
     create_data_channel: (),
@@ -179,7 +183,7 @@ pub(in crate::context_bootstrap) fn install_webrtc_template_bindings<'s>(
         "RTCStatsReport" => stats::install(scope, prototype),
         "RTCRtpTransceiver" => rtp_transceivers::install(scope, prototype, interface_name),
         "RTCDataChannel" => data_channel::install(scope, prototype),
-        "RTCIceTransport" | "RTCDtlsTransport" => {
+        "RTCIceTransport" | "RTCDtlsTransport" | "RTCSctpTransport" => {
             transports::install(scope, prototype, interface_name)
         }
         _ => {}
@@ -222,6 +226,7 @@ pub(in crate::context_bootstrap) fn rtc_peer_connection_constructor_callback<'s>
         last_created_answer: (),
         last_offer_options: (),
         has_data_channel: (),
+        sctp: (),
         onnegotiationneeded: (),
         event_target_slot: (),
         ordered_handlers: (),
@@ -553,6 +558,7 @@ fn rtc_peer_connection_close_callback<'s>(
     rtp_transceivers::close(scope, target);
     operations::close(scope, target);
     data_channel::close_connection(scope, target);
+    transports::close_sctp(scope, target);
     transports::close(scope, target);
     for (slot, state) in [
         (RTC_PEER_CONNECTION_ICE_CONNECTION_STATE_SLOT, "closed"),
