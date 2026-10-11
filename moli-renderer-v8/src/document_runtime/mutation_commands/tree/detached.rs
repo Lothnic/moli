@@ -1,9 +1,8 @@
 use super::policy::{TreeMutationSourceProfile, TreeNoncePolicy, TreeReactionDispatchPolicy};
 use crate::{
-    document_runtime::{DocumentRuntime, DomHandle, EventTargetHandle},
+    document_runtime::{DocumentRuntime, DomHandle},
     mutation_coordinator::ConnectedScriptMutationPolicy,
     native_bridge::JsContextHost,
-    util::v8str,
 };
 
 impl DocumentRuntime {
@@ -52,10 +51,7 @@ impl DocumentRuntime {
         reference_child: Option<DomHandle>,
         reaction_policy: TreeReactionDispatchPolicy,
     ) -> bool {
-        let insertion_roots = self
-            .fragment_insertion_children(child)
-            .unwrap_or_else(|| vec![child]);
-        let changed = self.insert_before_with_nonce_handling(
+        self.insert_before_with_nonce_handling(
             scope,
             host_ptr,
             parent,
@@ -68,15 +64,7 @@ impl DocumentRuntime {
                 reaction_policy,
                 TreeNoncePolicy::HideInsertedContentAttributes,
             ),
-        );
-        if changed {
-            self.dispatch_detached_native_iframe_load_after_insert(
-                scope,
-                host_ptr,
-                &insertion_roots,
-            );
-        }
-        changed
+        )
     }
 
     pub(crate) fn remove_detached_native_child(
@@ -103,36 +91,5 @@ impl DocumentRuntime {
             child,
             TreeMutationSourceProfile::js_dom_api_appending_to_current_reaction_queue(),
         )
-    }
-
-    fn dispatch_detached_native_iframe_load_after_insert(
-        &mut self,
-        scope: &mut v8::PinScope<'_, '_>,
-        host_ptr: *mut JsContextHost,
-        roots: &[DomHandle],
-    ) {
-        let Some(event_ctor) = scope
-            .get_current_context()
-            .global(scope)
-            .get(scope, v8str(scope, "Event").into())
-            .and_then(|value| v8::Local::<v8::Function>::try_from(value).ok())
-        else {
-            return;
-        };
-        for &root in roots {
-            if !self.dom_host.is_html_element_named(root, "iframe") {
-                continue;
-            }
-            let Some(event) = event_ctor.new_instance(scope, &[v8str(scope, "load").into()]) else {
-                continue;
-            };
-            let _ = self.dispatch_public_event_best_effort(
-                scope,
-                host_ptr,
-                EventTargetHandle::Node(root),
-                event,
-                "detached native iframe load after insert",
-            );
-        }
     }
 }

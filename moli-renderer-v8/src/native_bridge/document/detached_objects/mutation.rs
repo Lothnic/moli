@@ -897,11 +897,6 @@ fn detached_insert_node_with_current_queue_policy<'s>(
         detached_replace_children_array(scope, parent, prospective_array);
     }
     detached_record_tree_mutation(scope, parent);
-    if !parent_has_native_handle {
-        for node in insert_nodes {
-            dispatch_detached_iframe_load_after_insert(scope, node);
-        }
-    }
     Ok(child)
 }
 
@@ -935,18 +930,4 @@ fn detached_pre_insert_contains<'s>(
         current = detached_parent_node_object(scope, candidate);
     }
     false
-}
-
-fn dispatch_detached_iframe_load_after_insert<'s>(
-    scope: &mut v8::PinScope<'s, '_>,
-    node: v8::Local<'s, v8::Object>,
-) {
-    if detached_node_type(scope, node) == Some(1)
-        && detached_element_local_name(scope, node)
-            .is_some_and(|name| name.eq_ignore_ascii_case("iframe"))
-    {
-        let _ = crate::detached_event_target::dispatch_detached_simple_event(
-            scope, node, "load", false, false, false,
-        );
-    }
 }

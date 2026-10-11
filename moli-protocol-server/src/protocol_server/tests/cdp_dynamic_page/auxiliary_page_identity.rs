@@ -1230,13 +1230,27 @@ async fn auxiliary_adopted_iframe_loads_once_after_native_connection() {
     navigate_dynamic_page_and_wait_for_load(&mut child, 2, &format!("http://{fixture_addr}/popup"))
         .await;
     evaluate_window_name_probe(&mut opener, 3, r#"window.adoptedIframeLoaded=false;window.adoptedLoadCount=0;
+        window.adoptedLoadEvents=[];
         window.adoptedFrame=document.createElement('iframe');
-        adoptedFrame.onload=function(){adoptedLoadCount++;adoptedIframeLoaded=this===adoptedFrame&&this.ownerDocument===p.document};
-        p.document.body.append(adoptedFrame);true"#).await;
+        adoptedFrame.onload=function(){adoptedLoadCount++;adoptedLoadEvents.push('load');adoptedIframeLoaded=this===adoptedFrame&&this.ownerDocument===p.document};
+        p.document.body.append(adoptedFrame);
+        adoptedLoadEvents.push('after-insert');
+        true"#).await;
     wait_for_value(&mut opener, "adoptedIframeLoaded", json!(true)).await;
+    // Cross two tasks on the destination Page before checking for duplicate
+    // load delivery. Install the checkpoints in that Page's own evaluation.
+    evaluate_window_name_probe(
+        &mut child,
+        3,
+        r#"window.adoptedLoadCheckpoint=false;
+        setTimeout(()=>setTimeout(()=>{opener.adoptedLoadEvents.push('checkpoint');adoptedLoadCheckpoint=true},0),0);
+        true"#,
+    )
+    .await;
+    wait_for_value(&mut child, "adoptedLoadCheckpoint", json!(true)).await;
     assert_eq!(
-        evaluate_window_name_probe(&mut opener, 4, "adoptedLoadCount").await,
-        json!(1)
+        evaluate_window_name_probe(&mut opener, 4, "[adoptedLoadCount,adoptedLoadEvents]").await,
+        json!([1, ["load", "after-insert", "checkpoint"]])
     );
     abort_test_cdp_server(server).await;
 }

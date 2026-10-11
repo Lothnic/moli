@@ -1,0 +1,26 @@
+{
+  "product": "Chrome/145.0.7632.116",
+  "revision": "@7d28075c6a9ba147e6df449209001258bb82a122",
+  "cases": {
+    "inert-parser-append": {"immediate": ["before", "after"], "settled": ["before", "after"]},
+    "inert-parser-insert": {"immediate": ["before", "after"], "settled": ["before", "after"]},
+    "inert-parser-replace": {"immediate": ["before", "after"], "settled": ["before", "after"]},
+    "inert-html-append": {"immediate": ["before", "after"], "settled": ["before", "after"]},
+    "inert-html-insert": {"immediate": ["before", "after"], "settled": ["before", "after"]},
+    "inert-html-replace": {"immediate": ["before", "after"], "settled": ["before", "after"]},
+    "inert-adoption": {"immediate": ["before", "after"], "settled": ["before", "after"]},
+    "disconnected-native": {"immediate": ["before", "staged", "frame:handler", "frame:listener", "after"], "settled": ["before", "staged", "frame:handler", "frame:listener", "after"]},
+    "disconnected-foreign": {"immediate": ["before", "staged", "frame:handler", "frame:listener", "after"], "settled": ["before", "staged", "frame:handler", "frame:listener", "after"]},
+    "active-parser-append": {"immediate": ["before", "frame:handler", "frame:listener", "after"], "settled": ["before", "frame:handler", "frame:listener", "after"]},
+    "active-parser-insert": {"immediate": ["before", "frame:handler", "frame:listener", "after"], "settled": ["before", "frame:handler", "frame:listener", "after"]},
+    "active-parser-replace": {"immediate": ["before", "frame:handler", "frame:listener", "after"], "settled": ["before", "frame:handler", "frame:listener", "after"]},
+    "active-fragment": {"immediate": ["before", "staged", "frame:handler", "frame:listener", "after"], "settled": ["before", "staged", "frame:handler", "frame:listener", "after"]},
+    "active-cross-window": {"immediate": ["before", "frame:handler", "frame:listener", "after"], "settled": ["before", "frame:handler", "frame:listener", "after"]},
+    "reinsert": {"immediate": ["before", "frame:handler", "frame:listener", "removed", "frame:handler", "frame:listener", "after"], "settled": ["before", "frame:handler", "frame:listener", "removed", "frame:handler", "frame:listener", "after"]},
+    "remove-in-onload": {"immediate": ["before", "frame:handler", "frame:listener", "after"], "settled": ["before", "frame:handler", "frame:listener", "after"]},
+    "srcdoc": {"immediate": ["before", "after"], "settled": ["before", "after", "frame:handler", "frame:listener"]},
+    "pending-replacement": {"immediate": ["before", "after"], "settled": ["before", "after", "frame:handler", "frame:listener"]},
+    "navigate-in-onload": {"immediate": ["before", "frame:handler", "frame:listener", "after"], "settled": ["before", "frame:handler", "frame:listener", "after", "frame:handler", "frame:listener"]},
+    "url-navigation": {"immediate": ["before", "after"], "settled": ["before", "after", "frame:handler", "frame:listener"]}
+  }
+}

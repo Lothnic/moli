@@ -316,6 +316,10 @@ impl JsContextHost {
         );
     }
 
+    /// Delivers child Document loads exclusively through FrameOwnerStore's
+    /// owner and phase admissions, including synchronous initial about:blank.
+    /// DOM insertion only connects the frame; it must not synthesize load on
+    /// native nodes or their paired foreign reflectors.
     fn run_child_browsing_context_load_delivery(
         &mut self,
         scope: &mut v8::PinScope<'_, '_>,

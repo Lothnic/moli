@@ -216,7 +216,7 @@ fn dom_parser_detached_elements_dispatch_local_events() {
 }
 
 #[test]
-fn dom_parser_detached_iframe_load_ignores_tampered_non_elements() {
+fn dom_parser_detached_insertion_does_not_dispatch_iframe_load() {
     let mut vm = new_storage_test_vm("https://dom-parser-detached-iframe-load-guard.test/");
 
     let result = vm
@@ -238,9 +238,9 @@ fn dom_parser_detached_iframe_load_ignores_tampered_non_elements() {
 })()
 "#,
         )
-        .expect("DOMParser detached iframe load should guard node type");
+        .expect("a Document without a browsing context should not load inserted iframes");
 
-    assert_eq!(result, "0|1");
+    assert_eq!(result, "0|0");
 }
 
 #[test]
@@ -292,7 +292,7 @@ fn dom_parser_detached_iframe_window_declares_own_methods() {
 }
 
 #[test]
-fn dom_parser_detached_iframe_adopted_node_loads_after_insert() {
+fn dom_parser_detached_iframe_adoption_does_not_dispatch_load() {
     let mut vm = new_storage_test_vm("https://dom-parser-detached-iframe-import-sync.test/");
 
     let result = vm
@@ -326,7 +326,7 @@ fn dom_parser_detached_iframe_adopted_node_loads_after_insert() {
         )
         .expect("DOMParser detached iframe import source sync should evaluate");
 
-    assert_eq!(result, "true|1|imported|true|true");
+    assert_eq!(result, "true|0||true|true");
 }
 
 #[test]
