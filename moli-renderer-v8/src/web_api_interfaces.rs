@@ -114,8 +114,6 @@ interfaces! {
     AudioBufferSourceNode: AudioScheduledSourceNode;
     AudioContext: BaseAudioContext;
     AudioDestinationNode: AudioNode;
-    AudioListener;
-    AudioParamMap;
     AudioNode: EventTarget;
     AudioScheduledSourceNode: AudioNode;
     AudioParam;
@@ -402,7 +400,6 @@ interfaces! {
     IdleDeadline;
     IdleDetector: EventTarget;
     Image;
-    ImageBitmapRenderingContext;
     ImageBitmap;
     ImageData;
     InputEvent: UIEvent;
@@ -411,8 +408,6 @@ interfaces! {
     IntersectionObserverEntry;
     KeyboardEvent: UIEvent;
     KeyframeEffect: AnimationEffect;
-    Lock;
-    LockManager;
     Location;
     MathMLElement: Element;
     MediaCapabilities;
@@ -424,10 +419,6 @@ interfaces! {
     WakeLock;
     WakeLockSentinel: EventTarget;
     MediaError;
-    MediaKeySession: EventTarget;
-    MediaKeyStatusMap;
-    MediaKeySystemAccess;
-    MediaKeys;
     MediaList;
     MediaQueryList: EventTarget;
     MediaQueryListEvent: Event;
