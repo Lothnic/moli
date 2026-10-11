@@ -20,7 +20,6 @@ pub(in crate::context_bootstrap) use value::construct_css_animation_start_event;
 mod wrappers;
 
 pub(in crate::context_bootstrap) mod audio;
-pub(in crate::context_bootstrap) mod speech;
 
 pub(in crate::context_bootstrap) use device::{
     device_motion_event_constructor, device_orientation_event_constructor,
