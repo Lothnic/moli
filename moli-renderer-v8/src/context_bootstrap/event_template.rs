@@ -735,7 +735,6 @@ pub(super) fn install_event_template_bindings<'s>(
         let prototype = template.prototype_template(scope);
         document::install_document_prototype_methods(scope, prototype);
     }
-    super::events::speech::install(scope, template, interface);
     if let Some(declaration) = event_template_declaration(interface) {
         (declaration.install)(scope, template);
     }
