@@ -1,7 +1,7 @@
 //! Nested pause-loop coordination and causal Inspector output routing.
 
 use std::{
-    collections::{HashSet, VecDeque},
+    collections::{HashMap, HashSet, VecDeque},
     sync::{Arc, Weak},
 };
 
@@ -11,6 +11,7 @@ use serde_json::Value;
 #[cfg(test)]
 use serde_json::json;
 
+use crate::devtools::ingress::io::RendererInspectorIoIngress;
 use crate::devtools::target::RendererDevToolsTargetHandle;
 #[cfg(test)]
 use crate::runtime::RendererRuntimeInspectorResponseSender;
@@ -56,7 +57,8 @@ struct RendererInspectorPauseBridgeState {
     pause_loop_policy: RendererInspectorPauseLoopPolicy,
     quit_requested: bool,
     session_detach_arms: usize,
-    document_replacements: usize,
+    document_replacements: HashMap<RendererDevToolsAgentToken, usize>,
+    document_replacement_wake: Option<RendererInspectorIoIngress>,
     target_closed: bool,
     pending_prefaces: VecDeque<RendererInspectorPausePreface>,
     paused_sessions_awaiting_resumed: HashSet<(RendererDevToolsAgentToken, DevToolsSessionKey)>,
@@ -104,6 +106,20 @@ impl Drop for RendererInspectorPausePrefaceGuard {
         self.bridge.cancel_pause_preface(self.id);
     }
 }
+
+impl RendererInspectorPausePrefaceGuard {
+    pub(crate) fn take_unclaimed(self) -> Option<Vec<RendererRuntimeInspectorMessage>> {
+        let mut state = self.bridge.shared.state.lock();
+        let position = state
+            .pending_prefaces
+            .iter()
+            .position(|preface| preface.id == self.id)?;
+        state
+            .pending_prefaces
+            .remove(position)
+            .map(|preface| preface.messages)
+    }
+}
 #[derive(Clone)]
 pub(crate) struct RendererInspectorSessionOutboundRoute {
     target: RendererDevToolsTargetHandle,
@@ -126,7 +142,8 @@ impl RendererInspectorPauseBridge {
                 pause_loop_policy: RendererInspectorPauseLoopPolicy::MainAndIo,
                 quit_requested: false,
                 session_detach_arms: 0,
-                document_replacements: 0,
+                document_replacements: HashMap::new(),
+                document_replacement_wake: None,
                 target_closed: false,
                 pending_prefaces: VecDeque::new(),
                 paused_sessions_awaiting_resumed: HashSet::new(),
@@ -362,26 +379,54 @@ impl RendererInspectorPauseBridge {
         Some(state.pause_loop_policy)
     }
 
-    pub(crate) fn begin_document_replacement(&self) -> bool {
+    pub(crate) fn configure_document_replacement_wake(&self, ingress: RendererInspectorIoIngress) {
+        self.shared.state.lock().document_replacement_wake = Some(ingress);
+    }
+
+    pub(crate) fn document_replacement_active(&self, agent: RendererDevToolsAgentToken) -> bool {
+        self.shared
+            .state
+            .lock()
+            .document_replacements
+            .contains_key(&agent)
+    }
+
+    pub(crate) fn begin_document_replacement(&self, agent: RendererDevToolsAgentToken) -> bool {
         let mut state = self.shared.state.lock();
         if state.target_closed {
             return false;
         }
-        state.document_replacements += 1;
+        *state.document_replacements.entry(agent).or_default() += 1;
+        let wake = state.document_replacement_wake.clone();
         self.shared.pause_loop_wake.notify_all();
+        drop(state);
+        if let Some(wake) = wake {
+            wake.notify_document_replacement();
+        }
         true
     }
 
-    pub(crate) fn finish_document_replacement(&self) {
+    pub(crate) fn finish_document_replacement(&self, agent: RendererDevToolsAgentToken) {
         let mut state = self.shared.state.lock();
-        state.document_replacements = state
+        let count = state
             .document_replacements
-            .checked_sub(1)
+            .get_mut(&agent)
             .expect("document replacement scope must be balanced");
+        *count -= 1;
+        if *count != 0 {
+            return;
+        }
+        state.document_replacements.remove(&agent);
+        let wake = state.document_replacement_wake.clone();
+        drop(state);
+        if let Some(wake) = wake {
+            wake.notify_document_replacement();
+        }
     }
 
     pub(crate) fn wait_for_pause_work<T>(
         &self,
+        agent: RendererDevToolsAgentToken,
         mut claim: impl FnMut() -> Option<T>,
     ) -> Result<T, RendererInspectorPauseExitReason> {
         let mut state = self.shared.state.lock();
@@ -389,7 +434,7 @@ impl RendererInspectorPauseBridge {
             if state.target_closed {
                 return Err(RendererInspectorPauseExitReason::TargetClosed);
             }
-            if state.document_replacements != 0 {
+            if state.document_replacements.contains_key(&agent) {
                 return Err(RendererInspectorPauseExitReason::DocumentReplacement);
             }
             if state.session_detach_arms != 0 {
