@@ -7,9 +7,11 @@
 use moli_webapi_declare::WebApiFunctionTemplate;
 
 mod base64url;
+mod container;
 mod json_options;
 mod schema;
 mod value;
+pub(super) use container::build as build_container;
 
 use crate::{native_bridge::throw_dom_exception, util::v8str, web_api_interfaces};
 
@@ -90,6 +92,7 @@ pub(super) fn install<'s>(
     // Static members are installed on the constructor template by the derive.
     let prototype = template.prototype_template(scope);
     match interface_name {
+        "CredentialsContainer" => container::install(scope, prototype),
         "Credential" => {
             CredentialDeclaration::initialize_template(scope, template);
             CredentialDeclaration::initialize_prototype_template(scope, prototype);

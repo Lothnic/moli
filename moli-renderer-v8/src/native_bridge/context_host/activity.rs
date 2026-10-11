@@ -1,5 +1,6 @@
 use super::workers::WorkerExecutionState;
 use super::*;
+use crate::dom::native::Node;
 
 impl JsContextHost {
     pub(crate) fn document_has_browsing_context(&self, document: DomHandle) -> bool {
@@ -12,6 +13,35 @@ impl JsContextHost {
             || self
                 .lightweight_popup_id_for_document_handle(document)
                 .is_some()
+    }
+
+    pub(crate) fn document_is_fully_active(&self, document: DomHandle) -> bool {
+        if self.page_context_resources_closed {
+            return false;
+        }
+        // A retained Window association is insufficient: the Document and each
+        // ancestor must still be current in a live browsing context.
+        let mut document = document;
+        let mut visited = std::collections::HashSet::new();
+        loop {
+            if document == self.document_handle() {
+                return true;
+            }
+            if let Some(popup_id) = self.lightweight_popup_id_for_document_handle(document) {
+                return self.lightweight_popup_is_open(popup_id);
+            }
+            let Some(frame) = self.child_browsing_context_host_for_document_handle(document) else {
+                return false;
+            };
+            if !visited.insert(frame) || !self.dom_host().is_connected(frame) {
+                return false;
+            }
+            let Some(parent_document) = self.dom_host().node(frame).and_then(Node::owner_document)
+            else {
+                return false;
+            };
+            document = parent_document;
+        }
     }
 
     pub(crate) fn document_activity(&self) -> moli_page_types::DocumentActivity {

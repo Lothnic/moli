@@ -74,6 +74,7 @@ const NAVIGATOR_RUNTIME_DATA_KEYS: &[&str] = &[
     "storageBuckets",
     "geolocation",
     "mediaCapabilities",
+    "credentials",
 ];
 const WORKER_NAVIGATOR_INSTALLED_SLOT: &str = "__moliWorkerNavigatorInstalled";
 const WORKER_NAVIGATOR_MATERIALIZING_SLOT: &str = "__moliWorkerNavigatorMaterializing";
@@ -195,6 +196,13 @@ struct NavigatorRuntimeDataPrototypeDeclaration {
     media_capabilities: (),
     #[webapi(accessor_property, getter = navigator_cookie_enabled_getter_callback)]
     cookie_enabled: (),
+}
+
+#[derive(Default, WebApiObject)]
+#[webapi(fragment, prototype = "Navigator")]
+struct NavigatorCredentialsPrototypeDeclaration {
+    #[webapi(accessor_property, enumerable, receiver = web_api_interfaces::Navigator::is_instance, getter = navigator_runtime_data_getter_callback, data = callback_data_index_value(scope, 33))]
+    credentials: (),
 }
 
 #[derive(Default, WebApiFunctionTemplate)]
@@ -591,6 +599,8 @@ struct WindowNavigatorBackingDeclaration<'scope, 'profile> {
 
     #[webapi(data_property, enumerable)]
     media_capabilities: v8::Local<'scope, v8::Value>,
+    #[webapi(data_property, enumerable)]
+    credentials: v8::Local<'scope, v8::Value>,
 }
 
 #[derive(WebApiObject)]
@@ -927,6 +937,19 @@ pub(in crate::context_bootstrap) fn install_navigator_template_bindings<'s>(
     }
 }
 
+pub(in crate::context_bootstrap) fn finalize_navigator_credentials_realm_bindings<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    prototype: v8::Local<'s, v8::Object>,
+) -> Result<()> {
+    let global = scope.get_current_context().global(scope);
+    if super::super::runtime_state::window_realm_secure_context_available(scope, global) {
+        NavigatorCredentialsPrototypeDeclaration::default()
+            .initialize(scope, prototype)
+            .map_err(|error| anyhow!("failed to initialize Navigator credentials: {error}"))?;
+    }
+    Ok(())
+}
+
 fn filter_navigator_secure_context_exposure<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     prototype: v8::Local<'s, v8::Object>,
@@ -934,6 +957,7 @@ fn filter_navigator_secure_context_exposure<'s>(
 ) -> Result<()> {
     if !secure_context {
         delete_object_property(scope, prototype, "clipboard")?;
+        delete_object_property(scope, prototype, "credentials")?;
         delete_object_property(scope, prototype, "mediaDevices")?;
         delete_object_property(scope, prototype, "storage")?;
         delete_object_property(scope, prototype, "storageBuckets")?;
@@ -1086,6 +1110,7 @@ pub(super) fn build_lazy_navigator_subobject_in_current_realm<'s>(
             build_service_worker_container(scope, owner_child, owner_popup)?.into()
         }
         NavigatorSubobject::Clipboard => build_clipboard_object(scope)?.into(),
+        NavigatorSubobject::Credentials => super::credentials::build_container(scope)?.into(),
         NavigatorSubobject::UserActivation => build_user_activation(scope)?.into(),
         NavigatorSubobject::StorageBuckets => {
             build_storage_bucket_manager(scope, owner_child, owner_popup)?.into()
@@ -1275,6 +1300,7 @@ fn build_window_navigator_backing_for_owner<'s>(
         storage_buckets: v8::undefined(scope).into(),
         geolocation: v8::undefined(scope).into(),
         media_capabilities: v8::undefined(scope).into(),
+        credentials: v8::undefined(scope).into(),
     }
     .bind(scope)
     .map_err(|error| anyhow!("failed to bind Navigator backing object: {error}"))
@@ -1685,6 +1711,7 @@ fn navigator_runtime_data_object<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     navigator: v8::Local<'s, v8::Object>,
 ) -> Option<v8::Local<'s, v8::Object>> {
+    let navigator = moli_webapi_declare::web_api_object_target(scope, navigator)?;
     get_private_value(scope, navigator, NAVIGATOR_RUNTIME_DATA_SLOT)
         .and_then(|value| v8::Local::<v8::Object>::try_from(value).ok())
 }

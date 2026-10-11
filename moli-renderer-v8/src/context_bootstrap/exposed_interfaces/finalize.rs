@@ -2,6 +2,7 @@ use anyhow::{Context, Result, anyhow};
 
 use crate::context_bootstrap::{
     crypto::finalize_crypto_realm_bindings, events::finalize_pointer_event_realm_bindings,
+    navigator_runtime::finalize_navigator_credentials_realm_bindings,
     notification_runtime::finalize_notification_realm_bindings,
     performance_runtime::finalize_performance_observer_realm_bindings,
     web_audio_runtime::finalize_base_audio_context_realm_bindings,
@@ -13,6 +14,7 @@ enum RealmDependentFinalizer {
     DocumentRealmBindings,
     NodeMixinUnscopables,
     GlobalEventHandlersSecureContextSurface,
+    NavigatorCredentialsSecureContextSurface,
     CryptoSecureContextSurface,
     BaseAudioContextSecureContextSurface,
     XmlHttpRequestEventTargetState,
@@ -40,6 +42,10 @@ const REALM_DEPENDENT_FINALIZER_ALLOWLIST: &[(&str, RealmDependentFinalizer)] = 
     ),
     // These entries install private realm state, context-conditional surface,
     // or constructor data whose JavaScript identity must be realm-local.
+    (
+        "Navigator",
+        RealmDependentFinalizer::NavigatorCredentialsSecureContextSurface,
+    ),
     (
         "BaseAudioContext",
         RealmDependentFinalizer::BaseAudioContextSecureContextSurface,
@@ -113,6 +119,9 @@ pub(super) fn finalize_materialized_interface<'s>(
         RealmDependentFinalizer::BaseAudioContextSecureContextSurface => {
             finalize_base_audio_context_realm_bindings(scope, prototype)
         }
+        RealmDependentFinalizer::NavigatorCredentialsSecureContextSurface => {
+            finalize_navigator_credentials_realm_bindings(scope, prototype)
+        }
         RealmDependentFinalizer::GlobalEventHandlersSecureContextSurface => {
             crate::context_bootstrap::window_events::finalize_secure_global_event_handler_realm_bindings(
                 scope, prototype,
@@ -171,6 +180,7 @@ mod tests {
                 "Element",
                 "DocumentType",
                 "CharacterData",
+                "Navigator",
                 "BaseAudioContext",
                 "Crypto",
                 "XMLHttpRequestEventTarget",
