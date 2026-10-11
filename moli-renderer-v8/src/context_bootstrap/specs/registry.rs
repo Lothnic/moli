@@ -1009,14 +1009,6 @@ const CONSTRUCTOR_SPECS_BEFORE_STREAMS: &[ConstructorSpec] = &[
         kind: ConstructorKind::NavigatorUAData,
     },
     ConstructorSpec {
-        interface: web_api_interfaces::LockManager::DESCRIPTOR,
-        kind: ConstructorKind::Illegal,
-    },
-    ConstructorSpec {
-        interface: web_api_interfaces::Lock::DESCRIPTOR,
-        kind: ConstructorKind::Illegal,
-    },
-    ConstructorSpec {
         interface: web_api_interfaces::StorageManager::DESCRIPTOR,
         kind: ConstructorKind::StorageManager,
     },
@@ -1452,10 +1444,6 @@ const CONSTRUCTOR_SPECS_AFTER_STREAMS: &[ConstructorSpec] = &[
         kind: ConstructorKind::ImageData,
     },
     ConstructorSpec {
-        interface: web_api_interfaces::ImageBitmapRenderingContext::DESCRIPTOR,
-        kind: ConstructorKind::Illegal,
-    },
-    ConstructorSpec {
         interface: web_api_interfaces::ImageBitmap::DESCRIPTOR,
         kind: ConstructorKind::Illegal,
     },
@@ -1744,22 +1732,6 @@ const CONSTRUCTOR_SPECS_AFTER_STREAMS: &[ConstructorSpec] = &[
         kind: ConstructorKind::MediaRecorder,
     },
     ConstructorSpec {
-        interface: web_api_interfaces::MediaKeys::DESCRIPTOR,
-        kind: ConstructorKind::Illegal,
-    },
-    ConstructorSpec {
-        interface: web_api_interfaces::MediaKeySystemAccess::DESCRIPTOR,
-        kind: ConstructorKind::Illegal,
-    },
-    ConstructorSpec {
-        interface: web_api_interfaces::MediaKeyStatusMap::DESCRIPTOR,
-        kind: ConstructorKind::Illegal,
-    },
-    ConstructorSpec {
-        interface: web_api_interfaces::MediaKeySession::DESCRIPTOR,
-        kind: ConstructorKind::Illegal,
-    },
-    ConstructorSpec {
         interface: web_api_interfaces::MediaError::DESCRIPTOR,
         kind: ConstructorKind::MediaError,
     },
@@ -1890,14 +1862,6 @@ const CONSTRUCTOR_SPECS_AFTER_STREAMS: &[ConstructorSpec] = &[
     ConstructorSpec {
         interface: web_api_interfaces::AnalyserNode::DESCRIPTOR,
         kind: ConstructorKind::AnalyserNode,
-    },
-    ConstructorSpec {
-        interface: web_api_interfaces::AudioParamMap::DESCRIPTOR,
-        kind: ConstructorKind::Illegal,
-    },
-    ConstructorSpec {
-        interface: web_api_interfaces::AudioListener::DESCRIPTOR,
-        kind: ConstructorKind::Illegal,
     },
     ConstructorSpec {
         interface: web_api_interfaces::AudioParam::DESCRIPTOR,
