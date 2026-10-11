@@ -547,8 +547,8 @@ impl MainDocumentNavigationActivity {
             .await
             .err();
         out.extend_background_events_after_messages(background_events);
-        if let Some(message) = error {
-            self.emit_navigation_error_into_buffer(out, &message);
+        if let Some(error) = error {
+            self.emit_navigation_error_into_buffer(out, &format!("{error:#}"));
         }
     }
 
@@ -585,11 +585,11 @@ impl MainDocumentNavigationActivity {
         } else {
             None
         };
-        if let Some(message) = error {
+        if let Some(error) = error {
             let navigate_id = self.state.navigate_id;
             let navigate_session_id = self.state.owner.session_id().map(str::to_owned);
             let mut command_output = CommandOutputBuffer::default();
-            self.emit_navigation_error_into_buffer(&mut command_output, &message);
+            self.emit_navigation_error_into_buffer(&mut command_output, &format!("{error:#}"));
             out.extend_background_events(
                 command_output
                     .into_plan()

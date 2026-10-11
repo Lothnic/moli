@@ -1,11 +1,13 @@
 use std::{
     collections::HashMap,
-    fs,
+    error::Error,
+    fmt, fs, io,
     path::{Path, PathBuf},
     str::FromStr,
     sync::Arc,
 };
 
+use anyhow::Context;
 use http::HeaderName;
 use moli_core::network::ResourceRequestClient;
 use moli_core::page::RendererPendingDownloadActivation;
@@ -22,6 +24,44 @@ use super::{
     CommandDispatchContext, CommandOwnerScope, CompletedDownloadBody,
     CompletedDownloadBodyArtifact, NavigationDispatchState, output::BackgroundEventSender,
 };
+
+#[derive(Debug)]
+pub(crate) enum DownloadCommandError {
+    NotFound,
+    NotActive,
+    InProgress,
+    ArtifactUnavailable,
+    ReadArtifact { path: PathBuf, source: io::Error },
+}
+
+impl fmt::Display for DownloadCommandError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::NotFound => formatter.write_str("No download item found for the given GUID"),
+            Self::NotActive => formatter.write_str("Download item is no longer active"),
+            Self::InProgress => formatter.write_str("Download item is not completed yet"),
+            Self::ArtifactUnavailable => {
+                formatter.write_str("Download item has no readable artifact")
+            }
+            Self::ReadArtifact { path, .. } => {
+                write!(
+                    formatter,
+                    "Failed to read download artifact: {}",
+                    path.display()
+                )
+            }
+        }
+    }
+}
+
+impl Error for DownloadCommandError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::ReadArtifact { source, .. } => Some(source),
+            Self::NotFound | Self::NotActive | Self::InProgress | Self::ArtifactUnavailable => None,
+        }
+    }
+}
 
 #[derive(Clone, Default)]
 pub(crate) struct SharedDownloadRegistry {
@@ -230,7 +270,7 @@ impl CdpConnection {
         owner: &CommandOwnerScope,
         activation: RendererPendingDownloadActivation,
         command_context: &mut CommandDispatchContext,
-    ) -> Result<(), String> {
+    ) -> anyhow::Result<()> {
         self.handle_pending_download_activation_with_event_route_async(
             out,
             owner,
@@ -247,7 +287,7 @@ impl CdpConnection {
         owner: &CommandOwnerScope,
         activation: RendererPendingDownloadActivation,
         command_context: &mut CommandDispatchContext,
-    ) -> Result<(), String> {
+    ) -> anyhow::Result<()> {
         self.handle_pending_download_activation_with_event_route_async(
             out,
             owner,
@@ -265,7 +305,7 @@ impl CdpConnection {
         activation: RendererPendingDownloadActivation,
         allow_background_events: bool,
         command_context: &mut CommandDispatchContext,
-    ) -> Result<(), String> {
+    ) -> anyhow::Result<()> {
         if let Some(events) = self.denied_pending_download_activation_events(owner, &activation)? {
             if allow_background_events && let Some(sender) = self.background_event_sender() {
                 if command_context.response_flush().is_active() {
@@ -365,7 +405,7 @@ impl CdpConnection {
         final_url: Url,
         body_artifact: CompletedDownloadBodyArtifact,
         command_context: &mut CommandDispatchContext,
-    ) -> Result<(), String> {
+    ) -> anyhow::Result<()> {
         let Some(prepared) = self.prepare_navigation_download(state, final_url, body_artifact)?
         else {
             return Ok(());
@@ -395,7 +435,7 @@ impl CdpConnection {
         &mut self,
         command_owner: &CommandOwnerScope,
         activation: RendererPendingDownloadActivation,
-    ) -> Result<Option<PreparedDownloadActivation>, String> {
+    ) -> anyhow::Result<Option<PreparedDownloadActivation>> {
         let Some(owner) = self.pending_download_owner_context(command_owner) else {
             return Ok(None);
         };
@@ -409,8 +449,7 @@ impl CdpConnection {
             return Ok(None);
         };
 
-        let mut request = Request::get(&activation.url)
-            .map_err(|error| format!("invalid download url: {error}"))?;
+        let mut request = Request::get(&activation.url).context("invalid download url")?;
         request.request_headers = owner.request_headers;
         request = request
             .with_top_level_navigation_cookie_context()
@@ -450,7 +489,7 @@ impl CdpConnection {
         &mut self,
         command_owner: &CommandOwnerScope,
         activation: &RendererPendingDownloadActivation,
-    ) -> Result<Option<Vec<BackgroundProtocolEvent>>, String> {
+    ) -> anyhow::Result<Option<Vec<BackgroundProtocolEvent>>> {
         let Some(owner) = self.pending_download_owner_context(command_owner) else {
             return Ok(None);
         };
@@ -504,7 +543,7 @@ impl CdpConnection {
         &mut self,
         command_owner: &CommandOwnerScope,
         activation: RendererPendingDownloadActivation,
-    ) -> Result<Option<PreparedNavigationDownload>, String> {
+    ) -> anyhow::Result<Option<PreparedNavigationDownload>> {
         let Some(owner) = self.pending_download_owner_context(command_owner) else {
             return Ok(None);
         };
@@ -523,7 +562,7 @@ impl CdpConnection {
 
         let response_url = Url::parse(&response.final_url)
             .or_else(|_| Url::parse(&activation.url))
-            .map_err(|error| format!("invalid download url: {error}"))?;
+            .context("invalid download url")?;
         let response_headers = response.headers;
         let response_body = CompletedDownloadBody::Buffered(response.body);
 
@@ -546,7 +585,7 @@ impl CdpConnection {
         state: &NavigationDispatchState,
         final_url: Url,
         body_artifact: CompletedDownloadBodyArtifact,
-    ) -> Result<Option<PreparedNavigationDownload>, String> {
+    ) -> anyhow::Result<Option<PreparedNavigationDownload>> {
         let owner_context_id = self
             .target_owner_identity_for_owner(&state.owner)
             .map(|(browser_context_id, _)| browser_context_id)
@@ -579,40 +618,37 @@ impl CdpConnection {
         }))
     }
 
-    pub(crate) fn cancel_download(&self, guid: &str) -> Result<(), String> {
+    pub(crate) fn cancel_download(&self, guid: &str) -> Result<(), DownloadCommandError> {
         match self.download_registry.cancel(guid) {
             CancelDownloadOutcome::Handled => Ok(()),
-            CancelDownloadOutcome::AlreadyTerminal => {
-                Err("Download item is no longer active".to_owned())
-            }
-            CancelDownloadOutcome::NotFound => {
-                Err("No download item found for the given GUID".to_owned())
-            }
+            CancelDownloadOutcome::AlreadyTerminal => Err(DownloadCommandError::NotActive),
+            CancelDownloadOutcome::NotFound => Err(DownloadCommandError::NotFound),
         }
     }
 
     pub(crate) fn start_open_download_as_stream(
         &self,
         guid: &str,
-    ) -> Result<tokio::task::JoinHandle<Result<Vec<u8>, String>>, String> {
+    ) -> Result<tokio::task::JoinHandle<Result<Vec<u8>, DownloadCommandError>>, DownloadCommandError>
+    {
         let artifact_path = match self.download_registry.open_artifact(guid) {
             OpenDownloadArtifactOutcome::Ready(path) => path,
             OpenDownloadArtifactOutcome::InProgress => {
-                return Err("Download item is not completed yet".to_owned());
+                return Err(DownloadCommandError::InProgress);
             }
             OpenDownloadArtifactOutcome::NotAvailable => {
-                return Err("Download item has no readable artifact".to_owned());
+                return Err(DownloadCommandError::ArtifactUnavailable);
             }
             OpenDownloadArtifactOutcome::NotFound => {
-                return Err("No download item found for the given GUID".to_owned());
+                return Err(DownloadCommandError::NotFound);
             }
         };
 
-        let artifact_path_for_read = artifact_path.clone();
-        let artifact_path_label = artifact_path.display().to_string();
         Ok(tokio::task::spawn_blocking(move || {
-            fs::read(&artifact_path_for_read)
-                .map_err(|_| format!("Download artifact not found: {artifact_path_label}"))
+            fs::read(&artifact_path).map_err(|source| DownloadCommandError::ReadArtifact {
+                path: artifact_path,
+                source,
+            })
         }))
     }
 
@@ -952,7 +988,7 @@ async fn write_navigation_download_body_async(
     download_root: &str,
     artifact_path: &Path,
     body: CompletedDownloadBody,
-) -> Result<u64, String> {
+) -> anyhow::Result<u64> {
     match body {
         CompletedDownloadBody::Buffered(body) => {
             let total_bytes = body.len() as u64;
@@ -962,28 +998,24 @@ async fn write_navigation_download_body_async(
             Ok(total_bytes)
         }
         CompletedDownloadBody::Streaming(mut response) => {
-            tokio::fs::create_dir_all(download_root)
-                .await
-                .map_err(|error| error.to_string())?;
+            tokio::fs::create_dir_all(download_root).await?;
             let partial_path = partial_artifact_path(artifact_path);
-            let mut file = tokio::fs::File::create(&partial_path)
-                .await
-                .map_err(|error| error.to_string())?;
+            let mut file = tokio::fs::File::create(&partial_path).await?;
             let mut total_bytes = 0_u64;
             while let Some(chunk) = response.next_chunk().await {
                 total_bytes = total_bytes.saturating_add(chunk.len() as u64);
                 if let Err(error) = file.write_all(&chunk).await {
                     let _ = tokio::fs::remove_file(&partial_path).await;
-                    return Err(error.to_string());
+                    return Err(error.into());
                 }
             }
             if let Err(error) = response.finish().await {
                 let _ = tokio::fs::remove_file(&partial_path).await;
-                return Err(error.to_string());
+                return Err(error);
             }
             if let Err(error) = file.flush().await {
                 let _ = tokio::fs::remove_file(&partial_path).await;
-                return Err(error.to_string());
+                return Err(error.into());
             }
             drop(file);
             finalize_download_artifact(&partial_path, artifact_path).await?;
@@ -996,22 +1028,13 @@ async fn write_download_artifact_async(
     download_root: &str,
     artifact_path: &Path,
     body: &[u8],
-) -> Result<(), String> {
-    tokio::fs::create_dir_all(download_root)
-        .await
-        .map_err(|error| error.to_string())?;
-    tokio::fs::write(artifact_path, body)
-        .await
-        .map_err(|error| error.to_string())
+) -> io::Result<()> {
+    tokio::fs::create_dir_all(download_root).await?;
+    tokio::fs::write(artifact_path, body).await
 }
 
-async fn finalize_download_artifact(
-    partial_path: &Path,
-    artifact_path: &Path,
-) -> Result<(), String> {
-    tokio::fs::rename(partial_path, artifact_path)
-        .await
-        .map_err(|error| error.to_string())
+async fn finalize_download_artifact(partial_path: &Path, artifact_path: &Path) -> io::Result<()> {
+    tokio::fs::rename(partial_path, artifact_path).await
 }
 
 fn start_download_events(prepared: &PreparedDownloadActivation) -> Vec<BackgroundProtocolEvent> {
@@ -1301,10 +1324,9 @@ fn download_progress_event(
     )
 }
 
-fn generate_download_guid() -> Result<String, String> {
+fn generate_download_guid() -> anyhow::Result<String> {
     let mut bytes = [0_u8; 16];
-    moli_crypto::fill_secure_random(&mut bytes)
-        .map_err(|error| format!("failed to generate download GUID: {error}"))?;
+    moli_crypto::fill_secure_random(&mut bytes).context("failed to generate download GUID")?;
     Ok(format_download_guid(bytes))
 }
 
@@ -1498,10 +1520,13 @@ fn header_name_is(candidate: &str, expected: &HeaderName) -> bool {
 #[cfg(test)]
 mod tests {
     use std::{
+        error::Error,
+        io,
         path::PathBuf,
         time::{SystemTime, UNIX_EPOCH},
     };
 
+    use moli_core::page::RendererPendingDownloadActivation;
     use moli_fetch::FetchCancelHandle;
 
     use crate::{
@@ -1513,12 +1538,13 @@ mod tests {
     };
 
     use super::{
-        BrowserDownloadObserver, DownloadBehavior, DownloadEventRoute, DownloadLifecycle,
-        DownloadRecord, OpenDownloadArtifactOutcome, PageDownloadObserver, SharedDownloadRegistry,
-        artifact_file_name, content_length_from_headers, download_progress_event,
-        download_progress_events, download_will_begin_event, download_will_begin_events,
-        filename_from_content_disposition, format_download_guid, generate_download_guid,
-        partial_artifact_path, response_headers_indicate_download, sanitize_filename,
+        BrowserDownloadObserver, DownloadBehavior, DownloadCommandError, DownloadEventRoute,
+        DownloadLifecycle, DownloadRecord, OpenDownloadArtifactOutcome, PageDownloadObserver,
+        SharedDownloadRegistry, artifact_file_name, content_length_from_headers,
+        download_progress_event, download_progress_events, download_will_begin_event,
+        download_will_begin_events, filename_from_content_disposition, format_download_guid,
+        generate_download_guid, partial_artifact_path, response_headers_indicate_download,
+        sanitize_filename,
     };
 
     #[test]
@@ -1587,6 +1613,36 @@ mod tests {
 
         assert!(!DownloadBehavior::Allow.names_artifact_by_guid());
         assert!(DownloadBehavior::AllowAndName.names_artifact_by_guid());
+    }
+
+    #[test]
+    fn pending_download_retains_invalid_url_source() {
+        let mut conn = CdpConnection::new();
+        let mut context = BrowserContext::new("download-error-context".to_owned());
+        context.set_active_target_id("download-error-target");
+        conn.install_browser_context_fixture_for_test(context);
+        conn.download_behavior.set_global(
+            "allow".to_owned(),
+            Some("/tmp/downloads".to_owned()),
+            false,
+        );
+        let owner = CommandOwnerScope::capture(&conn, None);
+
+        let error = conn
+            .prepare_pending_download_activation(
+                &owner,
+                RendererPendingDownloadActivation {
+                    url: "relative-download-url".to_owned(),
+                    suggested_filename: None,
+                    response: None,
+                },
+            )
+            .err()
+            .expect("invalid download URL should fail");
+        assert_eq!(
+            error.downcast_ref::<url::ParseError>(),
+            Some(&url::ParseError::RelativeUrlWithoutBase)
+        );
     }
 
     #[test]
@@ -1908,7 +1964,7 @@ mod tests {
 
         let result = super::finalize_download_artifact(&missing_partial_path, &artifact_path).await;
 
-        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().kind(), io::ErrorKind::NotFound);
         assert_eq!(
             tokio::fs::read(&artifact_path)
                 .await
@@ -2091,9 +2147,71 @@ mod tests {
         conn.download_registry
             .mark_completed("DOWNLOAD-4", PathBuf::from("/tmp/download"));
 
-        assert_eq!(
+        assert!(matches!(
             conn.cancel_download("DOWNLOAD-4"),
-            Err("Download item is no longer active".to_owned())
+            Err(DownloadCommandError::NotActive)
+        ));
+    }
+
+    #[test]
+    fn connection_download_commands_distinguish_missing_active_and_canceled_items() {
+        let conn = CdpConnection::new();
+        assert!(matches!(
+            conn.cancel_download("missing"),
+            Err(DownloadCommandError::NotFound)
+        ));
+        assert!(matches!(
+            conn.start_open_download_as_stream("missing"),
+            Err(DownloadCommandError::NotFound)
+        ));
+
+        let cancel_handle = FetchCancelHandle::new();
+        conn.download_registry
+            .insert_active("active".to_owned(), cancel_handle.clone());
+        assert!(matches!(
+            conn.start_open_download_as_stream("active"),
+            Err(DownloadCommandError::InProgress)
+        ));
+        conn.cancel_download("active")
+            .expect("active download can be canceled");
+        assert!(cancel_handle.is_cancelled());
+        conn.download_registry.mark_canceled("active");
+        assert!(matches!(
+            conn.start_open_download_as_stream("active"),
+            Err(DownloadCommandError::ArtifactUnavailable)
+        ));
+    }
+
+    #[tokio::test]
+    async fn open_download_as_stream_retains_artifact_path_and_io_error() {
+        let conn = CdpConnection::new();
+        let path = std::env::temp_dir()
+            .join(generate_download_guid().unwrap())
+            .join("missing.bin");
+        conn.download_registry
+            .insert_active("completed".to_owned(), FetchCancelHandle::new());
+        conn.download_registry
+            .mark_completed("completed", path.clone());
+
+        let error = conn
+            .start_open_download_as_stream("completed")
+            .expect("completed download can be opened")
+            .await
+            .expect("read task should finish")
+            .expect_err("missing artifact should fail to read");
+        assert!(matches!(
+            &error,
+            DownloadCommandError::ReadArtifact { path: artifact_path, source }
+                if artifact_path == &path && source.kind() == io::ErrorKind::NotFound
+        ));
+        assert_eq!(
+            error
+                .source()
+                .unwrap()
+                .downcast_ref::<io::Error>()
+                .unwrap()
+                .kind(),
+            io::ErrorKind::NotFound
         );
     }
 }

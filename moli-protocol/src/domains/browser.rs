@@ -1,3 +1,4 @@
+use anyhow::Context;
 use chromiumoxide_cdp::cdp::browser_protocol::browser::{
     CancelDownloadParams, SetWindowBoundsParams,
 };
@@ -9,7 +10,7 @@ use crate::automation::{
     AutomationCommand, AutomationResult, DevToolsError, DevToolsErrorKind,
     DevToolsSetDownloadBehaviorCommand, DevToolsSetPermissionCommand,
 };
-use crate::conn::{BrowserWindowBounds, CdpConnection, Cmd};
+use crate::conn::{BrowserWindowBounds, CdpConnection, Cmd, DownloadCommandError};
 use crate::domains::actions::BrowserAction;
 use crate::domains::command_output::CommandOutputPlan;
 use crate::version;
@@ -47,7 +48,7 @@ pub(crate) enum BrowserCommandTaskStep {
 
 enum PendingBrowserCommandKind {
     OpenDownloadAsStream {
-        pending: tokio::task::JoinHandle<Result<Vec<u8>, String>>,
+        pending: tokio::task::JoinHandle<Result<Vec<u8>, DownloadCommandError>>,
     },
     ApplyPermissionOverrides {
         pending: Vec<PendingBrowserPageCommand>,
@@ -56,7 +57,7 @@ enum PendingBrowserCommandKind {
 
 enum CompletedBrowserCommandKind {
     OpenDownloadAsStream {
-        completed: Result<Vec<u8>, String>,
+        completed: anyhow::Result<Vec<u8>>,
     },
     ApplyPermissionOverrides {
         completed: Vec<CompletedBrowserPageCommand>,
@@ -70,7 +71,7 @@ struct PendingBrowserPageCommand {
 
 struct CompletedBrowserPageCommand {
     target: PendingBrowserPageTarget,
-    completed: Result<CompletedPageCommand, String>,
+    completed: anyhow::Result<CompletedPageCommand>,
 }
 
 #[derive(Clone)]
@@ -88,8 +89,8 @@ impl PendingBrowserCommandDispatch {
                 CompletedBrowserCommandKind::OpenDownloadAsStream {
                     completed: pending
                         .await
-                        .map_err(|error| error.to_string())
-                        .and_then(|result| result),
+                        .map_err(anyhow::Error::from)
+                        .and_then(|result| result.map_err(anyhow::Error::from)),
                 }
             }
             PendingBrowserCommandKind::ApplyPermissionOverrides { pending } => {
@@ -97,11 +98,7 @@ impl PendingBrowserCommandDispatch {
                 for page_command in pending {
                     completed.push(CompletedBrowserPageCommand {
                         target: page_command.target,
-                        completed: page_command
-                            .pending
-                            .wait()
-                            .await
-                            .map_err(|error| error.to_string()),
+                        completed: page_command.pending.wait().await,
                     });
                 }
                 CompletedBrowserCommandKind::ApplyPermissionOverrides { completed }
@@ -540,7 +537,7 @@ async fn execute_devtools_set_permission_command_async(
         });
 
     let pending = start_loaded_page_permission_override_commands(conn)
-        .map_err(|error| DevToolsError::new(DevToolsErrorKind::Internal, error))?;
+        .map_err(|error| DevToolsError::new(DevToolsErrorKind::Internal, format!("{error:#}")))?;
     if pending.is_empty() {
         return Ok(AutomationResult::Empty);
     }
@@ -561,8 +558,9 @@ async fn execute_devtools_set_permission_command_async(
         unreachable!("set permission can only wait for permission override commands")
     };
     for command in commands {
-        finish_pending_permission_override_command(conn, command)
-            .map_err(|error| DevToolsError::new(DevToolsErrorKind::Internal, error))?;
+        finish_pending_permission_override_command(conn, command).map_err(|error| {
+            DevToolsError::new(DevToolsErrorKind::Internal, format!("{error:#}"))
+        })?;
     }
     Ok(AutomationResult::Empty)
 }
@@ -577,7 +575,7 @@ fn cancel_download(conn: &mut CdpConnection, cmd: &Cmd<'_>) -> CommandOutputPlan
 
     match conn.cancel_download(&params.guid) {
         Ok(()) => CommandOutputPlan::success(),
-        Err(message) => CommandOutputPlan::error(-32602, message),
+        Err(error) => CommandOutputPlan::error(-32602, error.to_string()),
     }
 }
 
@@ -598,7 +596,7 @@ fn start_open_download_as_stream_command(
             response_session_id: cmd.session_id.map(str::to_owned),
             kind: PendingBrowserCommandKind::OpenDownloadAsStream { pending },
         }),
-        Err(message) => browser_error_step(-32602, message),
+        Err(error) => browser_error_step(-32602, error.to_string()),
     }
 }
 
@@ -718,7 +716,7 @@ fn start_apply_permission_overrides_command(
 ) -> BrowserCommandTaskStep {
     let pending = match start_loaded_page_permission_override_commands(conn) {
         Ok(pending) => pending,
-        Err(message) => return browser_error_step(-32000, message),
+        Err(error) => return browser_error_step(-32000, format!("{error:#}")),
     };
     if pending.is_empty() {
         return browser_success_step();
@@ -732,7 +730,7 @@ fn start_apply_permission_overrides_command(
 
 fn start_loaded_page_permission_override_commands(
     conn: &mut CdpConnection,
-) -> Result<Vec<PendingBrowserPageCommand>, String> {
+) -> anyhow::Result<Vec<PendingBrowserPageCommand>> {
     let all_overrides = conn.permission_overrides.clone();
     let mut pending = Vec::new();
     for browser_context in conn
@@ -761,7 +759,7 @@ fn start_loaded_page_permission_override_commands(
             };
             let page_command = page
                 .start_set_permission_overrides(&effective_overrides)
-                .map_err(|error| format!("failed to update page permission overrides: {error}"))?;
+                .context("failed to update page permission overrides")?;
             pending.push(PendingBrowserPageCommand {
                 target: PendingBrowserPageTarget {
                     browser_context_id: browser_context_id.clone(),
@@ -786,14 +784,14 @@ pub(crate) fn complete_pending_browser_command(
                 let stream = conn.finish_open_download_as_stream(bytes);
                 CommandOutputPlan::result(json!({ "stream": stream }))
             }
-            Err(message) => CommandOutputPlan::error(-32602, message),
+            Err(error) => CommandOutputPlan::error(-32602, format!("{error:#}")),
         },
         CompletedBrowserCommandKind::ApplyPermissionOverrides {
             completed: commands,
         } => {
             for command in commands {
                 if let Err(error) = finish_pending_permission_override_command(conn, command) {
-                    return CommandOutputPlan::error(-32000, error);
+                    return CommandOutputPlan::error(-32000, format!("{error:#}"));
                 }
             }
             CommandOutputPlan::success()
@@ -804,7 +802,7 @@ pub(crate) fn complete_pending_browser_command(
 fn finish_pending_permission_override_command(
     conn: &mut CdpConnection,
     command: CompletedBrowserPageCommand,
-) -> Result<(), String> {
+) -> anyhow::Result<()> {
     let target = command.target;
     let page = conn
         .browser_context_by_id_mut(&target.browser_context_id)
@@ -816,21 +814,19 @@ fn finish_pending_permission_override_command(
         });
     if let Some(page) = page {
         let completion = command.completed?;
-        return page
-            .finish_set_permission_overrides(completion)
-            .map_err(|error| error.to_string());
+        return page.finish_set_permission_overrides(completion);
     }
 
     // Browser policy was committed before dispatch and is replayed when a new
     // Page is installed. A retired projection may finish or be cancelled; it
     // cannot invalidate that policy or install its PageState on a new owner.
     match command.completed {
-        Ok(completion) => completion
-            .into_unit_page_command_turn()
-            .map(drop)
-            .map_err(|error| error.to_string()),
+        Ok(completion) => completion.into_unit_page_command_turn().map(drop),
         Err(_) => Ok(()),
     }
 }
 
 // ────────────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests;

@@ -100,7 +100,7 @@ pub(crate) use cookie_owner::{
     BrowserContextCookieGetFreshnessStatus, BrowserContextCookieSetReadinessStatus,
 };
 pub use dispatch::{CdpCommandTaskStep, CompletedCdpCommandDispatch, PendingCdpCommandDispatch};
-pub(crate) use downloads::SharedDownloadRegistry;
+pub(crate) use downloads::{DownloadCommandError, SharedDownloadRegistry};
 pub(crate) use fetch_support::PendingStreamingDocumentResponseNavigation;
 pub(crate) use fetch_support::{
     ClaimedSubresourceContinueRequest, CompletedDocumentBodyRead,
