@@ -1,5 +1,6 @@
 use super::*;
 use crate::inspector_session::InspectorSessionOutput;
+use crate::runtime::RendererRuntimeInspectorResponseSender;
 
 #[test]
 fn inspector_outbound_queue_reports_its_exact_length_until_flushed() {

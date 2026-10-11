@@ -750,11 +750,6 @@ impl PageVm {
         action: &str,
         raw_json: &str,
     ) -> Result<Vec<RendererRuntimeInspectorMessage>> {
-        if action == "evaluate"
-            && let Some(messages) = self.try_dispatch_child_default_runtime_evaluate(raw_json)?
-        {
-            return Ok(messages);
-        }
         let prepared_json =
             self.prepare_runtime_protocol_message_with_context_resolution(action, raw_json)?;
         let messages = self
@@ -779,34 +774,6 @@ impl PageVm {
         raw_json: &str,
         deferred_response: RendererRuntimeInspectorResponseSender,
     ) -> Result<Vec<RendererRuntimeInspectorMessage>> {
-        if action == "evaluate"
-            && let Some(messages) = self.try_dispatch_child_default_runtime_evaluate(raw_json)?
-        {
-            let call_id = deferred_response.call_id();
-            if let Some(message) = messages.into_iter().next() {
-                if deferred_response.response_delivery()
-                    == moli_page_types::RendererInspectorResponseDelivery::SessionSink
-                {
-                    let deferred_response = self.vm().route_frontend_runtime_inspector_response(
-                        inspector_session_id,
-                        deferred_response,
-                    )?;
-                    let settlement = deferred_response.finalize_output(
-                        RendererRuntimeCommandOutput::from_inspector_message(message),
-                    );
-                    self.append_runtime_command_output_settlement(settlement);
-                } else if let Err(message) =
-                    deferred_response.send(message.into_v8_inspector_message())
-                {
-                    tracing::debug!(
-                        call_id,
-                        message = ?message,
-                        "dropping child-frame runtime response because deferred receiver was closed"
-                    );
-                }
-            }
-            return Ok(Vec::new());
-        }
         let prepared_json =
             self.prepare_runtime_protocol_message_with_context_resolution(action, raw_json)?;
         self.dispatch_runtime_protocol_message_with_command_output(
@@ -1124,103 +1091,6 @@ impl PageVm {
             self.runtime_inspector_protocol_configurations
                 .remove(&session_key);
         }
-    }
-
-    fn try_dispatch_child_default_runtime_evaluate(
-        &mut self,
-        raw_json: &str,
-    ) -> Result<Option<Vec<RendererRuntimeInspectorMessage>>> {
-        let message: Value = serde_json::from_str(raw_json)?;
-        if message.get("method").and_then(Value::as_str) != Some("Runtime.evaluate") {
-            return Ok(None);
-        }
-        let Some(params) = message.get("params").and_then(Value::as_object) else {
-            return Ok(None);
-        };
-        let Some(context_id) = params.get("contextId").and_then(Value::as_i64) else {
-            return Ok(None);
-        };
-        if self
-            .vm_mut()
-            .child_default_frame_id_for_execution_context_id(context_id)
-            .is_none()
-        {
-            return Ok(None);
-        }
-        if params.get("objectGroup").is_some()
-            || params.get("generatePreview").and_then(Value::as_bool) == Some(true)
-            || params.get("returnByValue").and_then(Value::as_bool) != Some(true)
-        {
-            return Ok(None);
-        }
-        let expression = params
-            .get("expression")
-            .and_then(Value::as_str)
-            .unwrap_or_default();
-        let await_promise = params
-            .get("awaitPromise")
-            .and_then(Value::as_bool)
-            .unwrap_or(false);
-        let user_gesture = params
-            .get("userGesture")
-            .and_then(Value::as_bool)
-            .unwrap_or(false);
-        let file_prompt_handler = params
-            .get(crate::script_vm::WEBDRIVER_BIDI_FILE_PROMPT_HANDLER_PARAM)
-            .and_then(Value::as_str)
-            .filter(|handler| matches!(*handler, "accept" | "dismiss"));
-        let id = message.get("id").cloned().unwrap_or(Value::Null);
-        let result = self
-            .vm_mut()
-            .evaluate_expression_by_value_payload_in_context_with_await(
-                Some(context_id),
-                expression,
-                await_promise,
-                user_gesture,
-                file_prompt_handler,
-            );
-        let response = match result {
-            Ok(payload) if payload.get("exception").is_none() => {
-                json!({ "id": id, "result": { "result": payload } })
-            }
-            Ok(payload) => {
-                let description = payload
-                    .get("exception")
-                    .and_then(Value::as_str)
-                    .unwrap_or("Error");
-                json!({
-                    "id": id,
-                    "result": {
-                        "result": {
-                            "type": "object",
-                            "subtype": "error",
-                            "description": description,
-                        },
-                        "exceptionDetails": {
-                            "text": "Uncaught",
-                            "executionContextId": context_id,
-                            "exception": {
-                                "type": "object",
-                                "subtype": "error",
-                                "description": description,
-                            },
-                        },
-                    },
-                })
-            }
-            Err(error) => {
-                json!({
-                    "id": id,
-                    "error": {
-                        "code": -32000,
-                        "message": error.to_string(),
-                    },
-                })
-            }
-        };
-        Ok(Some(vec![RendererRuntimeInspectorMessage::protocol(
-            response,
-        )]))
     }
 
     fn prepare_runtime_protocol_message_with_context_resolution(

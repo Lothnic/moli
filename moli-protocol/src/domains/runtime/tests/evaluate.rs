@@ -100,6 +100,7 @@ async fn assert_empty_http_error_navigation(ctx: &mut TestContext, error_url: &s
     );
 }
 
+mod child_await;
 mod contexts;
 mod dom_integration;
 mod evaluation;
