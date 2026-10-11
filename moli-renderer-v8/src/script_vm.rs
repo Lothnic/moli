@@ -1494,15 +1494,6 @@ impl ScriptVm {
         )
     }
 
-    pub(super) fn route_frontend_runtime_inspector_response(
-        &self,
-        inspector_session_id: Option<&str>,
-        response: RendererRuntimeInspectorResponseSender,
-    ) -> Result<RendererRuntimeInspectorResponseSender> {
-        self.page_inspector
-            .route_frontend_response(inspector_session_id, response)
-    }
-
     fn dispatch_internal_runtime_evaluate_protocol_message(
         &mut self,
         raw_json: &str,
