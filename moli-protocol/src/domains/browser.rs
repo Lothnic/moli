@@ -77,6 +77,8 @@ struct CompletedBrowserPageCommand {
 struct PendingBrowserPageTarget {
     browser_context_id: String,
     target_id: String,
+    page_id: u64,
+    attachment_id: Option<moli_core::page::RendererAgentAttachmentId>,
 }
 
 impl PendingBrowserCommandDispatch {
@@ -559,10 +561,7 @@ async fn execute_devtools_set_permission_command_async(
         unreachable!("set permission can only wait for permission override commands")
     };
     for command in commands {
-        let completion = command
-            .completed
-            .map_err(|error| DevToolsError::new(DevToolsErrorKind::Internal, error))?;
-        finish_pending_permission_override_command(conn, command.target, completion)
+        finish_pending_permission_override_command(conn, command)
             .map_err(|error| DevToolsError::new(DevToolsErrorKind::Internal, error))?;
     }
     Ok(AutomationResult::Empty)
@@ -760,16 +759,17 @@ fn start_loaded_page_permission_override_commands(
             let Some(page) = target.loaded_page_mut() else {
                 continue;
             };
+            let page_command = page
+                .start_set_permission_overrides(&effective_overrides)
+                .map_err(|error| format!("failed to update page permission overrides: {error}"))?;
             pending.push(PendingBrowserPageCommand {
                 target: PendingBrowserPageTarget {
                     browser_context_id: browser_context_id.clone(),
                     target_id,
+                    page_id: page.page_id(),
+                    attachment_id: page_command.renderer_agent_attachment_id(),
                 },
-                pending: page
-                    .start_set_permission_overrides(&effective_overrides)
-                    .map_err(|error| {
-                        format!("failed to update page permission overrides: {error}")
-                    })?,
+                pending: page_command,
             });
         }
     }
@@ -792,15 +792,7 @@ pub(crate) fn complete_pending_browser_command(
             completed: commands,
         } => {
             for command in commands {
-                let completion = match command.completed {
-                    Ok(completion) => completion,
-                    Err(error) => {
-                        return CommandOutputPlan::error(-32000, error);
-                    }
-                };
-                if let Err(error) =
-                    finish_pending_permission_override_command(conn, command.target, completion)
-                {
+                if let Err(error) = finish_pending_permission_override_command(conn, command) {
                     return CommandOutputPlan::error(-32000, error);
                 }
             }
@@ -811,16 +803,34 @@ pub(crate) fn complete_pending_browser_command(
 
 fn finish_pending_permission_override_command(
     conn: &mut CdpConnection,
-    target: PendingBrowserPageTarget,
-    completion: CompletedPageCommand,
+    command: CompletedBrowserPageCommand,
 ) -> Result<(), String> {
+    let target = command.target;
     let page = conn
         .browser_context_by_id_mut(&target.browser_context_id)
         .and_then(|browser_context| browser_context.page_target_mut(&target.target_id))
         .and_then(|target| target.loaded_page_mut())
-        .ok_or_else(|| "NoDocumentLoaded".to_owned())?;
-    page.finish_set_permission_overrides(completion)
-        .map_err(|error| error.to_string())
+        .filter(|page| {
+            page.page_id() == target.page_id
+                && page.renderer_agent_attachment_id() == target.attachment_id
+        });
+    if let Some(page) = page {
+        let completion = command.completed?;
+        return page
+            .finish_set_permission_overrides(completion)
+            .map_err(|error| error.to_string());
+    }
+
+    // Browser policy was committed before dispatch and is replayed when a new
+    // Page is installed. A retired projection may finish or be cancelled; it
+    // cannot invalidate that policy or install its PageState on a new owner.
+    match command.completed {
+        Ok(completion) => completion
+            .into_unit_page_command_turn()
+            .map(drop)
+            .map_err(|error| error.to_string()),
+        Err(_) => Ok(()),
+    }
 }
 
 // ────────────────────────────────────────────────────────────────────────────
