@@ -221,13 +221,13 @@ struct ReadableStreamPrototypeDeclaration {
 }
 
 #[derive(WebApiFunctionTemplate)]
-#[webapi(interface = web_api_interfaces::WritableStream, enumerable)]
+#[webapi(interface = web_api_interfaces::WritableStream, enumerable, receiver)]
 struct WritableStreamPrototypeDeclaration {
     #[webapi(method, length = 0, callback = writable_stream_get_writer_callback)]
     get_writer: (),
-    #[webapi(method, length = 0, callback = writable_stream_abort_callback)]
+    #[webapi(method, returns_promise, length = 0, callback = writable_stream_abort_callback)]
     abort: (),
-    #[webapi(method, length = 0, callback = writable_stream_close_callback)]
+    #[webapi(method, returns_promise, length = 0, callback = writable_stream_close_callback)]
     close: (),
     #[webapi(accessor_property, getter = writable_stream_locked_getter)]
     locked: (),

@@ -1,4 +1,5 @@
 mod credential_json_options;
+mod writable_stream_native_receivers;
 use super::post_parse::dynamic_script_execute_is_runnable_before_dom_content_loaded;
 use super::{
     PostParseDriverStep, PostParseLifecycleAdvance, PostParseLifecycleCompletionAction,
