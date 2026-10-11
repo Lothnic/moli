@@ -44,6 +44,69 @@ fn window_open_empty_url_preserves_special_target_document() {
     assert!(vm.take_pending_location_navigation_with_seed().is_none());
 }
 
+#[test]
+fn window_open_parent_target_uses_the_receiver_browsing_context() {
+    for depth in [2, 3] {
+        for target in ["_parent", "_PaReNt"] {
+            for borrowed in [false, true] {
+                for url in ["", "https://window-open-parent.test/destination"] {
+                    let mut vm = new_parsed_test_vm(
+                        "https://window-open-parent.test/source",
+                        "<!doctype html><body></body>",
+                    );
+                    let description =
+                        format!("depth={depth} target={target} borrowed={borrowed} url={url:?}");
+                    let result = vm
+                        .eval(&format!(
+                            r#"(() => {{
+                              let receiver = window;
+                              for (let i = 0; i < {depth}; ++i) {{
+                                const frame = receiver.document.createElement('iframe');
+                                receiver.document.body.appendChild(frame);
+                                frame.srcdoc = '<body></body>';
+                                receiver = frame.contentWindow;
+                              }}
+                              const expected = receiver.parent;
+                              const parentHref = expected.location.href;
+                              const receiverHref = receiver.location.href;
+                              const seen = [];
+                              navigation.onnavigate = event => {{
+                                seen.push('top');
+                                event.preventDefault();
+                              }};
+                              const open = {borrowed} ? window.open : receiver.open;
+                              const opened = open.call(receiver, {url:?}, {target:?});
+                              return JSON.stringify([
+                                expected !== window,
+                                opened === expected,
+                                opened === window,
+                                expected.location.href === ({url:?} || parentHref),
+                                receiver.location.href === receiverHref,
+                                location.href === 'https://window-open-parent.test/source',
+                                seen
+                              ]);
+                            }})()"#
+                        ))
+                        .expect(&description);
+                    assert_eq!(
+                        serde_json::from_str::<serde_json::Value>(&result).unwrap(),
+                        serde_json::json!([true, true, false, true, true, true, []]),
+                        "{description}"
+                    );
+                    assert!(
+                        vm.take_pending_popup_activations().is_empty(),
+                        "{description}"
+                    );
+                    assert!(
+                        vm.take_pending_location_navigation_with_seed().is_none(),
+                        "{description}"
+                    );
+                }
+            }
+        }
+    }
+}
+
 #[tokio::test]
 async fn window_open_lightweight_named_reuse_updates_dom_opener_synchronously() {
     let loader = ResourceRequestClient::new(&moli_fetch::FetchConfig::default()).unwrap();

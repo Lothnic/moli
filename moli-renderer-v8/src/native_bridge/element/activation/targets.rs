@@ -517,7 +517,7 @@ fn navigate_special_target_from_window<'s>(
 
 pub(crate) fn navigate_existing_browsing_context_target<'s>(
     scope: &mut v8::PinScope<'s, '_>,
-    runtime_ptr: *mut JsContextHost,
+    source_window: v8::Local<'s, v8::Object>,
     target: SpecialBrowsingContextTarget,
     resolved_url: &str,
 ) -> Option<v8::Local<'s, v8::Object>> {
@@ -526,9 +526,6 @@ pub(crate) fn navigate_existing_browsing_context_target<'s>(
         SpecialBrowsingContextTarget::Blank,
         "a new-context target cannot use existing-context navigation"
     );
-    let dispatch_scope = unsafe { &*runtime_ptr }.entered_owner_dispatch_scope(scope);
-    let source_window =
-        browsing_context_window_for_dispatch_scope(scope, runtime_ptr, dispatch_scope)?;
     navigate_special_target_from_window(scope, source_window, Some(target), resolved_url)
 }
 
@@ -583,21 +580,22 @@ pub(crate) fn navigate_target_browsing_context<'s>(
             )
         )
     {
+        let dispatch_scope = unsafe { &*runtime_ptr }.entered_owner_dispatch_scope(scope);
+        let Some(source_window) =
+            browsing_context_window_for_dispatch_scope(scope, runtime_ptr, dispatch_scope)
+        else {
+            return false;
+        };
         return match special_target {
-            Some(target) => {
-                navigate_existing_browsing_context_target(scope, runtime_ptr, target, resolved_url)
-                    .is_some()
-            }
-            None => {
-                let dispatch_scope = unsafe { &*runtime_ptr }.entered_owner_dispatch_scope(scope);
-                let Some(source_window) =
-                    browsing_context_window_for_dispatch_scope(scope, runtime_ptr, dispatch_scope)
-                else {
-                    return false;
-                };
-                navigate_special_target_from_window(scope, source_window, None, resolved_url)
-                    .is_some()
-            }
+            Some(target) => navigate_existing_browsing_context_target(
+                scope,
+                source_window,
+                target,
+                resolved_url,
+            )
+            .is_some(),
+            None => navigate_special_target_from_window(scope, source_window, None, resolved_url)
+                .is_some(),
         };
     }
     if special_target == Some(SpecialBrowsingContextTarget::Blank) {

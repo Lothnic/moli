@@ -245,8 +245,18 @@ pub(crate) fn window_open_callback<'s>(
         target @ (SpecialBrowsingContextTarget::Parent | SpecialBrowsingContextTarget::Top),
     ) = special_target
     {
+        let source_window = if window_receiver_child_handle(scope, args.this()).is_some() {
+            args.this()
+        } else {
+            entered_window
+        };
         let navigation_url = if parsed.raw_url.is_empty() { "" } else { &url };
-        match navigate_existing_browsing_context_target(scope, host_ptr, target, navigation_url) {
+        match navigate_existing_browsing_context_target(
+            scope,
+            source_window,
+            target,
+            navigation_url,
+        ) {
             Some(window) => rv.set(window.into()),
             None => rv.set(v8::null(scope).into()),
         }
