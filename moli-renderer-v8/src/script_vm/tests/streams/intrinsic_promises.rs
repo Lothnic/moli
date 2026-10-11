@@ -1,6 +1,40 @@
 use super::*;
 
 #[test]
+fn stream_internal_rejection_handling_does_not_read_author_promise_catch() {
+    let mut vm = stream_test_vm();
+    vm.eval(r#"
+      globalThis.__handlingResult='pending';
+      (async()=>{
+        let hooks=0;
+        const saved=Object.getOwnPropertyDescriptor(Promise.prototype,'catch');
+        Object.defineProperty(Promise.prototype,'catch',{configurable:true,get(){hooks++;throw Error('author catch getter');}});
+        try {
+          const reader=new ReadableStream().getReader();
+          const pending=reader.read().then(()=>false,error=>error instanceof TypeError);
+          const readerClosed=reader.closed.then(()=>false,error=>error instanceof TypeError);
+          reader.releaseLock();
+          const writer=new WritableStream().getWriter();
+          const writerClosed=writer.closed.then(()=>false,error=>error==='stop');
+          await writer.abort('stop');
+          const writerReady=writer.ready.then(()=>false,error=>error==='stop');
+          const results=await Promise.all([pending,readerClosed,writerClosed,writerReady]);
+          writer.releaseLock();
+          return JSON.stringify({hooks,results});
+        } finally {Object.defineProperty(Promise.prototype,'catch',saved);}
+      })().then(value=>globalThis.__handlingResult=value,error=>globalThis.__handlingResult='error:'+error.name+':'+error.message);
+    "#).unwrap();
+    let mut result = String::new();
+    for _ in 0..16 {
+        result = vm.eval("__handlingResult").unwrap();
+        if result != "pending" {
+            break;
+        }
+    }
+    assert_eq!(result, r#"{"hooks":0,"results":[true,true,true,true]}"#);
+}
+
+#[test]
 fn writable_stream_writer_promises_survive_missing_or_poisoned_global_promise() {
     for (label, replacement) in [
         ("missing", "delete globalThis.Promise;"),
