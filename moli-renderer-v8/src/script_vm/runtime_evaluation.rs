@@ -39,26 +39,6 @@ impl ScriptVm {
         self.require_completed_runtime_evaluate(outcome)
     }
 
-    pub(crate) fn evaluate_expression_by_value_payload_in_context_with_await(
-        &mut self,
-        execution_context_id: Option<i64>,
-        expression: &str,
-        await_promise: bool,
-        user_gesture: bool,
-        file_prompt_handler: Option<&str>,
-    ) -> Result<Value> {
-        let outcome = self.begin_runtime_evaluate(
-            execution_context_id,
-            expression,
-            await_promise,
-            user_gesture,
-            file_prompt_handler,
-            RuntimeEvaluateCodeGenerationPolicy::from_cdp(None),
-            RuntimeEvaluateResultMode::ByValue,
-        )?;
-        self.require_completed_runtime_evaluate(outcome)
-    }
-
     pub(crate) fn performance_metric_snapshot(
         &mut self,
     ) -> Result<RendererPerformanceMetricSnapshot> {

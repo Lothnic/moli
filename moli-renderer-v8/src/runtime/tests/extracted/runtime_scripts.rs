@@ -721,38 +721,87 @@ async fn child_default_runtime_evaluate_pending_await_promise_does_not_leak_inte
     );
     let child_context_id = child_context_ids[0];
 
-    let evaluate = dispatch_runtime_protocol_with_context_resolution_for_test(
+    let (response_tx, mut response_rx) = oneshot::channel();
+    let (evaluate, _) = page
+        .run_async_command(
+            RendererPageCommand::dispatch_runtime_protocol_message_with_context_resolution_and_deferred_response(
+                None,
+                "evaluate".to_owned(),
+                serde_json::json!({
+                    "id": 67,
+                    "method": "Runtime.evaluate",
+                    "params": {
+                        "contextId": child_context_id,
+                        "expression": "new Promise(resolve => { globalThis.resolveChildAwait = resolve; })",
+                        "awaitPromise": true,
+                        "returnByValue": true
+                    }
+                }).to_string(),
+                RendererRuntimeInspectorResponseSender::new(67, response_tx),
+            ),
+        )
+        .await
+        .expect("child Runtime.evaluate awaitPromise should dispatch");
+    assert!(matches!(
+        evaluate,
+        RendererPageReply::RuntimeInspectorProtocolMessages(ref messages) if messages.is_empty()
+    ));
+    assert!(matches!(
+        response_rx.try_recv(),
+        Err(tokio::sync::oneshot::error::TryRecvError::Empty)
+    ));
+
+    let resolved = dispatch_runtime_protocol_with_context_resolution_for_test(
         &page,
         "evaluate",
         serde_json::json!({
-            "id": 67,
+            "id": 68,
             "method": "Runtime.evaluate",
             "params": {
                 "contextId": child_context_id,
-                "expression": "new Promise(() => {})",
-                "awaitPromise": true,
+                "expression": "resolveChildAwait('child-result'); 'resolved'",
                 "returnByValue": true
             }
         }),
     )
     .await
-    .expect("child Runtime.evaluate awaitPromise should dispatch");
-    let response =
-        runtime_protocol_response_by_id(&evaluate, 67).expect("child awaitPromise response");
+    .expect("the pending child evaluation must release Page dispatch");
+    assert_eq!(
+        runtime_protocol_response_by_id(&resolved, 68).expect("resolver response")["result"]["result"]
+            ["value"],
+        serde_json::json!("resolved")
+    );
+    let completion = tokio::time::timeout(Duration::from_secs(2), &mut response_rx)
+        .await
+        .expect("the child Promise response must settle on its Page owner")
+        .expect("the child response must retain its callback owner");
+    assert_eq!(completion.call_id, 67);
+    let response = completion
+        .output
+        .protocol_response(67)
+        .expect("child awaitPromise response");
+    let messages: Vec<_> = completion
+        .output
+        .messages()
+        .iter()
+        .cloned()
+        .map(RendererRuntimeInspectorMessage::into_v8_inspector_message)
+        .collect();
     let messages_json =
-        serde_json::to_string(&evaluate).expect("Runtime.evaluate messages should serialize");
+        serde_json::to_string(&messages).expect("Runtime.evaluate messages should serialize");
     assert!(
         !messages_json.contains("__moliAwaitPromiseToken"),
-        "child Runtime.evaluate awaitPromise leaked internal polling token: {evaluate:?}"
+        "child Runtime.evaluate awaitPromise leaked internal polling token: {messages_json}"
     );
     assert!(
         !messages_json.contains("__moliPendingPromise"),
-        "child Runtime.evaluate awaitPromise leaked internal pending marker: {evaluate:?}"
+        "child Runtime.evaluate awaitPromise leaked internal pending marker: {messages_json}"
     );
     assert!(
-        response.get("error").is_some() || response["result"]["exceptionDetails"].is_object(),
-        "pending child Runtime.evaluate awaitPromise must fail closed instead of returning an internal success payload: {response:?}"
+        response.get("error").is_none() && response["result"].get("exceptionDetails").is_none(),
+        "a resolved child Promise must return its native result: {response:?}"
     );
+    assert_eq!(response["result"]["result"]["value"], "child-result");
 
     page.close_async()
         .await
