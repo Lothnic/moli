@@ -24,7 +24,7 @@ on:
       browser_eval_ref:
         description: Exact browser-eval commit containing the certified runner
         required: false
-        default: "66e5d8bc5ac055a7a24a0d804dee1f643357d5fc"
+        default: "32951a4b1ab03c449b569fe105b8f9ef99d108ad"
 
 concurrency:
   group: ci-${{ github.event.pull_request.number || github.ref }}
