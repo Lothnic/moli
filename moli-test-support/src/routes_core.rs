@@ -4,6 +4,47 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, OnceLock};
 
+pub(super) async fn load_completion_controls_page() -> Html<&'static str> {
+    Html(
+        r#"<!doctype html><html><head><script>
+globalThis.mainLoadCount = 0;
+addEventListener('load', () => {
+  document.body.dataset.mainLoads = String(++mainLoadCount);
+});
+addEventListener('DOMContentLoaded', () => {
+  const mode = new URL(location.href).searchParams.get('mode');
+  const frame = document.createElement('iframe');
+  frame.id = 'child';
+  frame.onload = () => {
+    if (mode === 'replace' && !frame.dataset.replaced) {
+      frame.dataset.replaced = 'yes';
+      frame.src = '/static?replacement=1';
+      return;
+    }
+    document.body.dataset.childLoaded = 'yes';
+  };
+  frame.src = mode === 'error' ? '/missing-load-control' : '/static';
+  document.body.append(frame);
+  if (mode === 'remove') {
+    frame.remove();
+  }
+  if (mode === 'promote' || mode === 'retarget') {
+    const link = document.createElement('link');
+    link.rel = mode === 'promote' ? 'preload' : 'stylesheet';
+    link.as = 'style';
+    link.href = 'data:text/css,body%7Bcolor%3Argb(1%2C2%2C3)%7D';
+    document.head.append(link);
+    if (mode === 'promote') {
+      link.rel = 'stylesheet';
+    } else {
+      link.href = 'data:text/css,body%7Bcolor%3Argb(4%2C5%2C6)%7D';
+    }
+  }
+});
+</script></head><body><main>Load completion content</main></body></html>"#,
+    )
+}
+
 static NET_UPSTREAM_XHR_404_THEN_200_REQUESTS: AtomicUsize = AtomicUsize::new(0);
 static CONCURRENT_SHARED_STATE_REQUESTS_IN_FLIGHT: AtomicUsize = AtomicUsize::new(0);
 static PARSER_IMAGE_FETCH_POLICY_TOKEN_COUNTER: AtomicUsize = AtomicUsize::new(0);
