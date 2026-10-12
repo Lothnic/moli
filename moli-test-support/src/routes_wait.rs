@@ -69,6 +69,42 @@ const WAIT_UNTIL_OUTER_HTML_TAMPER_HTML: &str = "<!doctype html><html><body data
 // is around 500 ms; a 50 ms interval leaves enough margin under nextest load.
 const WAIT_UNTIL_INTERVAL_FETCH_HTML: &str = "<!doctype html><html><body data-state=\"init\"><script>window.addEventListener('load', () => { setInterval(() => { fetch('/wait-until-data').then(() => { document.body.setAttribute('data-ping', String((Number(document.body.getAttribute('data-ping') || '0') + 1))); }); }, 50); });</script></body></html>";
 const WAIT_UNTIL_INTERVAL_DOM_MUTATION_HTML: &str = "<!doctype html><html><body data-state=\"init\"><main id=\"mutation-count\">0</main><script>window.addEventListener('load', () => { setInterval(() => { const count = Number(document.body.getAttribute('data-mutation-count') || '0') + 1; document.body.setAttribute('data-mutation-count', String(count)); document.getElementById('mutation-count').textContent = String(count); }, 50); });</script></body></html>";
+const WAIT_UNTIL_CREDENTIAL_CALLBACK_NAVIGATION_HTML: &str = r#"<!doctype html>
+<html><head><title>credential callback bootstrap</title></head><body>
+<main id="credential-callback-source">credential-callback=source</main>
+<script>
+const bootstrap = new XMLHttpRequest();
+bootstrap.open('POST', '/wait-until-credential-bootstrap');
+bootstrap.withCredentials = true;
+bootstrap.onload = () => {
+  const callback = new XMLHttpRequest();
+  callback.open('GET', '/wait-until-credential-callback');
+  callback.withCredentials = true;
+  callback.onload = () => {
+    location.replace('/wait-until-credential-navigation-target');
+  };
+  callback.send();
+};
+bootstrap.send('register');
+</script>
+</body></html>"#;
+const WAIT_UNTIL_CREDENTIAL_NAVIGATION_TARGET_HTML: &str = r#"<!doctype html>
+<html><head><title>credential callback complete</title></head><body>
+<main id="credential-callback-target">credential-callback=navigation-done</main>
+</body></html>"#;
+const WAIT_UNTIL_UNRELATED_LONG_WORK_HTML: &str = r#"<!doctype html>
+<html><head><title>unrelated long work</title></head><body>
+<main id="unrelated-long-work-source">unrelated-long-work=source</main>
+<script>
+fetch('/wait-until-unrelated-long-poll').then(() => {
+  document.body.setAttribute('data-long-poll-finished', 'true');
+});
+setInterval(() => { fetch('/wait-until-data'); }, 5000);
+setTimeout(() => {
+  document.body.setAttribute('data-long-timer-fired', 'true');
+}, 5000);
+</script>
+</body></html>"#;
 const WAIT_UNTIL_SLOW_STATIC_HTML: &str =
     "<!doctype html><html><body><main id=\"slow-main\">slow-main=ready</main></body></html>";
 const WAIT_UNTIL_REDIRECT_STATUS_NAVIGATION_HTML: &str = r#"<!doctype html>
@@ -332,6 +368,30 @@ pub(super) fn add_wait_routes(router: Router) -> Router {
         .route(
             "/wait-until-interval-dom-mutation",
             get(wait_until_interval_dom_mutation_page),
+        )
+        .route(
+            "/wait-until-credential-callback-navigation",
+            get(wait_until_credential_callback_navigation_page),
+        )
+        .route(
+            "/wait-until-credential-bootstrap",
+            any(wait_until_credential_bootstrap),
+        )
+        .route(
+            "/wait-until-credential-callback",
+            get(wait_until_credential_callback),
+        )
+        .route(
+            "/wait-until-credential-navigation-target",
+            get(wait_until_credential_navigation_target_page),
+        )
+        .route(
+            "/wait-until-unrelated-long-work",
+            get(wait_until_unrelated_long_work_page),
+        )
+        .route(
+            "/wait-until-unrelated-long-poll",
+            get(wait_until_unrelated_long_poll),
         )
         .route("/wait-until-slow-static", get(wait_until_slow_static_page))
         .route(
@@ -729,6 +789,48 @@ async fn wait_until_interval_fetch_page() -> Html<&'static str> {
 
 async fn wait_until_interval_dom_mutation_page() -> Html<&'static str> {
     Html(WAIT_UNTIL_INTERVAL_DOM_MUTATION_HTML)
+}
+
+async fn wait_until_credential_callback_navigation_page() -> Html<&'static str> {
+    // Consume the redirect-status minimum window before Load. Credential
+    // callbacks need their own bounded post-Load handoff window.
+    sleep(Duration::from_millis(1200)).await;
+    Html(WAIT_UNTIL_CREDENTIAL_CALLBACK_NAVIGATION_HTML)
+}
+
+async fn wait_until_credential_bootstrap() -> Response {
+    sleep(Duration::from_millis(150)).await;
+    (
+        [(CONTENT_TYPE, HeaderValue::from_static("text/plain"))],
+        "ticket",
+    )
+        .into_response()
+}
+
+async fn wait_until_credential_callback() -> Response {
+    sleep(Duration::from_millis(100)).await;
+    (
+        [(CONTENT_TYPE, HeaderValue::from_static("text/plain"))],
+        "ok",
+    )
+        .into_response()
+}
+
+async fn wait_until_credential_navigation_target_page() -> Html<&'static str> {
+    Html(WAIT_UNTIL_CREDENTIAL_NAVIGATION_TARGET_HTML)
+}
+
+async fn wait_until_unrelated_long_work_page() -> Html<&'static str> {
+    Html(WAIT_UNTIL_UNRELATED_LONG_WORK_HTML)
+}
+
+async fn wait_until_unrelated_long_poll() -> Response {
+    sleep(Duration::from_secs(4)).await;
+    (
+        [(CONTENT_TYPE, HeaderValue::from_static("text/plain"))],
+        "done",
+    )
+        .into_response()
 }
 
 // These delayed main-resource fixtures make timeout accounting observable:

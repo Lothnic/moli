@@ -20,6 +20,9 @@ pub struct RendererLifecycleSnapshot {
     pub requested_url: Url,
     pub final_url: Url,
     pub status: u16,
+    /// Whether the exact current main Document still owns an explicitly
+    /// credential-including Window Fetch or XMLHttpRequest callback.
+    pub has_pending_credentialed_window_request: bool,
 }
 
 /// One-shot decision made synchronously when page creation reaches its exact
@@ -37,6 +40,11 @@ pub enum RendererLifecycleDecision {
     /// starts in time, accept the current Document instead of failing page
     /// creation.
     FollowNextDocumentOrFinish { navigation_grace_ms: u64 },
+    /// Observe navigation produced by an explicitly credential-including
+    /// Window Fetch or XMLHttpRequest already owned by the exact target
+    /// Document. Finish as soon as that request chain settles without a
+    /// navigation, or when the bounded grace period expires.
+    FollowPendingCredentialedRequestNavigationOrFinish { navigation_grace_ms: u64 },
 }
 
 /// Synchronous, one-shot policy decider for a page-creation lifecycle target.

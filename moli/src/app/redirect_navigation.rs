@@ -1,7 +1,8 @@
-//! CLI policy for replacing a non-success Document with its next navigation.
+//! CLI policy for bounded navigation handoffs at a lifecycle boundary.
 //!
-//! HTTP status interpretation and timeout configuration belong to the CLI
-//! layer. The renderer receives only the generic lifecycle-target decision.
+//! HTTP status interpretation and explicit credential-callback observation
+//! belong to the CLI layer. The renderer receives only a generic, owner-bound
+//! lifecycle-target decision.
 
 use anyhow::{Context, Result};
 use moli_core::runtime::{
@@ -39,12 +40,20 @@ pub(super) async fn fetch_with_redirect_wait(
             deadline,
             raw_document_policy,
             move |target| {
+                let navigation_grace_ms =
+                    remaining_wait_milliseconds(minimum_navigation_deadline, Instant::now());
                 Ok(if uses_redirect_wait(target.status) {
                     RendererLifecycleDecision::FollowNextDocumentOrFinish {
-                        navigation_grace_ms: remaining_wait_milliseconds(
-                            minimum_navigation_deadline,
-                            Instant::now(),
-                        ),
+                        navigation_grace_ms,
+                    }
+                } else if target.stage == moli_core::runtime::PageVmInitStage::Load
+                    && target.has_pending_credentialed_window_request
+                {
+                    RendererLifecycleDecision::FollowPendingCredentialedRequestNavigationOrFinish {
+                        navigation_grace_ms: minimum_navigation_wait
+                            .as_millis()
+                            .min(u128::from(u64::MAX))
+                            as u64,
                     }
                 } else {
                     RendererLifecycleDecision::Finish

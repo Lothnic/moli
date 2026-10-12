@@ -26,6 +26,7 @@ pub(super) struct PendingLifecycleNavigation {
     navigation_grace_ms: u64,
     navigation_deadline: Instant,
     finish_on_timeout: bool,
+    finish_when_credentialed_requests_settle: bool,
     resume_parked_page_turn: bool,
 }
 
@@ -73,6 +74,10 @@ fn capture_lifecycle_snapshot(
         requested_url,
         final_url: entry.page_vm().vm().document_runtime.document_url().clone(),
         status,
+        has_pending_credentialed_window_request: entry
+            .page_vm()
+            .vm()
+            .has_pending_credentialed_main_window_request(),
     })
 }
 
@@ -149,14 +154,24 @@ impl RendererOwnerHandle {
                 self.finalize_pending_page_creation_reply(pending).await
             }
             decision @ (RendererLifecycleDecision::FollowNextDocument { .. }
-            | RendererLifecycleDecision::FollowNextDocumentOrFinish { .. }) => {
-                let (navigation_grace_ms, finish_on_timeout) = match decision {
+            | RendererLifecycleDecision::FollowNextDocumentOrFinish { .. }
+            | RendererLifecycleDecision::FollowPendingCredentialedRequestNavigationOrFinish {
+                ..
+            }) => {
+                let (
+                    navigation_grace_ms,
+                    finish_on_timeout,
+                    finish_when_credentialed_requests_settle,
+                ) = match decision {
                     RendererLifecycleDecision::FollowNextDocument {
                         navigation_grace_ms,
-                    } => (navigation_grace_ms, false),
+                    } => (navigation_grace_ms, false, false),
                     RendererLifecycleDecision::FollowNextDocumentOrFinish {
                         navigation_grace_ms,
-                    } => (navigation_grace_ms, true),
+                    } => (navigation_grace_ms, true, false),
+                    RendererLifecycleDecision::FollowPendingCredentialedRequestNavigationOrFinish {
+                        navigation_grace_ms,
+                    } => (navigation_grace_ms, true, true),
                     RendererLifecycleDecision::Finish => unreachable!(
                         "the Finish lifecycle decision is handled by the preceding match arm"
                     ),
@@ -193,6 +208,7 @@ impl RendererOwnerHandle {
                         navigation_grace_ms,
                         navigation_deadline,
                         finish_on_timeout,
+                        finish_when_credentialed_requests_settle,
                         resume_parked_page_turn: released.resume_parked_page_turn,
                     }),
                 ))
@@ -210,6 +226,7 @@ impl RendererOwnerHandle {
             navigation_grace_ms,
             navigation_deadline,
             finish_on_timeout,
+            finish_when_credentialed_requests_settle,
             resume_parked_page_turn,
         } = wait;
         let token = pending.token;
@@ -246,6 +263,21 @@ impl RendererOwnerHandle {
                     navigation_reply_policy: NavigationReplyPolicy::FollowBeforeReply,
                 },
             );
+        }
+        if finish_when_credentialed_requests_settle
+            && !entry
+                .page_vm()
+                .vm()
+                .has_pending_credentialed_main_window_request()
+        {
+            self.restore_live_page_entry(token, entry);
+            if resume_parked_page_turn {
+                self.signal_internal_page_turn_source(
+                    token,
+                    RendererOwnerWakeSource::SchedulerContinuation,
+                );
+            }
+            return self.finalize_pending_page_creation_reply(pending).await;
         }
         if Instant::now() >= navigation_deadline {
             self.restore_live_page_entry(token, entry);
@@ -288,6 +320,7 @@ impl RendererOwnerHandle {
                     navigation_grace_ms,
                     navigation_deadline,
                     finish_on_timeout,
+                    finish_when_credentialed_requests_settle,
                     resume_parked_page_turn: false,
                 },
             )),
