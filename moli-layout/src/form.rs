@@ -7,12 +7,16 @@ use taffy::Size;
 use crate::{
     LayoutAnonymousReason, LayoutBoxId, LayoutBoxKind, LayoutDisplay, LayoutElementCategory,
     LayoutElementSemantics, LayoutError, LayoutFormControlKind, LayoutInputControlKind,
-    LayoutWorld, ResolvedLayoutStyle, replaced::ReplacedContext,
+    LayoutStyleResolver, LayoutWorld, ResolvedLayoutStyle, replaced::ReplacedContext,
 };
 
-pub(crate) fn prepare_form_controls<N>(world: &mut LayoutWorld<N>) -> Result<(), LayoutError>
+pub(crate) fn prepare_form_controls<N, R>(
+    world: &mut LayoutWorld<N>,
+    styles: &mut R,
+) -> Result<(), LayoutError>
 where
     N: Copy + Debug + Eq + Hash,
+    R: LayoutStyleResolver<N>,
 {
     let controls = (0..world.boxes.len())
         .map(LayoutBoxId::from_index)
@@ -35,10 +39,11 @@ where
                 .clip_form_control_contents();
         }
         let owner_label = world.boxes[control.index()].source_label.clone();
-        let wrapper_style = ResolvedLayoutStyle::anonymous_from(
+        let wrapper_style = styles.anonymous_style(
+            owner,
             &world.boxes[control.index()].style,
             LayoutDisplay::Block,
-        );
+        )?;
         let text_style = ResolvedLayoutStyle::text_leaf_from(&wrapper_style);
         for (row, text) in texts.into_iter().enumerate() {
             let mut wrapper = LayoutWorld::new_box(

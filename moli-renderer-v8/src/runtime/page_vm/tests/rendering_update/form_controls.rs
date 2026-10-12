@@ -134,3 +134,61 @@ return select.value + ';' + select.selectedOptions[0].label;
     .await
     .expect("select listbox rendering fixture should run");
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn focused_form_text_does_not_duplicate_control_outlines_and_shadows() {
+    run_page_vm_async_test(async move {
+        let loader =
+            crate::network::ResourceRequestClient::new(&FetchConfig::default()).expect("loader");
+        let mut page_vm = test_page_vm_with_loader_and_document_url(
+            &loader,
+            Vec::new(),
+            Url::parse("https://example.com/form-control-focus-paint.html")?,
+        );
+        // Blink's TextControlInnerEditorElement creates an inherited style;
+        // non-inherited control decoration belongs only to the outer box.
+        page_vm.vm_mut().eval(
+            r#"
+document.head.innerHTML = `<style>
+html,body{margin:0;background:white}
+input{display:block;box-sizing:border-box;width:300px;height:54px;border:0;
+      padding:10px 16px;border-radius:20px;background:#eee;color:red;font:20px/24px sans-serif;outline:none}
+input:focus{outline:2px solid blue;box-shadow:0 0 0 4px lime}
+</style>`;
+document.body.innerHTML = `<input id=field placeholder="Example">`;
+'installed'
+"#,
+        )?;
+        page_vm.vm_mut().sync_live_document_style_sources();
+        for (state, script, focused) in [
+            ("empty", "'ready'", false),
+            ("focused", "document.getElementById('field').focus();'focused'", true),
+            ("typed", "document.getElementById('field').value='moli probe';'typed'", true),
+            ("cleared", "document.getElementById('field').value='';'cleared'", true),
+            ("blurred", "document.getElementById('field').blur();'blurred'", false),
+        ] {
+            page_vm.vm_mut().eval(script)?;
+            let snapshot = page_vm.vm_mut()
+                .screenshot_layout_snapshot(moli_layout::PaintViewport::new(320, 90, 1.0))?
+                .expect("form control layout");
+            let outlines = snapshot.fragments.iter().filter_map(|fragment| match fragment {
+                moli_layout::PaintFragment::Border { rect, colors, .. }
+                    if colors.top == moli_layout::PaintColor::new(0.0, 0.0, 1.0, 1.0) => Some(rect),
+                _ => None,
+            }).collect::<Vec<_>>();
+            assert_eq!(outlines.len(), usize::from(focused), "{state}: one outline on the control");
+            if let Some(rect) = outlines.first() {
+                assert_eq!(rect.width, 304.0, "{state}: outline follows the outer border box");
+                assert_eq!(rect.height, 58.0);
+            }
+            let shadows = snapshot.fragments.iter().filter(|fragment| matches!(
+                fragment, moli_layout::PaintFragment::BoxShadow(_)
+            )).count();
+            assert_eq!(shadows, usize::from(focused), "{state}: one control shadow");
+            assert!(snapshot.fragments.iter().any(|fragment| matches!(
+                fragment, moli_layout::PaintFragment::GlyphRun(run) if run.font_size == 20.0
+            )), "{state}: text keeps the inherited font");
+        }
+        Ok::<_, anyhow::Error>(())
+    }).await.expect("form focus paint fixture should run");
+}
