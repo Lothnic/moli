@@ -24,7 +24,7 @@ on:
       browser_eval_ref:
         description: Exact browser-eval commit containing the certified runner
         required: false
-        default: "8ab0b545e3b038b58ce4353c486aeff4d6f71c02"
+        default: "2b19e144038f8a296f6475fe96b939b9887f0a0e"
 
 concurrency:
   group: ci-${{ github.event.pull_request.number || github.ref }}
@@ -976,10 +976,52 @@ jobs:
           -m moli_benchmark.sequential_navigate_ci check
           --input "$BENCHMARK_OUTPUT/comparison.json"
 
+  prepare-webfetch-comparison-inputs:
+    name: Prepare frozen Web Fetch inputs
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_webfetch_comparison == true }}
+    runs-on: [self-hosted, moli-ci]
+    timeout-minutes: 20
+    env:
+      SOURCE_DATASET_SHA256: d32ec3a78bc8326b555e2a9863bfe80ef8915aadabcb58b50b89ea4e44f0ed44
+    steps:
+      - name: Locate the exact unredacted source bundle
+        id: inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          search_root=${BROWSER_EVAL_DATA_HOME:-$HOME/.browser-eval}
+          bundle=$RUNNER_TEMP/webfetch-430-source
+          selected=
+          while IFS= read -r -d '' candidate; do
+            actual=$(sha256sum "$candidate" | cut -d' ' -f1)
+            root=$(dirname "$candidate")
+            if [[ "$actual" == "$SOURCE_DATASET_SHA256" \
+              && -d "$root/sources" && -d "$root/list-references" ]]; then
+              selected=$root
+              break
+            fi
+          done < <(find "$search_root" -type f -name dataset.json -print0)
+          test -n "$selected"
+          test -z "$(find "$selected/sources" "$selected/list-references" -type l -print -quit)"
+          mkdir -p "$bundle"
+          install -m 0644 "$selected/dataset.json" "$bundle/dataset.json"
+          cp -a "$selected/sources" "$selected/list-references" "$bundle/"
+          echo "$SOURCE_DATASET_SHA256  $bundle/dataset.json" | sha256sum --check
+          echo "bundle=$bundle" >> "$GITHUB_OUTPUT"
+
+      - name: Upload exact frozen inputs
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: webfetch-430-source-${{ env.SOURCE_DATASET_SHA256 }}
+          path: ${{ steps.inputs.outputs.bundle }}
+          compression-level: 6
+          if-no-files-found: error
+          retention-days: 1
+
   webfetch-comparison:
     name: Web Fetch · 430 cases · stable vs HEAD
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_webfetch_comparison == true }}
-    needs: [resolve-refs, build-release-head]
+    needs: [resolve-refs, build-release-head, prepare-webfetch-comparison-inputs]
     runs-on: [self-hosted, moli-ci]
     timeout-minutes: 720
     container:
@@ -988,11 +1030,7 @@ jobs:
         - moli-ci-cargo-home-1-96-1-v1:/usr/local/cargo
         - moli-ci-rustup-home-1-96-1-v1:/usr/local/rustup
     env:
-      BROWSER_EVAL_DATA_HOME: ${{ github.workspace }}/target/webfetch-comparison/data-home
-      SNAPSHOT_ID: webfetch-430-ver-a10d677a
-      SNAPSHOT_MANIFEST_URL: https://artifact-site.lexmount.cn/api/preview/jGXOOJwkdBK_/manifest.json?__artifact_share=IqGpMUYHWat-dw4n8usQttTptoPzboAo&__artifact_version=ver_a10d677a5efb4553a96ef201dae9faec
-      SNAPSHOT_MANIFEST_SHA256: 47d79b47c3692ce9f0a1028518c4363e08313b8efa363e6849650eaf6ca34e4f
-      SNAPSHOT_DATASET_SHA256: 3a83b3c4568c07739443fc130581fded07510df202a616e28b3152abb70352be
+      SOURCE_DATASET_SHA256: d32ec3a78bc8326b555e2a9863bfe80ef8915aadabcb58b50b89ea4e44f0ed44
       STABLE_ARCHIVE_URL: https://github.com/lexmount/moli/releases/download/v1.1.15/moli-x86_64-unknown-linux-gnu.tar.gz
       STABLE_ARCHIVE_SHA256: f7c9455451bffd4d3a6353431b3596c1d18ad4d9fe6725d8d4033f6fff5fa59d
       STABLE_BINARY_SHA256: 7a53cdd071ae60a2f8ff6d08107f67f6b0f1d6247a9acd970d2bcec77ff15b50
@@ -1033,14 +1071,21 @@ jobs:
       - name: Install the frozen evaluation environment
         run: uv sync --project browser-eval --frozen --extra reference-audit
 
-      - name: Restore the pinned 430-case inputs
-        run: >-
-          uv run --project browser-eval --frozen python
-          browser-eval/scripts/import_reference_inputs.py
-          --packed-manifest-url "$SNAPSHOT_MANIFEST_URL"
-          --expected-manifest-sha256 "$SNAPSHOT_MANIFEST_SHA256"
-          --expected-dataset-sha256 "$SNAPSHOT_DATASET_SHA256"
-          --snapshot-id "$SNAPSHOT_ID"
+      - name: Download the exact unredacted source bundle
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: webfetch-430-source-${{ env.SOURCE_DATASET_SHA256 }}
+          path: target/webfetch-comparison/input
+
+      - name: Verify the frozen source bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          root=$PWD/target/webfetch-comparison/input
+          echo "$SOURCE_DATASET_SHA256  $root/dataset.json" | sha256sum --check
+          test -d "$root/sources"
+          test -d "$root/list-references"
+          test -z "$(find "$root" -type l -print -quit)"
 
       - name: Pin stable and candidate executables
         shell: bash
@@ -1098,16 +1143,15 @@ jobs:
             --arg candidate_version "$candidate_version" \
             --arg stable_sha "$STABLE_BINARY_SHA256" \
             --arg browser_eval_revision "${{ inputs.browser_eval_ref }}" \
-            --arg manifest_sha "$SNAPSHOT_MANIFEST_SHA256" \
-            --arg dataset_sha "$SNAPSHOT_DATASET_SHA256" \
+            --arg dataset_sha "$SOURCE_DATASET_SHA256" \
             '{schema_version: 1, run_url: $run_url,
               candidate: {revision: $candidate_revision, binary_sha256: $candidate_sha,
                 reported_version: $candidate_version},
               stable: {release: "v1.1.15", source_revision: "eaaf6f2dbfe26bf8de33387cd3ae6c31d0931a0e",
                 binary_sha256: $stable_sha},
               runner: {repository: "lexmount/browser-eval", revision: $browser_eval_revision},
-              inputs: {manifest_sha256: $manifest_sha, dataset_sha256: $dataset_sha,
-                case_count: 430},
+              inputs: {dataset_sha256: $dataset_sha, case_count: 430,
+                source: "private CI artifact prepared from the exact frozen unredacted bundle"},
               execution: {workers: 1, call_order: "case-alternating", runs: 1,
                 caller_retries: 0, retrieval_mode: "native"}}' > "$root/run-receipt.json"
 
@@ -1116,7 +1160,7 @@ jobs:
         run: |
           set -euo pipefail
           root=$PWD/target/webfetch-comparison
-          dataset="$BROWSER_EVAL_DATA_HOME/reference-inputs/$SNAPSHOT_ID/dataset.json"
+          dataset="$root/input/dataset.json"
           case_ids=$(uv run --project browser-eval --frozen python -c \
             'import json,sys; print(",".join(row["id"] for row in json.load(open(sys.argv[1]))["cases"]))' \
             "$dataset")
@@ -1154,6 +1198,5 @@ jobs:
             target/webfetch-comparison/work
             target/webfetch-comparison/providers.json
             target/webfetch-comparison/run-receipt.json
-            target/webfetch-comparison/data-home/reference-inputs/*/import-receipt.json
           if-no-files-found: warn
           retention-days: 14
