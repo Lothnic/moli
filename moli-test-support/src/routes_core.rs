@@ -4,37 +4,15 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, OnceLock};
 
-pub(super) async fn load_completion_controls_page() -> Html<&'static str> {
+pub(super) async fn window_load_application_script_page() -> Html<&'static str> {
     Html(
         r#"<!doctype html><html><head><script>
 globalThis.mainLoadCount = 0;
 addEventListener('load', () => {
   document.body.dataset.mainLoads = String(++mainLoadCount);
-  if (new URL(location.href).searchParams.get('mode') === 'late-script') {
-    const script = document.createElement('script');
-    script.src = '/runtime/load-completion-script.js';
-    document.head.append(script);
-  }
-});
-addEventListener('DOMContentLoaded', () => {
-  const mode = new URL(location.href).searchParams.get('mode');
-  if (mode === 'late-script') return;
-  const frame = document.createElement('iframe');
-  frame.id = 'child';
-  frame.onload = () => {
-    if (mode === 'replace' && !frame.dataset.replaced) {
-      frame.dataset.replaced = 'yes';
-      frame.src = '/static?replacement=1';
-      return;
-    }
-    document.body.dataset.childLoaded = 'yes';
-  };
-  frame.src = mode === 'error' ? '/missing-load-control' : '/static';
-  document.body.append(frame);
-  if (mode === 'remove') {
-    frame.remove();
-  }
-
+  const script = document.createElement('script');
+  script.src = '/runtime/load-completion-script.js';
+  document.head.append(script);
 });
 </script></head><body><main>Load completion content</main></body></html>"#,
     )

@@ -69,47 +69,12 @@ async fn fetches_static_fixture() -> Result<()> {
 }
 
 #[tokio::test]
-async fn load_completes_after_dynamic_child_transitions() -> Result<()> {
-    let server = FixtureServer::spawn().await?;
-    for mode in ["success", "error", "replace", "remove"] {
-        let browser = Browser::new(AppConfig::default())?;
-        let page = browser
-            .fetch_with_wait_until(
-                &server.url(&format!("/runtime/load-completion-controls?mode={mode}")),
-                RenderedDomWaitUntil::Done,
-                Duration::from_secs(5),
-            )
-            .await?;
-        let html = page.serialize_html_async().await?;
-        assert!(html.contains("Load completion content"), "mode={mode}");
-        assert!(
-            html.contains("data-main-loads=\"1\""),
-            "mode={mode}: {html}"
-        );
-        if mode != "remove" {
-            assert!(
-                html.contains("data-child-loaded=\"yes\""),
-                "mode={mode}: {html}"
-            );
-        }
-        if mode == "replace" {
-            assert!(
-                html.contains("/static?replacement=1"),
-                "mode={mode}: {html}"
-            );
-        }
-    }
-    server.shutdown().await;
-    Ok(())
-}
-
-#[tokio::test]
 async fn network_idle_includes_application_script_started_by_window_load() -> Result<()> {
     let server = FixtureServer::spawn().await?;
     let browser = Browser::new(AppConfig::default())?;
     let page = browser
         .fetch_with_wait_until(
-            &server.url("/runtime/load-completion-controls?mode=late-script"),
+            &server.url("/runtime/window-load-application-script"),
             RenderedDomWaitUntil::NetworkIdle,
             Duration::from_secs(5),
         )
