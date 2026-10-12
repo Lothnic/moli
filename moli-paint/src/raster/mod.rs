@@ -1928,30 +1928,35 @@ fn normalize_radii(radii: PaintCornerRadii, rect_width: f64, rect_height: f64) -
         bottom_right: sanitize_radius(radii.bottom_right),
         bottom_left: sanitize_radius(radii.bottom_left),
     };
+    // Tailwind's rounded-full can resolve to f32::MAX. Promote before adding
+    // corner pairs so their sum cannot overflow and collapse the scale to zero.
     let factors = [
-        ratio(rect_width, f64::from(radii.top_left.x + radii.top_right.x)),
         ratio(
             rect_width,
-            f64::from(radii.bottom_left.x + radii.bottom_right.x),
+            f64::from(radii.top_left.x) + f64::from(radii.top_right.x),
+        ),
+        ratio(
+            rect_width,
+            f64::from(radii.bottom_left.x) + f64::from(radii.bottom_right.x),
         ),
         ratio(
             rect_height,
-            f64::from(radii.top_left.y + radii.bottom_left.y),
+            f64::from(radii.top_left.y) + f64::from(radii.bottom_left.y),
         ),
         ratio(
             rect_height,
-            f64::from(radii.top_right.y + radii.bottom_right.y),
+            f64::from(radii.top_right.y) + f64::from(radii.bottom_right.y),
         ),
     ];
-    let factor = factors.into_iter().fold(1.0_f64, f64::min).min(1.0) as f32;
+    let factor = factors.into_iter().fold(1.0_f64, f64::min).min(1.0);
     for radius in [
         &mut radii.top_left,
         &mut radii.top_right,
         &mut radii.bottom_right,
         &mut radii.bottom_left,
     ] {
-        radius.x *= factor;
-        radius.y *= factor;
+        radius.x = (f64::from(radius.x) * factor) as f32;
+        radius.y = (f64::from(radius.y) * factor) as f32;
     }
     radii
 }
@@ -2143,6 +2148,44 @@ mod tests {
 
     fn snapshot(width: u32, height: u32, scale: f32) -> PaintSnapshot {
         PaintSnapshot::new(PaintViewport::new(width, height, scale), PaintColor::WHITE)
+    }
+
+    #[test]
+    fn maximum_corner_radii_preserve_pill_shapes_at_normal_and_subpixel_sizes() {
+        let radii = PaintCornerRadii::all(PaintCornerRadius::new(f32::MAX, f32::MAX));
+        for (width, height) in [(120.0, 40.0), (3e-6, 1e-6)] {
+            let normalized = normalize_radii(radii, width, height);
+            for radius in [
+                normalized.top_left,
+                normalized.top_right,
+                normalized.bottom_right,
+                normalized.bottom_left,
+            ] {
+                let expected = height / 2.0;
+                assert!((f64::from(radius.x) / expected - 1.0).abs() < 1e-6);
+                assert!((f64::from(radius.y) / expected - 1.0).abs() < 1e-6);
+            }
+        }
+    }
+
+    #[test]
+    fn maximum_corner_radii_leave_pill_corners_unpainted() {
+        let mut snapshot = snapshot(120, 40, 1.0);
+        snapshot.push_fragment(PaintFragment::Fill {
+            shape: PaintShape::RoundedRect {
+                rect: PaintRect::new(0.0, 0.0, 120.0, 40.0),
+                radii: PaintCornerRadii::all(PaintCornerRadius::new(f32::MAX, f32::MAX)),
+            },
+            brush: PaintBrush::Solid(PaintColor::new(0.0, 0.0, 1.0, 1.0)),
+            transform: PaintTransform2D::IDENTITY,
+        });
+
+        let image = raster_snapshot(&snapshot).expect("pill fill should rasterize");
+        for (x, y) in [(0, 0), (119, 0), (0, 39), (119, 39)] {
+            assert_eq!(pixel(&image, x, y), [255, 255, 255, 255]);
+        }
+        assert_eq!(pixel(&image, 60, 0), [0, 0, 255, 255]);
+        assert_eq!(pixel(&image, 60, 20), [0, 0, 255, 255]);
     }
 
     #[test]

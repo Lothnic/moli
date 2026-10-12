@@ -445,6 +445,45 @@ mod tests {
     }
 
     #[test]
+    fn css_color4_gradient_stops_preserve_style_precedence_and_alpha() {
+        let svg = decode_svg_image(
+            br##"<svg xmlns="http://www.w3.org/2000/svg" width="20" height="10">
+                <defs><linearGradient id="paint">
+                    <stop offset="0" stop-color="#00ff00" style="stop-color:#ff0000;stop-color:color(display-p3 .5 0 0 / .5);stop-opacity:.5"/>
+                    <stop offset="1" stop-color="color(display-p3 0 0 1)"/>
+                </linearGradient></defs>
+                <rect width="20" height="10" fill="url(#paint)"/>
+            </svg>"##,
+        )
+        .unwrap();
+        let stops = svg.tree().linear_gradients()[0].stops();
+        assert_eq!(stops.len(), 2);
+        assert_eq!(stops[0].color(), usvg::Color::new_rgb(140, 0, 0));
+        assert!((stops[0].opacity().get() - 128.0 / 255.0 * 0.5).abs() < 1e-6);
+        assert_eq!(stops[1].color(), usvg::Color::new_rgb(0, 0, 255));
+    }
+
+    #[test]
+    fn css_color4_stylesheet_colors_preserve_current_color_inheritance() {
+        let rules = "stop { stop-color: color(display-p3 .5 0 0); } .endpoint { stop-color: currentColor; color: color(display-p3 0 0 1); }";
+        for stylesheet in [rules.to_owned(), format!("<![CDATA[{rules}]]>")] {
+            let source = format!(
+                r##"<svg xmlns="http://www.w3.org/2000/svg" width="20" height="10">
+                    <style>{stylesheet}</style>
+                    <defs><linearGradient id="paint">
+                        <stop offset="0"/><stop class="endpoint" offset="1"/>
+                    </linearGradient></defs>
+                    <rect width="20" height="10" fill="url(#paint)"/>
+                </svg>"##
+            );
+            let svg = decode_svg_image(source.as_bytes()).unwrap();
+            let stops = svg.tree().linear_gradients()[0].stops();
+            assert_eq!(stops[0].color(), usvg::Color::new_rgb(140, 0, 0));
+            assert_eq!(stops[1].color(), usvg::Color::new_rgb(0, 0, 255));
+        }
+    }
+
+    #[test]
     fn vector_work_budget_includes_definition_subtrees() {
         let svg = decode_svg_image(
             br##"<svg xmlns="http://www.w3.org/2000/svg" width="20" height="10">

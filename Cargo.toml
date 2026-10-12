@@ -114,7 +114,7 @@ stylo_atoms = { git = "https://github.com/lexmount/stylo", rev = "0c7e8baf63b671
 stylo_dom = { git = "https://github.com/lexmount/stylo", rev = "0c7e8baf63b6714e7614834fadbc09710f3c3d27" }
 stylo_static_prefs = { git = "https://github.com/lexmount/stylo", rev = "0c7e8baf63b6714e7614834fadbc09710f3c3d27" }
 stylo_traits = { git = "https://github.com/lexmount/stylo", rev = "0c7e8baf63b6714e7614834fadbc09710f3c3d27" }
-svgtypes = { git = "https://github.com/lexmount/svgtypes", branch = "feat/strict-path-numbers" }
+svgtypes = { git = "https://github.com/lexmount/svgtypes", branch = "moli" }
 taffy = { git = "https://github.com/ldm0/taffy", rev = "645bf5a49df607a8bff34ec90c5343901d04f10e" }
 
 [workspace.lints.clippy]
