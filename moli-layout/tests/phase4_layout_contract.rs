@@ -244,6 +244,100 @@ fn assert_close(actual: f32, expected: f32) {
 }
 
 #[test]
+fn grid_wrapped_max_content_item_contributes_its_constrained_height() {
+    assert_grid_intrinsic_item_contributes_constrained_height(Dimension::auto());
+}
+
+#[test]
+fn grid_intrinsic_minimum_and_percentage_maximum_contribute_constrained_height() {
+    assert_grid_intrinsic_item_contributes_constrained_height(Dimension::min_content());
+}
+
+fn assert_grid_intrinsic_item_contributes_constrained_height(min_width: Dimension) {
+    // Blink's GridLayoutAlgorithm::ContributionSizeForGridItem measures the
+    // block contribution against the resolved inline grid area, including
+    // max-width, rather than using the unconstrained max-content line height.
+    let source = Source(vec![
+        Node::element(
+            "root",
+            "div",
+            LayoutElementCategory::Generic,
+            None,
+            vec![1, 5],
+        ),
+        Node::element("grid", "div", LayoutElementCategory::Generic, None, vec![2]),
+        Node::element(
+            "measure",
+            "span",
+            LayoutElementCategory::Generic,
+            None,
+            vec![3, 4],
+        ),
+        Node::text("text", "sorts your email "),
+        Node::element(
+            "icon",
+            "span",
+            LayoutElementCategory::Generic,
+            None,
+            Vec::new(),
+        ),
+        Node::element(
+            "following",
+            "div",
+            LayoutElementCategory::Generic,
+            None,
+            Vec::new(),
+        ),
+    ]);
+    let mut styles = Styles::default();
+    styles
+        .primary
+        .insert(0, style(LayoutDisplay::Block, PaintColor::TRANSPARENT));
+    styles.primary.insert(
+        1,
+        style(LayoutDisplay::Grid, GREEN).tap_taffy(|taffy| {
+            taffy.display = taffy::Display::Grid;
+            taffy.size.width = Dimension::length(350.0);
+            taffy.grid_template_columns = vec![taffy::style_helpers::minmax(
+                taffy::style_helpers::length(0.0),
+                taffy::style_helpers::fr(1.0),
+            )];
+        }),
+    );
+    styles.primary.insert(
+        2,
+        style(LayoutDisplay::Block, PaintColor::TRANSPARENT)
+            .tap_taffy(|taffy| {
+                taffy.size.width = Dimension::max_content();
+                taffy.min_size.width = min_width;
+                taffy.max_size.width = Dimension::percent(1.0);
+                taffy.justify_self = Some(taffy::AlignSelf::CENTER);
+            })
+            .with_text_metrics(47.0, 52.0),
+    );
+    styles
+        .primary
+        .insert(4, sized(LayoutDisplay::InlineBlock, 60.0, 47.0, RED));
+    styles
+        .primary
+        .insert(5, sized(LayoutDisplay::Block, 350.0, 20.0, BLUE));
+
+    let snapshot = render(&source, &mut styles, 400, 300);
+    let grid = rect(&snapshot, GREEN);
+    let icon = rect(&snapshot, RED);
+    let following = rect(&snapshot, BLUE);
+    assert!(
+        grid.height >= 104.0,
+        "the auto row must include both wrapped lines: {grid:?}"
+    );
+    assert!(
+        icon.bottom() <= following.y,
+        "the next block must follow the wrapped icon"
+    );
+    assert_eq!(following.y, grid.bottom());
+}
+
+#[test]
 fn table_caption_tracks_rows_cells_and_common_spans_share_one_wrapper_geometry() {
     use LayoutElementCategory::Table;
     use LayoutTableRole::{BodyGroup, Caption, Cell, Row, Table as Root};

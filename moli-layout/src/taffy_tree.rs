@@ -1661,8 +1661,8 @@ where
         } else {
             inputs
         };
-        let resolved_intrinsic_inputs =
-            taffy::compute::resolve_intrinsic_width_inputs(self, node_id, intrinsic_inputs);
+        let resolved_width_inputs =
+            taffy::compute::resolve_used_width_inputs(self, node_id, intrinsic_inputs);
         let inputs = LayoutInput {
             // The float parent has already removed horizontal margins from the
             // child's available space. Restoring them above is only an adapter
@@ -1670,7 +1670,7 @@ where
             // subtraction; carrying that restored space into layout would make
             // an auto-width float stretch across its margins again. Only the
             // resolved border-box width crosses this seam.
-            known_dimensions: resolved_intrinsic_inputs.known_dimensions,
+            known_dimensions: resolved_width_inputs.inputs.known_dimensions,
             ..inputs
         };
         if self.is_viewport_taffy_node(node_id) {
