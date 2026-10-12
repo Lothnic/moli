@@ -12,6 +12,85 @@ fn dark_pixels(image: &moli_paint::RasterImage, x: u32, y: u32, width: u32, heig
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn placeholder_pseudo_style_tracks_empty_and_filled_form_controls() {
+    run_page_vm_async_test(async move {
+        let loader =
+            crate::network::ResourceRequestClient::new(&FetchConfig::default()).expect("loader");
+        let mut page_vm = test_page_vm_with_loader_and_document_url(
+            &loader,
+            Vec::new(),
+            Url::parse("https://example.com/placeholder-paint.html")?,
+        );
+        // Like Blink's TextFieldInputType::UpdatePlaceholderText, placeholder
+        // content has its own pseudo style, independently of the input value.
+        page_vm.vm_mut().eval(
+            r#"
+document.head.innerHTML = `<style>
+html,body{margin:0}
+input,textarea{display:block;width:200px;height:40px;padding:0;border:0;
+  color:red;font:20px/28px sans-serif}
+::placeholder{color:rgb(31,63,127);font-size:24px;opacity:0.5}
+</style>`;
+document.body.innerHTML=`<input placeholder=Example><input type=email placeholder=Example>
+<textarea placeholder=Example></textarea>`;
+'installed'
+"#,
+        )?;
+        page_vm.vm_mut().sync_live_document_style_sources();
+        for (value, expected_color, expected_size) in [
+            (
+                "",
+                moli_layout::PaintColor::new(31.0 / 255.0, 63.0 / 255.0, 127.0 / 255.0, 1.0),
+                24.0,
+            ),
+            (
+                "Example",
+                moli_layout::PaintColor::new(1.0, 0.0, 0.0, 1.0),
+                20.0,
+            ),
+            (
+                "",
+                moli_layout::PaintColor::new(31.0 / 255.0, 63.0 / 255.0, 127.0 / 255.0, 1.0),
+                24.0,
+            ),
+        ] {
+            page_vm.vm_mut().eval(&format!(
+                "document.querySelectorAll('input,textarea').forEach(el=>el.value={});'updated'",
+                serde_json::to_string(value)?,
+            ))?;
+            let snapshot = page_vm
+                .vm_mut()
+                .screenshot_layout_snapshot(moli_layout::PaintViewport::new(240, 180, 1.0))?
+                .expect("placeholder layout");
+            let runs = snapshot
+                .fragments
+                .iter()
+                .filter_map(|fragment| match fragment {
+                    moli_layout::PaintFragment::GlyphRun(run) => Some(run),
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(runs.len(), 3, "each control paints one label");
+            for run in runs {
+                assert_eq!(run.color, expected_color, "value={value:?}");
+                assert_eq!(run.font_size, expected_size);
+            }
+            let placeholder_layers = snapshot.fragments.iter().filter(|fragment| matches!(
+                fragment, moli_layout::PaintFragment::PushLayer { opacity, .. } if *opacity == 0.5
+            )).count();
+            assert_eq!(
+                placeholder_layers,
+                if value.is_empty() { 3 } else { 0 },
+                "placeholder opacity must not affect typed text"
+            );
+        }
+        Ok::<_, anyhow::Error>(())
+    })
+    .await
+    .expect("placeholder paint fixture should run");
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn screenshot_select_listboxes_paint_every_option_and_clip_their_contents() {
     run_page_vm_async_test(async move {
         let loader =

@@ -21,11 +21,12 @@ where
     let controls = (0..world.boxes.len())
         .map(LayoutBoxId::from_index)
         .filter_map(|id| {
-            form_control_texts(&world.boxes[id.index()].element_semantics).map(|texts| (id, texts))
+            form_control_texts(&world.boxes[id.index()].element_semantics)
+                .map(|(texts, placeholder)| (id, texts, placeholder))
         })
-        .filter(|(_, texts)| !texts.is_empty())
+        .filter(|(_, texts, _)| !texts.is_empty())
         .collect::<Vec<_>>();
-    for (control, texts) in controls {
+    for (control, texts, placeholder) in controls {
         let Some(owner) = world.boxes[control.index()].source else {
             continue;
         };
@@ -39,11 +40,22 @@ where
                 .clip_form_control_contents();
         }
         let owner_label = world.boxes[control.index()].source_label.clone();
-        let wrapper_style = styles.anonymous_style(
-            owner,
-            &world.boxes[control.index()].style,
-            LayoutDisplay::Block,
-        )?;
+        let placeholder_style = if placeholder {
+            styles.placeholder_style(owner)?
+        } else {
+            None
+        };
+        let wrapper_style = if let Some(style) = placeholder_style {
+            let mut style = style.into_style();
+            style.force_layout_display(LayoutDisplay::Block);
+            style
+        } else {
+            styles.anonymous_style(
+                owner,
+                &world.boxes[control.index()].style,
+                LayoutDisplay::Block,
+            )?
+        };
         let text_style = ResolvedLayoutStyle::text_leaf_from(&wrapper_style);
         for (row, text) in texts.into_iter().enumerate() {
             let mut wrapper = LayoutWorld::new_box(
@@ -79,7 +91,7 @@ where
     Ok(())
 }
 
-fn form_control_texts(semantics: &Option<LayoutElementSemantics>) -> Option<Vec<Arc<str>>> {
+fn form_control_texts(semantics: &Option<LayoutElementSemantics>) -> Option<(Vec<Arc<str>>, bool)> {
     let semantics = semantics.as_ref()?;
     let LayoutElementCategory::FormControl(kind) = semantics.category else {
         return None;
@@ -94,8 +106,23 @@ fn form_control_texts(semantics: &Option<LayoutElementSemantics>) -> Option<Vec<
         .cloned()
         .unwrap_or_default();
     if semantics.is_select_listbox() {
-        return Some(data.option_labels);
+        return Some((data.option_labels, false));
     }
+    let placeholder = data.value.is_empty()
+        && !data.placeholder.is_empty()
+        && matches!(
+            kind,
+            LayoutFormControlKind::TextArea
+                | LayoutFormControlKind::Input(
+                    LayoutInputControlKind::Text
+                        | LayoutInputControlKind::Search
+                        | LayoutInputControlKind::Email
+                        | LayoutInputControlKind::Telephone
+                        | LayoutInputControlKind::Password
+                        | LayoutInputControlKind::Url
+                        | LayoutInputControlKind::Number
+                )
+        );
     let text = match kind {
         LayoutFormControlKind::Input(input) => match input {
             LayoutInputControlKind::Button => data.value.to_string(),
@@ -161,11 +188,14 @@ fn form_control_texts(semantics: &Option<LayoutElementSemantics>) -> Option<Vec<
         | LayoutFormControlKind::Progress
         | LayoutFormControlKind::Meter => String::new(),
     };
-    Some(if text.is_empty() {
-        Vec::new()
-    } else {
-        vec![text.into()]
-    })
+    Some((
+        if text.is_empty() {
+            Vec::new()
+        } else {
+            vec![text.into()]
+        },
+        placeholder,
+    ))
 }
 
 pub(crate) fn select_row_height(font_size: f32, line_height: f32) -> f32 {
