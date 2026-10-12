@@ -983,30 +983,62 @@ jobs:
     timeout-minutes: 20
     env:
       SOURCE_DATASET_SHA256: d32ec3a78bc8326b555e2a9863bfe80ef8915aadabcb58b50b89ea4e44f0ed44
+      SOURCE_RELEASE_TAG: webfetch-ci-input-d32ec3a7
+      SOURCE_ARCHIVE_NAME: webfetch-430-source-d32ec3a7.tar.gz
+      SOURCE_ARCHIVE_SHA256: 7f9f1f884d80bd0925f3f07229cd55a84593c82418b4d6b08a7bb95655cad6d0
     steps:
-      - name: Locate the exact unredacted source bundle
+      - name: Download the private hash-bound source archive
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        env:
+          ARCHIVE_PATH: ${{ runner.temp }}/${{ env.SOURCE_ARCHIVE_NAME }}
+        with:
+          script: |
+            const releases = await github.paginate(
+              github.rest.repos.listReleases,
+              {owner: context.repo.owner, repo: context.repo.repo, per_page: 100},
+            );
+            const release = releases.find(item => item.tag_name === process.env.SOURCE_RELEASE_TAG);
+            if (!release || !release.draft) {
+              core.setFailed(`Missing private draft release ${process.env.SOURCE_RELEASE_TAG}`);
+              return;
+            }
+            const asset = release.assets.find(item => item.name === process.env.SOURCE_ARCHIVE_NAME);
+            if (!asset) {
+              core.setFailed(`Missing release asset ${process.env.SOURCE_ARCHIVE_NAME}`);
+              return;
+            }
+            const response = await github.request(
+              'GET /repos/{owner}/{repo}/releases/assets/{asset_id}',
+              {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                asset_id: asset.id,
+                headers: {accept: 'application/octet-stream'},
+              },
+            );
+            const bytes = response.data instanceof ArrayBuffer
+              ? Buffer.from(response.data)
+              : Buffer.from(response.data);
+            require('fs').writeFileSync(process.env.ARCHIVE_PATH, bytes);
+
+      - name: Verify and unpack the exact source bundle
         id: inputs
         shell: bash
         run: |
           set -euo pipefail
-          search_root=${BROWSER_EVAL_DATA_HOME:-$HOME/.browser-eval}
+          archive=$RUNNER_TEMP/$SOURCE_ARCHIVE_NAME
           bundle=$RUNNER_TEMP/webfetch-430-source
-          selected=
-          while IFS= read -r -d '' candidate; do
-            actual=$(sha256sum "$candidate" | cut -d' ' -f1)
-            root=$(dirname "$candidate")
-            if [[ "$actual" == "$SOURCE_DATASET_SHA256" \
-              && -d "$root/sources" && -d "$root/list-references" ]]; then
-              selected=$root
-              break
-            fi
-          done < <(find "$search_root" -type f -name dataset.json -print0)
-          test -n "$selected"
-          test -z "$(find "$selected/sources" "$selected/list-references" -type l -print -quit)"
+          echo "$SOURCE_ARCHIVE_SHA256  $archive" | sha256sum --check
+          if tar -tzf "$archive" | grep -Eq '(^/|(^|/)\.\.(/|$))'; then
+            echo "Source archive contains an unsafe path" >&2
+            exit 1
+          fi
           mkdir -p "$bundle"
-          install -m 0644 "$selected/dataset.json" "$bundle/dataset.json"
-          cp -a "$selected/sources" "$selected/list-references" "$bundle/"
+          tar -xzf "$archive" -C "$bundle"
           echo "$SOURCE_DATASET_SHA256  $bundle/dataset.json" | sha256sum --check
+          test -d "$bundle/sources"
+          test -d "$bundle/list-references"
+          test -z "$(find "$bundle" -type l -print -quit)"
           echo "bundle=$bundle" >> "$GITHUB_OUTPUT"
 
       - name: Upload exact frozen inputs
