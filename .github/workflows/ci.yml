@@ -24,7 +24,7 @@ on:
       browser_eval_ref:
         description: Exact browser-eval commit containing the certified runner
         required: false
-        default: "43d30cb3106cf2ef4e5a8c308503f0fe59f2ad4b"
+        default: "8ab0b545e3b038b58ce4353c486aeff4d6f71c02"
 
 concurrency:
   group: ci-${{ github.event.pull_request.number || github.ref }}
@@ -1072,7 +1072,7 @@ jobs:
             --arg candidate_sha "$candidate_sha" \
             --arg candidate_version "$candidate_version" \
             '{schema_version: 1, providers: {
-              "moli-1.1.15": {
+              "moli": {
                 type: "moli_webfetch", label: "Moli 1.1.15",
                 binary: $stable, expected_reported_version: $stable_version,
                 expected_binary_sha256: $stable_sha,
@@ -1126,7 +1126,7 @@ jobs:
             --dataset "$dataset" \
             --output "$root/evidence" \
             --work-root "$root/work" \
-            --providers moli-1.1.15,moli-stack-1428 \
+            --providers moli,moli-stack-1428 \
             --case-ids "$case_ids" \
             --provider-config "$root/providers.json" \
             --workers 1 \
