@@ -5244,6 +5244,9 @@ pub enum RendererPageCommand {
     SetNetworkOffline(bool),
     SetBypassServiceWorker(bool),
     SetBlockedUrlPatterns(Vec<String>),
+    /// Consume the current Document's already queued first-frame work and its
+    /// zero-delay follow-up chain within a bounded post-load window.
+    CompletePostLoadReadyTasks,
     MsToNextTimeout,
     #[cfg(debug_assertions)]
     #[doc(hidden)]

@@ -498,6 +498,36 @@ async fn fetch_done_does_not_wait_for_future_interval_timers() -> Result<()> {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn fetch_load_consumes_one_queued_render_turn_without_waiting_for_background_timers()
+-> Result<()> {
+    let server = FixtureServer::spawn().await?;
+    let browser = Browser::new(AppConfig::default())?;
+
+    let page = tokio::time::timeout(
+        Duration::from_secs(1),
+        browser.fetch_with_wait_until(
+            &server.url("/runtime/post-load-ready-turn"),
+            RenderedDomWaitUntil::Load,
+            Duration::from_millis(750),
+        ),
+    )
+    .await
+    .context("load should settle the queued render turn without waiting for background timers")??;
+
+    let html = page.serialize_html_async().await?;
+    assert!(
+        html.contains("<table id=\"live-demo\"><tbody><tr><td>ready</td></tr></tbody></table>"),
+        "the post-load rAF, zero-delay task, and microtask chain should reach the snapshot: {html}"
+    );
+    assert!(
+        !html.contains("data-fallback=\"ran\""),
+        "the five-second fallback must stay pending: {html}"
+    );
+    server.shutdown().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn fetch_allow_http_error_materializes_error_status_pages() -> Result<()> {
     let server = FixtureServer::spawn().await?;
     let browser = Browser::new(AppConfig::default())?;
