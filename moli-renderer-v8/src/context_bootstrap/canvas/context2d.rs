@@ -1,19 +1,13 @@
-use super::backing_store::{
-    canvas_like_pixels_copy, canvas_owner_from_context, with_canvas_like_pixels_mut,
-};
+use super::backing_store::{canvas_owner_from_context, with_canvas_like_pixels_mut};
 use super::helpers::{canonical_canvas_fill_style, canvas_unrestricted_double_arg};
 use super::state::canvas_path_state;
 use super::*;
-use crate::context_bootstrap::image_data::{
-    build_image_data_object, build_image_data_object_with_bytes, image_data_bytes_from_object,
-    image_data_dimensions_from_object,
-};
 use crate::util::{get_private_value, set_private_value};
 use crate::web_api_interfaces;
 use crate::webidl;
 use moli_canvas::{
-    DEFAULT_FILL_STYLE, DEFAULT_FONT, blit_image_data, byte_len, draw_text, extract_image_data,
-    fill_style_rgba, measure_text_width, normalize_rect as canvas_normalize_rect, paint_rect,
+    DEFAULT_FILL_STYLE, DEFAULT_FONT, draw_text, fill_style_rgba, measure_text_width,
+    normalize_rect as canvas_normalize_rect, paint_rect,
 };
 use moli_layout::{
     PaintBrush, PaintColor, PaintFragment, PaintLineCap, PaintLineJoin, PaintShape, PaintSnapshot,
@@ -167,58 +161,6 @@ struct CanvasGradientAddColorStopArgs {
     offset: f64,
     #[webidl(required)]
     _color: String,
-}
-
-#[derive(webidl::WebIdlArgs)]
-#[webidl(prefix = "CanvasRenderingContext2D.createImageData")]
-struct CanvasContextCreateImageDataSizeArgs {
-    #[webidl(required, converter = "enforce_range_long")]
-    sw: i32,
-    #[webidl(required, converter = "enforce_range_long")]
-    sh: i32,
-}
-
-#[derive(webidl::WebIdlArgs)]
-#[webidl(prefix = "CanvasRenderingContext2D.getImageData")]
-struct CanvasContextGetImageDataArgs {
-    #[webidl(required, converter = "enforce_range_long")]
-    sx: i32,
-    #[webidl(required, converter = "enforce_range_long")]
-    sy: i32,
-    #[webidl(required, converter = "enforce_range_long")]
-    sw: i32,
-    #[webidl(required, converter = "enforce_range_long")]
-    sh: i32,
-}
-
-#[derive(webidl::WebIdlArgs)]
-#[webidl(prefix = "CanvasRenderingContext2D.putImageData")]
-struct CanvasContextPutImageDataArgs<'s> {
-    #[webidl(required)]
-    image_data: v8::Local<'s, v8::Object>,
-    #[webidl(required, converter = "enforce_range_long")]
-    dx: i32,
-    #[webidl(required, converter = "enforce_range_long")]
-    dy: i32,
-}
-
-#[derive(webidl::WebIdlArgs)]
-#[webidl(prefix = "CanvasRenderingContext2D.putImageData")]
-struct CanvasContextPutImageDataDirtyArgs<'s> {
-    #[webidl(required)]
-    image_data: v8::Local<'s, v8::Object>,
-    #[webidl(required, converter = "enforce_range_long")]
-    dx: i32,
-    #[webidl(required, converter = "enforce_range_long")]
-    dy: i32,
-    #[webidl(required, converter = "enforce_range_long", name = "dirtyX")]
-    dirty_x: i32,
-    #[webidl(required, converter = "enforce_range_long", name = "dirtyY")]
-    dirty_y: i32,
-    #[webidl(required, converter = "enforce_range_long", name = "dirtyWidth")]
-    dirty_width: i32,
-    #[webidl(required, converter = "enforce_range_long", name = "dirtyHeight")]
-    dirty_height: i32,
 }
 
 #[derive(webidl::WebIdlArgs)]
@@ -1896,213 +1838,6 @@ fn canvas_context_relevant_context<'s>(
         .or_else(|| context.get_creation_context(scope))
 }
 
-pub(crate) fn canvas_context_create_image_data_callback<'s>(
-    scope: &mut v8::PinScope<'s, '_>,
-    args: v8::FunctionCallbackArguments<'s>,
-    mut rv: v8::ReturnValue<'_, v8::Value>,
-) {
-    let dimensions = if let Ok(object) = v8::Local::<v8::Object>::try_from(args.get(0)) {
-        image_data_dimensions_from_object(scope, object)
-            .or_else(|| image_data_width_height_from_webidl_args(scope, &args))
-    } else {
-        image_data_width_height_from_webidl_args(scope, &args)
-    };
-    let Some((width, height)) = dimensions else {
-        rv.set(v8::undefined(scope).into());
-        return;
-    };
-    let relevant_context = canvas_context_relevant_context(scope, args.this())
-        .unwrap_or_else(|| scope.get_current_context());
-    let target_scope = &mut v8::ContextScope::new(scope, relevant_context);
-    if let Some(image_data) = build_image_data_object(target_scope, width, height) {
-        rv.set(image_data.into());
-    } else {
-        rv.set(v8::undefined(target_scope).into());
-    }
-}
-
-pub(crate) fn canvas_context_put_image_data_callback<'s>(
-    scope: &mut v8::PinScope<'s, '_>,
-    args: v8::FunctionCallbackArguments<'s>,
-    _rv: v8::ReturnValue<'_, v8::Value>,
-) {
-    let Some(canvas) = canvas_owner_from_context(scope, args.this()) else {
-        return;
-    };
-    let (image_data, dx, dy, dirty_rect) = if args.length() >= 7 {
-        let Some(parsed) = webidl::parse_args::<CanvasContextPutImageDataDirtyArgs>(scope, &args)
-        else {
-            return;
-        };
-        let Some(dirty_rect) = normalized_image_data_dirty_rect(
-            scope,
-            parsed.dirty_x,
-            parsed.dirty_y,
-            parsed.dirty_width,
-            parsed.dirty_height,
-        ) else {
-            return;
-        };
-        (parsed.image_data, parsed.dx, parsed.dy, Some(dirty_rect))
-    } else {
-        let Some(parsed) = webidl::parse_args::<CanvasContextPutImageDataArgs>(scope, &args) else {
-            return;
-        };
-        (parsed.image_data, parsed.dx, parsed.dy, None)
-    };
-    let Some((source_width, source_height)) = image_data_dimensions_from_object(scope, image_data)
-    else {
-        throw_type_error(
-            scope,
-            "CanvasRenderingContext2D.putImageData: argument 1 is not an ImageData object.",
-        );
-        return;
-    };
-    let Some(bytes) = image_data_bytes_from_object(scope, image_data) else {
-        return;
-    };
-
-    let (dirty_x, dirty_y, dirty_width, dirty_height) = if args.length() >= 7 {
-        dirty_rect.unwrap_or((0, 0, 0, 0))
-    } else {
-        (0, 0, source_width as i32, source_height as i32)
-    };
-
-    let _ = with_canvas_like_pixels_mut(scope, canvas, |pixels, width, height| {
-        blit_image_data(
-            pixels,
-            width,
-            height,
-            &bytes,
-            source_width,
-            source_height,
-            dx,
-            dy,
-            dirty_x,
-            dirty_y,
-            dirty_width,
-            dirty_height,
-        );
-    });
-}
-
-pub(crate) fn canvas_context_get_image_data_callback<'s>(
-    scope: &mut v8::PinScope<'s, '_>,
-    args: v8::FunctionCallbackArguments<'s>,
-    mut rv: v8::ReturnValue<'_, v8::Value>,
-) {
-    let Some(parsed) = webidl::parse_args::<CanvasContextGetImageDataArgs>(scope, &args) else {
-        rv.set(v8::undefined(scope).into());
-        return;
-    };
-    let Some(width) = positive_image_data_dimension_from_long(scope, parsed.sw) else {
-        rv.set(v8::undefined(scope).into());
-        return;
-    };
-    let Some(height) = positive_image_data_dimension_from_long(scope, parsed.sh) else {
-        rv.set(v8::undefined(scope).into());
-        return;
-    };
-    if byte_len(width, height).is_none() {
-        webidl::throw_index_size_error(scope);
-        rv.set(v8::undefined(scope).into());
-        return;
-    }
-    let source_x = parsed.sx;
-    let source_y = parsed.sy;
-    let bytes = if let Some(canvas) = canvas_owner_from_context(scope, args.this()) {
-        canvas_like_pixels_copy(scope, canvas)
-            .map(|(pixels, canvas_width, canvas_height)| {
-                extract_image_data(
-                    &pixels,
-                    canvas_width,
-                    canvas_height,
-                    source_x,
-                    source_y,
-                    width,
-                    height,
-                )
-            })
-            .unwrap_or_else(|| blank_image_data(width, height))
-    } else {
-        blank_image_data(width, height)
-    };
-    let relevant_context = canvas_context_relevant_context(scope, args.this())
-        .unwrap_or_else(|| scope.get_current_context());
-    let target_scope = &mut v8::ContextScope::new(scope, relevant_context);
-    let image_data = build_image_data_object_with_bytes(target_scope, width, height, bytes)
-        .or_else(|| build_image_data_object(target_scope, width, height));
-    let Some(image_data) = image_data else {
-        rv.set(v8::undefined(target_scope).into());
-        return;
-    };
-    rv.set(image_data.into());
-}
-
-fn image_data_width_height_from_webidl_args<'s>(
-    scope: &mut v8::PinScope<'s, '_>,
-    args: &v8::FunctionCallbackArguments<'s>,
-) -> Option<(u32, u32)> {
-    let parsed = webidl::parse_args::<CanvasContextCreateImageDataSizeArgs>(scope, args)?;
-    let width = image_data_dimension_from_long(scope, parsed.sw)?;
-    let height = image_data_dimension_from_long(scope, parsed.sh)?;
-    if byte_len(width, height).is_none() {
-        webidl::throw_index_size_error(scope);
-        return None;
-    }
-    Some((width, height))
-}
-
-fn image_data_dimension_from_long(scope: &mut v8::PinScope<'_, '_>, value: i32) -> Option<u32> {
-    if value == 0 || value == i32::MIN {
-        webidl::throw_index_size_error(scope);
-        return None;
-    }
-    Some(value.unsigned_abs())
-}
-
-fn positive_image_data_dimension_from_long(
-    scope: &mut v8::PinScope<'_, '_>,
-    value: i32,
-) -> Option<u32> {
-    if value <= 0 {
-        webidl::throw_index_size_error(scope);
-        return None;
-    }
-    Some(value as u32)
-}
-
-fn normalized_image_data_dirty_rect(
-    scope: &mut v8::PinScope<'_, '_>,
-    dirty_x: i32,
-    dirty_y: i32,
-    dirty_width: i32,
-    dirty_height: i32,
-) -> Option<(i32, i32, i32, i32)> {
-    let (dirty_x, dirty_width) = normalized_dirty_axis(scope, dirty_x, dirty_width)?;
-    let (dirty_y, dirty_height) = normalized_dirty_axis(scope, dirty_y, dirty_height)?;
-    Some((dirty_x, dirty_y, dirty_width, dirty_height))
-}
-
-fn normalized_dirty_axis(
-    scope: &mut v8::PinScope<'_, '_>,
-    start: i32,
-    span: i32,
-) -> Option<(i32, i32)> {
-    if span >= 0 {
-        return Some((start, span));
-    }
-    if span == i32::MIN {
-        webidl::throw_index_size_error(scope);
-        return None;
-    }
-    let start = start.checked_add(span).or_else(|| {
-        webidl::throw_index_size_error(scope);
-        None
-    })?;
-    Some((start, -span))
-}
-
 fn normalized_rect<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     args: &v8::FunctionCallbackArguments<'s>,
@@ -2116,9 +1851,8 @@ fn normalized_rect<'s>(
     )
 }
 
-fn blank_image_data(width: u32, height: u32) -> Vec<u8> {
-    vec![0; byte_len(width, height).unwrap_or(0)]
-}
-
 mod draw_image;
 pub(crate) use draw_image::install_canvas_draw_image_bindings;
+
+mod pixel_manipulation;
+pub(crate) use pixel_manipulation::install_canvas_pixel_bindings;

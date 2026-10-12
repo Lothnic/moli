@@ -17,8 +17,8 @@ pub use pixel::{
 pub use rect::{canonicalize_fill_style, fill_style_rgba, normalize_rect, paint_rect};
 pub use text::{draw_text, measure_text_width};
 pub use types::{
-    CanvasRect, DEFAULT_FILL_STYLE, DEFAULT_FONT, DrawImageBlit, MAX_RGBA8_BYTE_LENGTH, Rgba8Rect,
-    ScaleFilter, byte_len,
+    CanvasRect, DEFAULT_FILL_STYLE, DEFAULT_FONT, DrawImageBlit, ImageDataRect,
+    MAX_RGBA8_BYTE_LENGTH, Rgba8Rect, ScaleFilter, byte_len,
 };
 
 #[cfg(test)]
@@ -264,7 +264,7 @@ mod tests {
         .expect("copy should fit");
 
         assert_eq!(
-            extract_image_data(&dest, 4, 3, 1, 1, 2, 2),
+            extract_image_data(&dest, 4, 3, ImageDataRect::new(1, 1, 2, 2)),
             vec![
                 2, 0, 0, 255, 3, 0, 0, 255, //
                 5, 0, 0, 255, 6, 0, 0, 255,
@@ -404,20 +404,71 @@ mod tests {
             255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 255, 255, 0, 255,
         ];
 
-        blit_image_data(&mut dst, 2, 2, &src, 2, 2, 0, 0, 0, 0, 2, 2);
-        assert_eq!(extract_image_data(&dst, 2, 2, 0, 0, 2, 2), src);
+        blit_image_data(
+            &mut dst,
+            2,
+            2,
+            &src,
+            2,
+            2,
+            0,
+            0,
+            ImageDataRect::new(0, 0, 2, 2),
+        );
+        assert_eq!(
+            extract_image_data(&dst, 2, 2, ImageDataRect::new(0, 0, 2, 2)),
+            src
+        );
     }
 
     #[test]
     fn extract_image_data_out_of_bounds_fills_transparent_black() {
         let pixels = vec![255, 0, 0, 255];
         assert_eq!(
-            extract_image_data(&pixels, 1, 1, -1, -1, 2, 2),
+            extract_image_data(&pixels, 1, 1, ImageDataRect::new(-1, -1, 2, 2)),
             vec![
                 0, 0, 0, 0, 0, 0, 0, 0, //
                 0, 0, 0, 0, 255, 0, 0, 255,
             ]
         );
+    }
+
+    #[test]
+    fn image_data_extreme_rectangles_clip_without_wrapping() {
+        let source = vec![255, 0, 0, 255, 0, 255, 0, 255];
+        let mut target = vec![0; 8];
+        blit_image_data(
+            &mut target,
+            2,
+            1,
+            &source,
+            2,
+            1,
+            0,
+            0,
+            ImageDataRect::new(1, 0, i32::MIN, 1),
+        );
+        assert_eq!(target, [255, 0, 0, 255, 0, 0, 0, 0]);
+        assert_eq!(
+            extract_image_data(&source, 2, 1, ImageDataRect::new(2, 1, -2, -1)),
+            source,
+        );
+        assert_eq!(
+            extract_image_data(&source, 2, 1, ImageDataRect::new(i32::MIN, 0, -2, 1)),
+            [0; 8],
+        );
+        blit_image_data(
+            &mut target,
+            2,
+            1,
+            &source,
+            2,
+            1,
+            i32::MAX,
+            0,
+            ImageDataRect::new(i32::MIN, 0, i32::MIN, 1),
+        );
+        assert_eq!(target, [255, 0, 0, 255, 0, 0, 0, 0]);
     }
 
     #[test]
@@ -428,17 +479,37 @@ mod tests {
         ];
 
         let mut dst = vec![0; byte_len(2, 2).expect("buffer len")];
-        blit_image_data(&mut dst, 2, 2, &source, 2, 2, 0, 0, 1, 0, 1, 2);
+        blit_image_data(
+            &mut dst,
+            2,
+            2,
+            &source,
+            2,
+            2,
+            0,
+            0,
+            ImageDataRect::new(1, 0, 1, 2),
+        );
         assert_eq!(
             dst,
             vec![
-                0, 255, 0, 255, 0, 0, 0, 0, //
-                255, 255, 0, 255, 0, 0, 0, 0,
+                0, 0, 0, 0, 0, 255, 0, 255, //
+                0, 0, 0, 0, 255, 255, 0, 255,
             ]
         );
 
         let mut clipped = vec![0; byte_len(1, 2).expect("buffer len")];
-        blit_image_data(&mut clipped, 1, 2, &source, 2, 2, -1, 0, 0, 0, 2, 2);
+        blit_image_data(
+            &mut clipped,
+            1,
+            2,
+            &source,
+            2,
+            2,
+            -1,
+            0,
+            ImageDataRect::new(0, 0, 2, 2),
+        );
         assert_eq!(
             clipped,
             vec![
@@ -457,10 +528,7 @@ mod tests {
             2,
             -1,
             0,
-            0,
-            0,
-            2,
-            2,
+            ImageDataRect::new(0, 0, 2, 2),
         );
         assert_eq!(
             negative_destination,
@@ -488,7 +556,7 @@ mod tests {
             2,
             DrawImageBlit::new(0.0, 0.0, 2.0, 2.0, 1.0, 1.0, 2.0, 2.0).expect("valid blit"),
         );
-        let scaled_crop = extract_image_data(&scaled, 4, 4, 1, 1, 2, 2);
+        let scaled_crop = extract_image_data(&scaled, 4, 4, ImageDataRect::new(1, 1, 2, 2));
         assert_eq!(
             scaled_crop,
             vec![
