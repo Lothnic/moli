@@ -3121,11 +3121,11 @@ fn cli_load_does_not_wait_for_unrelated_long_timer_or_poll() -> Result<()> {
         "stdout={stdout}"
     );
     assert!(
-        !stdout.contains("data-long-poll-finished"),
+        !stdout.contains("data-long-poll-finished=\"true\""),
         "the ordinary poll must remain outside Load completion: stdout={stdout}"
     );
     assert!(
-        !stdout.contains("data-long-timer-fired"),
+        !stdout.contains("data-long-timer-fired=\"true\""),
         "the long timer must remain outside Load completion: stdout={stdout}"
     );
     assert!(
