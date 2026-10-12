@@ -13,10 +13,13 @@ The dependency uses a fixed Git revision with only `raster-images` enabled;
 own `pdf-writer` Git pin (`fdf0901`) is recorded in `Cargo.lock`. This revision
 requires Rust 1.92; the repository toolchain is 1.96.1. Krilla and the adapter now
 share `skrifa` 0.44 with Parley, Vello and usvg. The adapter uses `skrifa::raw`
-instead of declaring a separate `read-fonts` dependency. The `subsetter` 0.2.6
-dependency still brings `skrifa` 0.42, `read-fonts` 0.39 and `font-types` 0.11:
-its upstream `main` also requires those versions, so switching Krilla to Git
-does not remove that older stack. Krilla's `imagesize` 0.14 and `base64` 0.22
+instead of declaring a separate `read-fonts` dependency. Moli's root
+`[patch.crates-io]` also aligns `subsetter` with `skrifa` 0.44 and `write-fonts`
+0.50, so subsetting shares `read-fonts` 0.41 and `font-types` 0.12 with the
+rendering stack. The patch pins our [subsetter dependency update](https://github.com/lexmount/subsetter/commit/8d3815245835af309559c3b4a872d6a0a54913a9)
+and can be removed when upstream publishes compatible fontations dependencies.
+The dependency update preserves the subsetting algorithm, variable fonts and
+CFF2 support. Krilla's `imagesize` 0.14 and `base64` 0.22
 also coexist with usvg's 0.15 and 0.23; their version requirements do not overlap.
 
 The PDF adapter embeds and subsets fonts, using Parley's existing glyph positions
@@ -111,13 +114,25 @@ samples differed by at most one 8-bit channel value from the raster screenshot.
 The Git revision also passed the real CLI/MuPDF checks and CDP PDF smoke group;
 its rendered visual sample was pixel-identical to the crates.io baseline.
 
-The release measurements below were taken with crates.io Krilla 0.8.2 before
-the Git switch; they have not been remeasured for the pinned revision.
-The repository release profile produced a 158,402,744-byte binary (151.06 MiB,
-not stripped by the profile). Compared with the previous lockfile, the production
-paint dependency closure adds 11 crate versions, plus a bitflags upgrade required
-by the test parser. A same-revision baseline binary was not built, so these
-measurements do not establish the PDF backend's binary-size delta.
+Release sizes measured with Rust 1.96.1 on Linux x86_64, using
+`cargo build -p moli --release --locked` with the repository's unchanged release
+profile and default features. Packaging used `scripts/release.py` with version
+1.1.16, which strips the binary and creates a gzip level-9 archive:
+
+| Revision | Release binary bytes | Stripped binary bytes | Archive bytes |
+| --- | ---: | ---: | ---: |
+| Before native PDF (`d9928760`) | 156,266,960 | 107,667,480 | 43,425,106 |
+| Native PDF, official Krilla Git (`7a52ca98`) | 158,167,208 | 109,363,224 | 44,157,871 |
+| Same Krilla, root `subsetter` patch (`8d38152`) | 157,856,280 | 109,084,696 | 44,031,505 |
+
+The subsetter dependency update removes the duplicate `skrifa`, `read-fonts`
+and `font-types` versions. It saves 272 KiB in the stripped binary and 126,366
+bytes in the archive. The stripped binary's native-PDF increase relative to
+`d9928760` is now 1.35 MiB (1.32%), down from 1.62 MiB. The four CLI reader
+samples below (82 pages total) produced byte-identical PDFs before and after
+the dependency update; their extracted text and rendered pixels also matched.
+The updated subsetter passed all 174 tests, and 14 static, variable, CFF and
+CFF2 font-subset comparisons were byte-identical to the registry version.
 
 One observed release CLI run with local data URLs and fixed fonts:
 
