@@ -653,6 +653,13 @@ where
         Ok(None)
     }
 
+    fn placeholder_style(
+        &mut self,
+        _node: N,
+    ) -> Result<Option<ResolvedLayoutPseudoStyle>, LayoutError> {
+        Ok(None)
+    }
+
     fn anonymous_style(
         &mut self,
         _owner: N,

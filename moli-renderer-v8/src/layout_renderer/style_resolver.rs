@@ -204,6 +204,19 @@ impl LayoutStyleResolver<DomHandle> for NativeLayoutStyleResolver<'_> {
         Ok(resolved)
     }
 
+    fn placeholder_style(
+        &mut self,
+        node: DomHandle,
+    ) -> Result<Option<ResolvedLayoutPseudoStyle>, LayoutError> {
+        Ok(self
+            .reads
+            .read(node)
+            .pseudo_computed_values("placeholder")
+            .map(|computed| {
+                ResolvedLayoutPseudoStyle::new(ResolvedLayoutStyle::from_stylo(computed))
+            }))
+    }
+
     fn anonymous_style(
         &mut self,
         owner: DomHandle,
