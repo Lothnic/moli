@@ -170,6 +170,42 @@ pub fn is_webassembly_mime(input: &str) -> bool {
     mime_essence(input).is_some_and(|mime| mime == "application/wasm")
 }
 
+pub(crate) fn is_office_document_mime_essence(input: &str) -> bool {
+    matches!(
+        input,
+        "application/msexcel"
+            | "application/mspowerpoint"
+            | "application/msword"
+            | "application/msword-template"
+            | "application/vnd.ms-excel"
+            | "application/vnd.ms-excel.addin.macroenabled.12"
+            | "application/vnd.ms-excel.sheet.binary.macroenabled.12"
+            | "application/vnd.ms-excel.sheet.macroenabled.12"
+            | "application/vnd.ms-excel.template.macroenabled.12"
+            | "application/vnd.ms-powerpoint"
+            | "application/vnd.ms-powerpoint.addin.macroenabled.12"
+            | "application/vnd.ms-powerpoint.presentation.macroenabled.12"
+            | "application/vnd.ms-powerpoint.slideshow.macroenabled.12"
+            | "application/vnd.ms-powerpoint.template.macroenabled.12"
+            | "application/vnd.ms-word"
+            | "application/vnd.ms-word.document.12"
+            | "application/vnd.ms-word.document.macroenabled.12"
+            | "application/vnd.ms-word.template.macroenabled.12"
+            | "application/vnd.msword"
+            | "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+            | "application/vnd.openxmlformats-officedocument.presentationml.slideshow"
+            | "application/vnd.openxmlformats-officedocument.presentationml.template"
+            | "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            | "application/vnd.openxmlformats-officedocument.spreadsheetml.template"
+            | "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            | "application/vnd.openxmlformats-officedocument.wordprocessingml.template"
+            | "application/vnd.presentation-openxml"
+            | "application/vnd.presentation-openxmlm"
+            | "application/vnd.spreadsheet-openxml"
+            | "application/vnd.wordprocessing-openxml"
+    )
+}
+
 /// Returns whether a navigation response can be represented by Moli's
 /// lightweight Document surface. Raw main-resource handling is deliberately
 /// broader: binary responses can be returned to a caller without becoming a
@@ -202,6 +238,7 @@ pub fn is_binary_document_mime_type(input: &str) -> bool {
         || is_font_mime_essence(&essence)
         || is_image_mime_essence(&essence)
         || is_video_mime_essence(&essence)
+        || is_office_document_mime_essence(&essence)
         || matches!(
             essence.as_str(),
             "application/gzip"

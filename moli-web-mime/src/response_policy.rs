@@ -1,6 +1,7 @@
 use crate::classification::{
     is_audio_mime_essence, is_css_mime, is_font_mime_essence, is_image_mime_essence,
-    is_javascript_mime, is_json_mime_essence, is_video_mime_essence,
+    is_javascript_mime, is_json_mime_essence, is_office_document_mime_essence,
+    is_video_mime_essence,
 };
 use crate::destination::FetchDestination;
 use crate::headers::{extract_response_mime_essence, extract_response_mime_type};
@@ -69,34 +70,13 @@ pub fn should_opaque_response_be_blocked_by_orb(headers: &[(String, Vec<u8>)]) -
         || essence == "text/csv"
         || essence == "text/vtt"
         || is_font_mime_essence(&essence)
+        || is_office_document_mime_essence(&essence)
         || matches!(
             essence.as_str(),
-            "application/msexcel"
-                | "application/mspowerpoint"
-                | "application/msword"
-                | "application/msword-template"
-                | "application/vnd.apple.mpegurl"
+            "application/vnd.apple.mpegurl"
                 | "application/vnd.ces-quickpoint"
                 | "application/vnd.ces-quicksheet"
                 | "application/vnd.ces-quickword"
-                | "application/vnd.ms-excel"
-                | "application/vnd.ms-excel.sheet.macroenabled.12"
-                | "application/vnd.ms-powerpoint"
-                | "application/vnd.ms-powerpoint.presentation.macroenabled.12"
-                | "application/vnd.ms-word"
-                | "application/vnd.ms-word.document.12"
-                | "application/vnd.ms-word.document.macroenabled.12"
-                | "application/vnd.msword"
-                | "application/vnd.openxmlformats-officedocument.presentationml.presentation"
-                | "application/vnd.openxmlformats-officedocument.presentationml.template"
-                | "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                | "application/vnd.openxmlformats-officedocument.spreadsheetml.template"
-                | "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                | "application/vnd.openxmlformats-officedocument.wordprocessingml.template"
-                | "application/vnd.presentation-openxml"
-                | "application/vnd.presentation-openxmlm"
-                | "application/vnd.spreadsheet-openxml"
-                | "application/vnd.wordprocessing-openxml"
         )
 }
 
