@@ -1375,7 +1375,12 @@ impl DomHost {
         self.find_document_anchor(document_handle, &decoded)
     }
 
-    fn find_document_anchor(&self, document_handle: DomHandle, name: &str) -> Option<DomHandle> {
+    /// Finds an ID or legacy named anchor without changing the document target.
+    pub fn find_document_anchor(
+        &self,
+        document_handle: DomHandle,
+        name: &str,
+    ) -> Option<DomHandle> {
         if name.is_empty() || !self.node(document_handle).is_some_and(Node::is_document) {
             return None;
         }

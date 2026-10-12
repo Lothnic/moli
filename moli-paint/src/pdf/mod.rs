@@ -4,6 +4,7 @@
 //! effects are rasterized at their own clipped bounds; ordinary text stays text.
 
 mod image;
+mod links;
 mod primitives;
 mod text;
 mod validation;
@@ -125,14 +126,34 @@ pub fn pdf_snapshot(snapshot: &PaintSnapshot, options: &PdfOptions) -> Result<Ve
     if selected.is_empty() {
         return Err(PdfError::PageRangeExceeded);
     }
-    if selected.len().saturating_mul(metrics.operation_count) > 20_000_000 {
+    if selected
+        .len()
+        .saturating_mul(metrics.operation_count.saturating_add(snapshot.links.len()))
+        > 20_000_000
+    {
         return Err(PdfError::ResourceLimit);
     }
     let mut document = Document::new();
     let mut fonts = text::FontCache::default();
     let mut images = std::collections::HashMap::new();
     let scopes = primitives::scope_ends(&snapshot.fragments)?;
-    for page_index in selected {
+    let regions = links::collect(snapshot)?;
+    if selected.len().saturating_mul(regions.len()) > 1_000_000 {
+        return Err(PdfError::ResourceLimit);
+    }
+    let selected = selected
+        .into_iter()
+        .enumerate()
+        .map(|(output, original)| (original, output))
+        .collect();
+    let page_links = links::PageLinks {
+        regions: &regions,
+        selected: &selected,
+        page_height,
+        scale,
+        options,
+    };
+    for &page_index in selected.keys() {
         let top = page_index as f64 * page_height;
         let source = Rect::new(0.0, top, printable_width / scale, top + page_height);
         let mut page = document.start_page_with(
@@ -169,8 +190,9 @@ pub fn pdf_snapshot(snapshot: &PaintSnapshot, options: &PdfOptions) -> Result<Ve
         surface.pop();
         surface.pop();
         surface.finish();
-        page.finish();
         result?;
+        page_links.append(&mut page, source)?;
+        page.finish();
     }
     let mut bytes = document
         .finish()
@@ -192,5 +214,7 @@ fn image_size(width: u32, height: u32) -> Result<Size, PdfError> {
     Size::from_wh(width as f32, height as f32).ok_or(PdfError::InvalidParameters)
 }
 
+#[cfg(test)]
+mod links_tests;
 #[cfg(test)]
 mod tests;

@@ -99,6 +99,42 @@ impl LayoutSource for NativeLayoutSourceView<'_> {
         native_flat_parent(self.host(), self.root, node)
     }
 
+    fn hyperlink(&self, node: DomHandle) -> Option<moli_layout::LayoutHyperlink<DomHandle>> {
+        let host = self.host();
+        if !host.is_html_element_named(node, "a") {
+            return None;
+        }
+        let document = self.document?;
+        let href = host.get_attribute(node, "href")?;
+        let url = host
+            .document_base_url_for_handle(document)?
+            .join(&href)
+            .ok()?;
+        // JavaScript handlers have no equivalent in a static PDF.
+        if url.scheme() == "javascript" {
+            return None;
+        }
+        let mut without_fragment = url.clone();
+        without_fragment.set_fragment(None);
+        let mut document_url = host.document_url_for_handle(document)?.clone();
+        document_url.set_fragment(None);
+        let destination = if without_fragment == document_url {
+            let fragment = url.fragment().unwrap_or_default();
+            let decoded = percent_encoding::percent_decode_str(fragment).decode_utf8_lossy();
+            host.find_document_anchor(document, fragment)
+                .or_else(|| host.find_document_anchor(document, &decoded))
+                .or_else(|| {
+                    (decoded.is_empty() || decoded.eq_ignore_ascii_case("top")).then_some(self.root)
+                })
+        } else {
+            None
+        };
+        Some(moli_layout::LayoutHyperlink {
+            url: url.as_str().into(),
+            destination,
+        })
+    }
+
     fn flat_children(&self, node: Self::NodeId) -> Self::ChildIter<'_> {
         native_flat_children(self.host(), self.root, node).into_iter()
     }

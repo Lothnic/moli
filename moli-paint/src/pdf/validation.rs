@@ -6,6 +6,26 @@ use super::PdfError;
 // raster fallback). Resource identities, operation counts and scope depths are
 // checked by the shared paint validator.
 pub(super) fn validate(snapshot: &PaintSnapshot) -> Result<(), PdfError> {
+    if snapshot.links.len() > 100_000 {
+        return Err(PdfError::ResourceLimit);
+    }
+    for link in &snapshot.links {
+        if link.before_fragment > snapshot.fragments.len()
+            || !rect(link.rect)
+            || link.rect.width < 0.0
+            || link.rect.height < 0.0
+            || !link
+                .transform
+                .coefficients
+                .into_iter()
+                .all(|v| (v as f32).is_finite())
+            || link.target.destination.is_some_and(|p| !point(p))
+            || link.target.url.is_empty()
+            || link.target.url.len() > 65_536
+        {
+            return Err(PdfError::Encoding("invalid hyperlink metadata".into()));
+        }
+    }
     for fragment in &snapshot.fragments {
         let (valid, matrix) = match fragment {
             PaintFragment::PushLayer {

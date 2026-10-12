@@ -5,6 +5,92 @@ use crate::runtime::{
 };
 
 #[tokio::test(flavor = "current_thread")]
+async fn native_pdf_resolves_links_base_urls_anchors_and_embedded_frames() {
+    run_page_vm_async_test(async move {
+        let loader = crate::network::ResourceRequestClient::new(&FetchConfig::default())?;
+        let mut page_vm = test_page_vm_with_loader_and_document_url(
+            &loader,
+            Vec::new(),
+            Url::parse("https://example.com/doc.html")?,
+        );
+        page_vm.set_viewport_surface(Some(crate::protocol_types::ViewportSurface {
+            inner_width: 300,
+            inner_height: 300,
+            ..Default::default()
+        }))?;
+        page_vm.vm_mut().eval(
+            r#"
+document.head.innerHTML = `<base href="https://example.org/base/"><style>
+body { margin:0 } a { display:block; width:100px; height:20px }
+iframe { position:absolute; left:120px; top:20px; width:120px; height:80px; border:0 }
+#destination { position:absolute; top:400px; height:20px }
+</style>`;
+document.body.innerHTML = `<a href="../relative?q=1&amp;x=2">Relative</a>
+<a href="mailto:hello@example.org">Mail</a>
+<a href="https://example.com/doc.html#dest%20name">Internal</a>
+<a href="javascript:void(0)">Script</a>
+<a href="https://hidden.invalid/" style="opacity:0">Hidden</a>
+<a href="https://display.invalid/" style="display:none">None</a>
+<div id="destination"><span id="dest name">Destination</span></div>
+<iframe id=frame></iframe>`;
+frame.contentDocument.body.innerHTML = '<a href="https://child.example/link">Child</a>';
+'installed'
+"#,
+        )?;
+        let request = RendererPrintToPdfRequest {
+            options: moli_paint::pdf::PdfOptions {
+                width: 300.0,
+                height: 300.0,
+                margin_left: 0.0,
+                margin_right: 0.0,
+                margin_top: 0.0,
+                margin_bottom: 0.0,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let RendererPrintToPdfReply::Printed(bytes) = page_vm.print_to_pdf(request)? else {
+            anyhow::bail!("print failed");
+        };
+        let doc = lopdf::Document::load_mem(&bytes)?;
+        let mut urls = std::collections::BTreeSet::new();
+        let mut destinations = Vec::new();
+        for object in doc.objects.values() {
+            let Ok(dict) = object.as_dict() else { continue };
+            if dict.get(b"Subtype").and_then(|o| o.as_name()).ok() != Some(b"Link") {
+                continue;
+            }
+            if let Ok(action) = dict.get(b"A") {
+                let action = action.as_dict()?;
+                urls.insert(String::from_utf8(action.get(b"URI")?.as_str()?.to_vec())?);
+            } else {
+                let (_, dest) = doc.dereference(dict.get(b"Dest")?)?;
+                destinations.push(dest.as_array()?[0].as_reference()?);
+            }
+        }
+        assert_eq!(
+            urls,
+            [
+                "https://example.org/relative?q=1&x=2",
+                "mailto:hello@example.org",
+                "https://child.example/link"
+            ]
+            .map(str::to_owned)
+            .into()
+        );
+        assert!(!destinations.is_empty());
+        assert!(destinations.iter().all(|id| *id == doc.get_pages()[&2]));
+        assert_eq!(
+            page_vm.vm_mut().eval("matchMedia('print').matches")?,
+            "false"
+        );
+        Ok::<_, anyhow::Error>(())
+    })
+    .await
+    .expect("print links preserve URL and document ownership");
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn native_pdf_restores_media_on_success_and_failure_and_keeps_iframe_text() {
     run_page_vm_async_test(async move {
         let loader = crate::network::ResourceRequestClient::new(&FetchConfig::default())?;

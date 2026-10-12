@@ -880,6 +880,25 @@ impl PaintDiagnostic {
     }
 }
 
+/// An owned hyperlink region in the coordinate system of its paint scope.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PaintLink {
+    /// Scopes active immediately before this paint command also clip the link.
+    /// May equal `fragments.len()` (before closing an embedded snapshot).
+    pub before_fragment: usize,
+    pub rect: PaintRect,
+    pub transform: PaintTransform2D,
+    pub target: PaintLinkTarget,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct PaintLinkTarget {
+    /// Absolute URL; also the fallback if an internal destination is not printed.
+    pub url: std::sync::Arc<str>,
+    /// Same-document destination in capture-surface CSS pixels.
+    pub destination: Option<PaintPoint>,
+}
+
 /// Fully owned input to a paint backend.
 ///
 /// No source-tree identifier, computed-style handle, or renderer borrow is
@@ -904,6 +923,8 @@ pub struct PaintSnapshot {
     pub content_size: PaintSize,
     /// Paint operations in back-to-front order.
     pub fragments: Vec<PaintFragment>,
+    /// Print-only hyperlinks. No DOM handles or live layout borrows are retained.
+    pub links: Vec<PaintLink>,
     /// Immutable resources referenced by glyph fragments.
     pub fonts: Vec<PaintFontResource>,
     /// Immutable resources referenced by image fragments.
@@ -925,6 +946,7 @@ impl PaintSnapshot {
             canvas_color,
             content_size: PaintSize::new(viewport.css_width as f32, viewport.css_height as f32),
             fragments: Vec::new(),
+            links: Vec::new(),
             fonts: Vec::new(),
             images: Vec::new(),
             svg_images: Vec::new(),
@@ -1041,7 +1063,12 @@ impl PaintSnapshot {
                 transform: local_to_surface,
             });
         }
+        let mut fragment_offsets =
+            (!child.links.is_empty()).then(|| Vec::with_capacity(child.fragments.len() + 1));
         for fragment in child.fragments {
+            if let Some(offsets) = &mut fragment_offsets {
+                offsets.push(self.fragments.len());
+            }
             if let Some(fragment) = rebase_embedded_fragment(
                 fragment,
                 local_to_surface,
@@ -1051,6 +1078,23 @@ impl PaintSnapshot {
             ) {
                 self.push_fragment(fragment);
             }
+        }
+        if let Some(offsets) = &mut fragment_offsets {
+            offsets.push(self.fragments.len());
+        }
+        for mut link in child.links {
+            // Do not turn malformed child metadata into a valid parent index.
+            link.before_fragment = fragment_offsets
+                .as_ref()
+                .and_then(|offsets| offsets.get(link.before_fragment))
+                .copied()
+                .unwrap_or(usize::MAX);
+            link.transform = local_to_surface.concatenate(link.transform);
+            link.target.destination = link
+                .target
+                .destination
+                .map(|point| local_to_surface.map_point(point));
+            self.links.push(link);
         }
         self.push_fragment(PaintFragment::PopLayer);
         for diagnostic in child.diagnostics {

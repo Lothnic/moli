@@ -65,7 +65,13 @@ replayed slices from duplicating the extracted document. Device pixel ratio does
 not affect PDF page geometry. Page ranges still refer to original document pages.
 
 This does not implement CSS fragmentation (`break-inside`, repeated table headers,
-`@page`), tagged PDF, link annotations or document outlines. PDF reading order still
+`@page`), tagged PDF or document outlines. HTML anchor links are retained as PDF
+annotations, including resolved relative URLs, wrapped lines, transforms, overflow
+and clip-path clipping, embedded frames and page boundaries. Same-document IDs and
+legacy named anchors become PDF destinations; omitted destination pages fall back
+to the original URL. Curved clip boundaries use half-CSS-pixel strips; rectangular
+and transformed rectangular clips use polygon intersections. JavaScript handlers,
+image maps and links inside SVG resources are not exported. PDF reading order still
 follows paint order, and complex-script extraction depends on the reader's handling
 of ToUnicode/ActualText. SVG text that takes a raster fallback has no separate text
 mapping. This is not an accessibility or PDF/UA implementation. Krilla

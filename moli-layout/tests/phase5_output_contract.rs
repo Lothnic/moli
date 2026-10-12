@@ -104,6 +104,13 @@ impl LayoutSource for Source {
         self.0[node].label.to_owned()
     }
 
+    fn hyperlink(&self, node: usize) -> Option<moli_layout::LayoutHyperlink<usize>> {
+        (self.0[node].local_name == "a").then(|| moli_layout::LayoutHyperlink {
+            url: self.0[node].label.into(),
+            destination: None,
+        })
+    }
+
     fn scroll_offset(&self, node: Self::NodeId) -> LayoutPoint {
         self.0[node].scroll
     }
@@ -148,6 +155,48 @@ fn build(source: &Source, styles: &mut Styles) -> LayoutPassResult<usize> {
         styles,
         LayoutPassRequest::new(LayoutViewport::new(320, 240, 1.0), LayoutFlushReason::Test),
     )
+}
+
+#[test]
+fn owned_links_are_collected_only_for_printing_and_do_not_change_paint() {
+    let (raster, print) = {
+        let source = Source(vec![
+            Node::element("root", vec![1]),
+            Node::html_element("https://example.com/link", "a", vec![2]),
+            Node::element("child", vec![]),
+        ]);
+        let mut styles = Styles(HashMap::from([
+            (0, fixed_size(LayoutDisplay::Block, 320.0, 240.0)),
+            (1, fixed_size(LayoutDisplay::Block, 100.0, 40.0)),
+            (2, fixed_size(LayoutDisplay::Block, 30.0, 20.0)),
+        ]));
+        let viewport = LayoutViewport::new(320, 240, 1.0);
+        let raster = build_with_request(
+            &source,
+            &mut styles,
+            LayoutPassRequest::with_paint(viewport, LayoutFlushReason::Test),
+        )
+        .into_paint_snapshot()
+        .unwrap();
+        let print = build_with_request(
+            &source,
+            &mut styles,
+            LayoutPassRequest::with_paint(viewport, LayoutFlushReason::Print),
+        )
+        .into_paint_snapshot()
+        .unwrap();
+        (raster, print)
+    };
+    assert!(raster.links.is_empty());
+    assert_eq!(raster.fragments, print.fragments);
+    assert_eq!(print.links.len(), 2, "anchor and inherited child regions");
+    assert!(
+        print
+            .links
+            .iter()
+            .all(|link| link.target.url.as_ref() == "https://example.com/link")
+    );
+    assert_eq!(print.links[0].rect.width, 100.0);
 }
 
 fn build_with_request(

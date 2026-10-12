@@ -486,6 +486,14 @@ impl LayoutTextSelection {
     }
 }
 
+/// A resolved hyperlink, sampled only for document export. A same-document
+/// destination retains source identity only until paint projection finishes.
+#[derive(Clone, Debug)]
+pub struct LayoutHyperlink<N> {
+    pub url: std::sync::Arc<str>,
+    pub destination: Option<N>,
+}
+
 /// A short-lived, read-only view of the renderer's canonical flat tree.
 pub trait LayoutSource {
     type NodeId: Copy + Debug + Eq + Hash;
@@ -525,6 +533,12 @@ pub trait LayoutSource {
     fn element_semantics(&self, node: Self::NodeId) -> Option<LayoutElementSemantics>;
     fn text(&self, node: Self::NodeId) -> Option<&str>;
     fn label(&self, node: Self::NodeId) -> String;
+
+    /// Returns a link owned by this element, with its URL resolved against the
+    /// document base. Ancestor links are handled by the export projection.
+    fn hyperlink(&self, _node: Self::NodeId) -> Option<LayoutHyperlink<Self::NodeId>> {
+        None
+    }
 
     /// Returns the active document selection intersecting one source text node.
     fn text_selection(&self, _node: Self::NodeId) -> Option<LayoutTextSelection> {

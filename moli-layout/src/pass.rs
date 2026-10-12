@@ -277,7 +277,7 @@ where
     let embedded_frame_elapsed = phase_started.elapsed();
     finish_layout_pass(
         &world,
-        source.root(),
+        source,
         request.viewport,
         request.reason,
         started,
