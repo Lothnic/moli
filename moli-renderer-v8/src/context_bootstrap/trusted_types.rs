@@ -426,7 +426,7 @@ fn trusted_script_string_for_code_generation_sink(
             Some(original.to_owned())
         }
         DefaultTrustedTypePolicyOutcome::Value(_) => {
-            dispatch_trusted_types_sink_violation_event(scope, sink, violation_sample);
+            // TrustedScript was supplied; rejecting transformed source is a compilation error.
             throw_eval_error(scope, transformed_value_error);
             None
         }
@@ -1002,7 +1002,7 @@ fn trusted_script_string_for_function_constructor<'s>(
         if default_value == default_policy_source {
             return Some(original);
         }
-        dispatch_trusted_types_sink_violation_event(scope, "Function", &violation_sample);
+        // The policy supplied TrustedScript, so this is not a sink mismatch.
         throw_eval_error(
             scope,
             "Trusted Types default policy must not transform strings passed to Function.",

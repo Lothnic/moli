@@ -1717,3 +1717,28 @@ fn svg_script_href_base_val_uses_the_owner_reflected_trusted_script_url_sink() {
         r#"[{"blockedURI":"trusted-types-sink","effectiveDirective":"require-trusted-types-for","sample":"SVGScriptElement href|plain.js"}]"#
     );
 }
+
+#[test]
+fn transformed_trusted_script_rejection_does_not_report_a_sink_mismatch() {
+    let mut vm = new_storage_test_vm("https://trusted-script-compilation.test/");
+    vm.set_response_content_security_policies(&[
+        "script-src 'unsafe-eval'; require-trusted-types-for 'script'".to_owned(),
+    ]);
+    assert_eq!(vm.eval(r#"
+        globalThis.compilationReports = [];
+        document.addEventListener('securitypolicyviolation', e => compilationReports.push(e.blockedURI));
+        trustedTypes.createPolicy('default', {createScript: source => source + ' '});
+        (() => {
+            let rejected = 0;
+            for (const compile of [() => eval('1'), () => Function('return 1;')]) {
+                try { compile(); } catch (error) {
+                    if (!(error instanceof EvalError)) throw error;
+                    rejected++;
+                }
+            }
+            return rejected;
+        })()
+    "#).unwrap(), "2");
+    let _ = drain_pre_domcontentloaded_non_script_page_tasks_for_test(&mut vm);
+    assert_eq!(vm.eval("JSON.stringify(compilationReports)").unwrap(), "[]");
+}
