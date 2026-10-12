@@ -1234,7 +1234,10 @@ fn cli_dump_markdown_rejects_docx_but_keeps_text_documents_renderable() -> Resul
             "path={path} stderr={}",
             clean_output(&output.stderr)
         );
-        assert!(clean_output(&output.stdout).contains(expected), "path={path}");
+        assert!(
+            clean_output(&output.stdout).contains(expected),
+            "path={path}"
+        );
     }
 
     runtime.block_on(server.shutdown());
