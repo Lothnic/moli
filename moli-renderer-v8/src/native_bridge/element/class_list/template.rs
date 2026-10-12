@@ -45,10 +45,10 @@ struct DomTokenListTemplateMethodsDeclaration {
     )]
     contains: (),
 
-    #[webapi(method, length = 1, callback = methods::class_list_add_callback)]
+    #[webapi(method, length = 0, callback = methods::class_list_add_callback)]
     add: (),
 
-    #[webapi(method, length = 1, callback = methods::class_list_remove_callback)]
+    #[webapi(method, length = 0, callback = methods::class_list_remove_callback)]
     remove: (),
 
     #[webapi(method, length = 1, callback = methods::class_list_toggle_callback)]

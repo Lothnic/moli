@@ -63,7 +63,7 @@
     let count = 0;
     for (const rawArg of splitTopLevel(args, ",")) {
       const arg = stripExtendedAttributes(rawArg).trim();
-      if (!arg || arg.startsWith("optional ") || arg.includes(" = ")) {
+      if (!arg || arg.startsWith("optional ") || arg.includes(" = ") || arg.includes("...")) {
         continue;
       }
       count += 1;
@@ -86,6 +86,15 @@
 
   function addUnique(list, entry) {
     if (!list.some((item) => item.name === entry.name)) {
+      list.push(entry);
+    }
+  }
+
+  function addOperation(list, entry) {
+    const existing = list.find((item) => item.name === entry.name);
+    if (existing) {
+      existing.length = Math.min(existing.length, entry.length);
+    } else {
       list.push(entry);
     }
   }
@@ -119,7 +128,7 @@
       /^static\s+[\s\S]+?\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(([\s\S]*)\)$/,
     );
     if (staticOperation) {
-      addUnique(iface.staticOperations, {
+      addOperation(iface.staticOperations, {
         name: staticOperation[1],
         length: requiredArgumentCount(staticOperation[2]),
         unforgeable: extendedAttributes.has("LegacyUnforgeable"),
@@ -131,7 +140,7 @@
       /^[\s\S]+?\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(([\s\S]*)\)$/,
     );
     if (operation) {
-      addUnique(iface.operations, {
+      addOperation(iface.operations, {
         name: operation[1],
         length: requiredArgumentCount(operation[2]),
         unforgeable: extendedAttributes.has("LegacyUnforgeable"),
