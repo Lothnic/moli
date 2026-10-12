@@ -10,9 +10,15 @@ pub(super) async fn load_completion_controls_page() -> Html<&'static str> {
 globalThis.mainLoadCount = 0;
 addEventListener('load', () => {
   document.body.dataset.mainLoads = String(++mainLoadCount);
+  if (new URL(location.href).searchParams.get('mode') === 'late-script') {
+    const script = document.createElement('script');
+    script.src = '/runtime/load-completion-script.js';
+    document.head.append(script);
+  }
 });
 addEventListener('DOMContentLoaded', () => {
   const mode = new URL(location.href).searchParams.get('mode');
+  if (mode === 'late-script') return;
   const frame = document.createElement('iframe');
   frame.id = 'child';
   frame.onload = () => {
@@ -32,6 +38,16 @@ addEventListener('DOMContentLoaded', () => {
 });
 </script></head><body><main>Load completion content</main></body></html>"#,
     )
+}
+
+pub(super) async fn load_completion_script() -> Response {
+    sleep(Duration::from_millis(100)).await;
+    Response::builder()
+        .header(CONTENT_TYPE, "application/javascript")
+        .body(Body::from(
+            "document.querySelector('main').textContent = 'Late application content';",
+        ))
+        .unwrap()
 }
 
 static NET_UPSTREAM_XHR_404_THEN_200_REQUESTS: AtomicUsize = AtomicUsize::new(0);
