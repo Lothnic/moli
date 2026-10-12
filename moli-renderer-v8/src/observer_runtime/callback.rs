@@ -25,6 +25,8 @@ use crate::{
     },
 };
 
+mod realtime_resize;
+
 pub(super) struct ObserverCallback {
     callback: WindowWebIdlCallbackFunction,
     observer_identity: Option<WindowExecutionContextIdentity>,
@@ -75,7 +77,7 @@ impl ObserverCallback {
 /// queues and V8-traced callback/context values on their JS objects. This ID
 /// binds those private values to the exact observer and callback Window
 /// identities without making Rust a permanent GC root.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub(crate) struct ObserverCallbackId(u32);
 
 impl ObserverCallbackId {
@@ -151,6 +153,9 @@ impl ObserverCallbackBinding {
 struct ObserverCallbackRegistryState {
     next_id: u32,
     bindings: HashMap<ObserverCallbackId, ObserverCallbackBinding>,
+    // Allocated only by Realtime RO construction. Legacy observers do not
+    // gain per-observer state, roots or a frame queue.
+    realtime_resize: Option<Box<realtime_resize::RealtimeResizeObservers>>,
 }
 
 /// Shared owner-local identity registry for observer APIs whose batching and
@@ -158,8 +163,9 @@ struct ObserverCallbackRegistryState {
 ///
 /// The `Rc<RefCell<_>>` is deliberate: a V8 weak finalizer must be able to
 /// release the small identity binding after the observer becomes unreachable,
-/// without retaining a raw `JsContextHost` pointer. The registry never roots
-/// the callback or observer, so callback↔observer cycles remain V8-collectable.
+/// without retaining a raw `JsContextHost` pointer. Active registrations may
+/// root their wrapper; disconnect and exact Realm retirement release those
+/// roots, so inactive callback↔observer cycles remain V8-collectable.
 #[derive(Clone, Default)]
 pub(super) struct ObserverCallbackRegistry {
     state: Rc<RefCell<ObserverCallbackRegistryState>>,
@@ -294,17 +300,25 @@ impl ObserverCallbackRegistry {
         &self,
         mut should_retire: impl FnMut(&ObserverCallbackBinding) -> bool,
     ) -> usize {
-        let retired = {
+        let (retired, retired_resize) = {
             let mut state = self.state.borrow_mut();
             let ids: Vec<_> = state
                 .bindings
                 .iter()
                 .filter_map(|(id, binding)| should_retire(binding).then_some(*id))
                 .collect();
-            ids.into_iter()
+            let retired_resize = state.realtime_resize.as_mut().map(|entries| {
+                ids.iter()
+                    .filter_map(|id| entries.remove(id))
+                    .collect::<Vec<_>>()
+            });
+            let retired = ids
+                .into_iter()
                 .filter_map(|id| state.bindings.remove(&id))
-                .collect::<Vec<_>>()
+                .collect::<Vec<_>>();
+            (retired, retired_resize)
         };
+        drop(retired_resize);
         retired.len()
     }
 
@@ -312,7 +326,14 @@ impl ObserverCallbackRegistry {
         let state = Rc::downgrade(&self.state);
         move || {
             if let Some(state) = Weak::upgrade(&state) {
-                let retired = state.borrow_mut().bindings.remove(&id);
+                let retired = {
+                    let mut state = state.borrow_mut();
+                    let resize = state
+                        .realtime_resize
+                        .as_mut()
+                        .and_then(|entries| entries.remove(&id));
+                    (state.bindings.remove(&id), resize)
+                };
                 drop(retired);
             }
         }

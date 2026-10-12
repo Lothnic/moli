@@ -6,6 +6,9 @@ use crate::{
 };
 use moli_webidl_callback::WebIdlCallbackFunction;
 
+mod realtime_resize;
+pub(crate) use realtime_resize::*;
+
 use super::{
     IntersectionMutationPlan, IntersectionObserverOptions, MutationObserverOptions,
     ObserverMutationPlan, ObserverStore, build_intersection_entries_array,
@@ -395,6 +398,7 @@ pub(crate) fn retire_execution_context_owner(
     };
     host.dom_host()
         .set_mutation_observer_records_enabled(mutation_records_enabled);
+    host.refresh_realtime_rendering_opportunity();
     retired
 }
 
@@ -409,6 +413,7 @@ pub(crate) fn retire_context_token(
     };
     host.dom_host()
         .set_mutation_observer_records_enabled(mutation_records_enabled);
+    host.refresh_realtime_rendering_opportunity();
     retired
 }
 
