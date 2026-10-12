@@ -7,7 +7,7 @@ use std::time::Instant;
 use crate::{
     document_runtime::DomHandle,
     native_bridge::{JsContextHost, element::StyleObservation},
-    style_engine::{StyleViewport, StyloAnonymousBoxKind},
+    style_engine::{StyleViewport, StyloAnonymousBoxKind, StyloStyleEnvironment},
 };
 
 pub(super) struct NativeLayoutStyleResolver<'a> {
@@ -39,8 +39,9 @@ impl<'a> NativeLayoutStyleResolver<'a> {
         root: DomHandle,
         document: DomHandle,
         viewport: LayoutViewport,
+        environment_override: Option<StyloStyleEnvironment>,
     ) -> Self {
-        let mut reads = layout_style_read_scope(runtime, document, viewport);
+        let mut reads = layout_style_read_scope(runtime, document, viewport, environment_override);
         let _ = reads.read(root).computed_values();
         Self {
             runtime,
@@ -79,15 +80,24 @@ fn layout_style_read_scope<'a>(
     runtime: &'a JsContextHost,
     document: DomHandle,
     viewport: LayoutViewport,
+    environment_override: Option<StyloStyleEnvironment>,
 ) -> StyleObservation<'a> {
     let viewport = layout_style_viewport(runtime, viewport);
-    if document == runtime.document_handle() && viewport == runtime.style_viewport() {
+    if environment_override.is_none()
+        && document == runtime.document_handle()
+        && viewport == runtime.style_viewport()
+    {
         // Keep the normal main-document observation environment so layout and
         // rendered-text collection read the same persistent style world. Only
-        // an override viewport or embedded Document needs an explicit context.
+        // an override viewport/media or embedded Document needs an explicit context.
         StyleObservation::new(runtime)
     } else {
-        StyleObservation::new_for_document_viewport(runtime, document, viewport)
+        StyleObservation::new_for_document_viewport(
+            runtime,
+            document,
+            viewport,
+            environment_override,
+        )
     }
 }
 

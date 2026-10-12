@@ -1,6 +1,7 @@
 //! Screenshot and screencast requests, replies and pixel capture.
 
 use crate::native_bridge::LayoutPublicationRequest;
+use crate::style_engine::StyloStyleEnvironment;
 use moli_layout::{
     LayoutRect, LayoutTransform2D, PaintCaptureRegion, PaintCaptureRequest, PaintCaptureSurface,
     PaintViewport,
@@ -68,7 +69,7 @@ pub struct RendererVisualStateToken(Arc<RendererVisualState>);
 struct RendererVisualState {
     document: RendererDocumentLifecycleIdentity,
     dom_generation: u64,
-    style_generations: Vec<(u32, u64, u64, u64)>,
+    style_generations: Vec<(u32, u64, u64)>,
     interaction_generation: u64,
     resource_generation: u64,
     viewport_width: u32,
@@ -81,7 +82,7 @@ impl RendererVisualStateToken {
     pub(crate) fn new(
         document: RendererDocumentLifecycleIdentity,
         dom_generation: u64,
-        style_generations: Vec<(crate::document_runtime::DomHandle, u64, u64, u64)>,
+        style_generations: Vec<(crate::document_runtime::DomHandle, u64, u64)>,
         interaction_generation: u64,
         resource_generation: u64,
         viewport: PaintViewport,
@@ -92,9 +93,7 @@ impl RendererVisualStateToken {
             dom_generation,
             style_generations: style_generations
                 .into_iter()
-                .map(|(document, source, computed, context)| {
-                    (document.index_u32(), source, computed, context)
-                })
+                .map(|(document, source, input)| (document.index_u32(), source, input))
                 .collect(),
             interaction_generation,
             resource_generation,
@@ -235,17 +234,16 @@ impl PageVm {
         self.flush_page_action_window(barrier)?;
         let paint_capture = request
             .paint_capture_request(self.document_settings.viewport_surface.unwrap_or_default())?;
-        let restore_media = if matches!(request.purpose, RendererScreenshotPurpose::Print { .. })
-            && self.document_settings.emulated_media.media.is_none()
-        {
-            let previous = self.document_settings.emulated_media.clone();
-            let mut print = previous.clone();
-            print.media = Some("print".to_owned());
-            self.set_emulated_media(&print)?;
-            Some(previous)
-        } else {
-            None
-        };
+        let environment_override =
+            if matches!(request.purpose, RendererScreenshotPurpose::Print { .. })
+                && self.document_settings.emulated_media.media.is_none()
+            {
+                let mut print = self.document_settings.emulated_media.clone();
+                print.media = Some("print".to_owned());
+                Some(StyloStyleEnvironment::from_emulated_media(&print))
+            } else {
+                None
+            };
         let result = self.capture_image(
             request.format,
             request.quality,
@@ -259,10 +257,8 @@ impl PageVm {
                 RendererScreenshotPurpose::Screenshot => LayoutPublicationRequest::Screen,
                 RendererScreenshotPurpose::Print { .. } => LayoutPublicationRequest::Transient,
             },
+            environment_override,
         );
-        if let Some(previous) = restore_media {
-            self.set_emulated_media(&previous)?;
-        }
         result.map(RendererImageCaptureOutcome::into_screenshot_reply)
     }
 
@@ -323,6 +319,7 @@ impl PageVm {
             paint_capture,
             moli_layout::LayoutFlushReason::Screencast,
             LayoutPublicationRequest::Screen,
+            None,
         )? {
             RendererImageCaptureOutcome::Captured(image) => image,
             RendererImageCaptureOutcome::LayoutDisabled => {
@@ -356,6 +353,7 @@ impl PageVm {
         paint_capture: PaintCaptureRequest,
         reason: moli_layout::LayoutFlushReason,
         publication: LayoutPublicationRequest,
+        environment_override: Option<StyloStyleEnvironment>,
     ) -> anyhow::Result<RendererImageCaptureOutcome> {
         let profile_enabled = moli_trace::cpu_profile_enabled();
         let total_started = profile_enabled.then(Instant::now);
@@ -374,6 +372,7 @@ impl PageVm {
             reason,
             paint_capture,
             publication,
+            environment_override,
         )?
         else {
             return Ok(RendererImageCaptureOutcome::NoDocument);
