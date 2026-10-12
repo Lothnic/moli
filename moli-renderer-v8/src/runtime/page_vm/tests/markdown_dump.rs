@@ -33,7 +33,7 @@ async fn markdown_uses_live_visibility_and_preserves_disclosure_content() {
                 <div style="opacity:0">Transparent parent <span style="opacity:1">Transparent child</span></div>
                 <div ng-cloak>Buy {{product.name}} for {{product.price | currency}}</div>
                 <div v-cloak>Vue template {{message}}</div>
-                <p>Visible value <font id="legacy-hidden" color="white">hidden suffix</font> 8</p>
+                <p>Visible value <font id="legacy-white-text" color="white">Same-color text</font> 8</p>
                 <p>CSS override <font id="css-override" color="white" style="color:black">VISIBLE</font></p>
                 <p>Stylesheet override <font id="external-override" color="white">ALSO VISIBLE</font></p>
                 <p style="background:black;color:white">White on black stays visible</p>
@@ -64,14 +64,14 @@ async fn markdown_uses_live_visibility_and_preserves_disclosure_content() {
                 <button aria-expanded="false" aria-controls="dialog">Preferences</button>
                 <div role="dialog" id="dialog" class="off">Cookie template</div>`;
         "##).unwrap();
-        assert_eq!(page.vm_mut().eval("getComputedStyle(document.getElementById('legacy-hidden')).color").unwrap(), "rgb(255, 255, 255)");
+        assert_eq!(page.vm_mut().eval("getComputedStyle(document.getElementById('legacy-white-text')).color").unwrap(), "rgb(255, 255, 255)");
         assert_eq!(page.vm_mut().eval("getComputedStyle(document.getElementById('css-override')).color").unwrap(), "rgb(0, 0, 0)");
         assert_eq!(page.vm_mut().eval("getComputedStyle(document.getElementById('external-override')).color").unwrap(), "rgb(0, 0, 0)");
-        assert_eq!(page.vm_mut().eval("document.getElementById('legacy-hidden').setAttribute('color','black'); getComputedStyle(document.getElementById('legacy-hidden')).color").unwrap(), "rgb(0, 0, 0)");
-        page.vm_mut().eval("document.getElementById('legacy-hidden').setAttribute('color','white')").unwrap();
+        assert_eq!(page.vm_mut().eval("document.getElementById('legacy-white-text').setAttribute('color','black'); getComputedStyle(document.getElementById('legacy-white-text')).color").unwrap(), "rgb(0, 0, 0)");
+        page.vm_mut().eval("document.getElementById('legacy-white-text').setAttribute('color','white')").unwrap();
         for strip_css in [false, true] {
             let output = page.render_page_dump(options(strip_css));
-            for kept in ["Visible body", "Restored child", "Panel content", "ARIA panel content", "Disclosure content", "Closed details content", "Followers 2", "Score 313131", "Parser trap", "Accessible helper", "Faded text", "Animated revealed text", "Visible value 8", "CSS override VISIBLE", "Stylesheet override ALSO VISIBLE", "White on black stays visible", "![Article photo](https://example.test/article.jpg)"] {
+            for kept in ["Visible body", "Restored child", "Panel content", "ARIA panel content", "Disclosure content", "Closed details content", "Followers 2", "Score 313131", "Parser trap", "Accessible helper", "Faded text", "Animated revealed text", "Visible value Same-color text 8", "CSS override VISIBLE", "Stylesheet override ALSO VISIBLE", "White on black stays visible", "![Article photo](https://example.test/article.jpg)"] {
                 assert!(output.contains(kept), "missing {kept}: {output}");
             }
             assert!(output.contains("10<sup>−17</sup>"), "{output}");
@@ -79,7 +79,7 @@ async fn markdown_uses_live_visibility_and_preserves_disclosure_content() {
             assert!(output.contains("Active\nReviewed"), "{output}");
             assert!(!output.contains("tracking.gif"), "{output}");
             assert!(output.contains("Upload complete"), "{output}");
-            for omitted in ["Translation pending", "Share metadata", "Hidden ancestor", "Inherited hidden", "Cookie template", "Followers 92", "Animated hidden text", "Overridden animation text", "Animated rotation text", "Zero-duration reveal text", "Repeating reveal text", "Reverse reveal text", "Transparent parent", "Transparent child", "hidden suffix", "product.name", "Vue template"] {
+            for omitted in ["Translation pending", "Share metadata", "Hidden ancestor", "Inherited hidden", "Cookie template", "Followers 92", "Animated hidden text", "Overridden animation text", "Animated rotation text", "Zero-duration reveal text", "Repeating reveal text", "Reverse reveal text", "Transparent parent", "Transparent child", "product.name", "Vue template"] {
                 assert!(!output.contains(omitted), "leaked {omitted}: {output}");
             }
             assert!(output.contains("Account settings"), "{output}");
@@ -361,13 +361,13 @@ async fn markdown_uses_live_visibility_and_preserves_disclosure_content() {
             document.body.innerHTML = `
                 <p style="color:white;background-color:rgba(0,0,0,0.5)">Visible on grey</p>
                 <p style="color:white;background:white;text-shadow:0 0 2px black">Visible shadow</p>
-                <div style="color:white;background-image:linear-gradient(black,black)"><p style="background:white">Hidden on opaque child</p></div>
+                <div style="color:white;background-image:linear-gradient(black,black)"><p style="background:white">Opaque same-color text</p></div>
                 <article><p>A detailed review... <a href="#complete">Read more</a></p><div hidden><div id="complete" style="display:none">A detailed review includes the full conclusion.</div></div></article>`;
         "##).unwrap();
         let composite = page.render_page_dump(options(false));
         assert!(composite.contains("Visible on grey"), "{composite}");
         assert!(composite.contains("Visible shadow"), "{composite}");
-        assert!(!composite.contains("Hidden on opaque child"), "{composite}");
+        assert!(composite.contains("Opaque same-color text"), "{composite}");
         assert!(composite.contains("full conclusion"), "{composite}");
         assert!(!composite.contains("A detailed review..."), "{composite}");
         page.vm_mut().eval(r#"
@@ -405,5 +405,33 @@ async fn markdown_uses_live_visibility_and_preserves_disclosure_content() {
         assert!(!responsive.contains("phantom.jpg"), "{responsive}");
         page.vm_mut().eval("document.documentElement.style.display = 'none'").unwrap();
         assert!(page.render_page_dump(options(false)).is_empty());
+    }).await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn markdown_preserves_text_when_dom_ancestry_cannot_prove_painted_contrast() {
+    run_page_vm_async_test(async move {
+        let loader = crate::network::ResourceRequestClient::new(&FetchConfig::default()).expect("loader");
+        let mut page = test_page_vm_with_loader_and_document_url(&loader, Vec::new(), Url::parse("https://example.test/content").unwrap());
+        page.vm_mut().eval(r##"
+            document.head.innerHTML = '<style>.image-heading{position:absolute;color:white}.pseudo{position:relative;isolation:isolate;color:white}.pseudo::before{content:"";position:absolute;inset:0;background:black;z-index:-1}.backdrop{position:absolute;inset:0;background:black}.front{position:relative;color:white}</style>';
+            document.body.innerHTML = `
+                <section style="position:relative"><h1 class="image-heading">Picture heading</h1><picture><img style="display:block;width:320px;height:80px;background:black" alt="Banner"></picture></section>
+                <p class="pseudo">Pseudo background heading</p>
+                <section style="position:relative"><div class="backdrop"></div><p class="front">Positioned backdrop heading</p></section>
+                <p style="display:none">Display hidden control</p>
+                <p style="visibility:hidden">Visibility hidden control</p>
+                <p style="opacity:0">Opacity hidden control</p>
+            `;
+        "##).unwrap();
+        for strip_css in [false, true] {
+            let output = page.render_page_dump(options(strip_css));
+            for text in ["Picture heading", "Pseudo background heading", "Positioned backdrop heading"] {
+                assert!(output.contains(text), "{output}");
+            }
+            for text in ["Display hidden control", "Visibility hidden control", "Opacity hidden control"] {
+                assert!(!output.contains(text), "{output}");
+            }
+        }
     }).await;
 }

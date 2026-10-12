@@ -48,36 +48,6 @@ impl<'a> MarkdownDom<'a> {
         let fragment_links = styles.iter().any(|(node, _)| {
             Dom::attribute(dom, *node, "href").is_some_and(|href| href.starts_with('#'))
         });
-        // `styles` follows the document's preorder, so every element's parent
-        // has already been seen. Cache the painted ancestor background once;
-        // walking ancestors for every node is quadratic on deeply nested pages.
-        let mut effective_backgrounds = HashMap::new();
-        let mut non_solid_backgrounds = HashSet::new();
-        if styles
-            .iter()
-            .any(|(_, values)| values.get(11).is_some_and(|value| !value.is_empty()))
-        {
-            for (node, values) in &styles {
-                let own_color = values.get(11).and_then(|value| css_color(value));
-                let own = own_color.filter(|color| color.3 > 0.99);
-                let inherited = dom
-                    .parent_node(*node)
-                    .and_then(|parent| effective_backgrounds.get(&parent).copied());
-                effective_backgrounds
-                    .insert(*node, own.or(inherited).unwrap_or((255, 255, 255, 1.0)));
-                let own_image = values
-                    .get(13)
-                    .is_some_and(|image| !image.is_empty() && image != "none");
-                let inherited_image = own.is_none()
-                    && dom
-                        .parent_node(*node)
-                        .is_some_and(|parent| non_solid_backgrounds.contains(&parent));
-                let translucent = own_color.is_some_and(|color| color.3 > 0.0 && color.3 <= 0.99);
-                if own_image || inherited_image || translucent {
-                    non_solid_backgrounds.insert(*node);
-                }
-            }
-        }
         let mut disclosures = HashSet::new();
         let mut excerpts = HashSet::new();
         let targets: HashMap<_, _> = styles
@@ -250,21 +220,8 @@ impl<'a> MarkdownDom<'a> {
                     .get(9)
                     .and_then(|value| px(value))
                     .is_some_and(|height| height <= 1.5);
-            let foreground = values.get(10).and_then(|value| css_color(value));
-            let zero_contrast_leaf = !has_element_child(dom, node)
-                && has_text_child(dom, node)
-                && !non_solid_backgrounds.contains(&node)
-                && values
-                    .get(12)
-                    .is_none_or(|shadow| shadow.is_empty() || shadow == "none")
-                && foreground
-                    .filter(|color| color.3 > 0.99)
-                    .zip(effective_backgrounds.get(&node).copied())
-                    .is_some_and(|(foreground, background)| {
-                        background.3 > 0.99
-                            && (foreground.0, foreground.1, foreground.2)
-                                == (background.0, background.1, background.2)
-                    });
+            // Text/background color equality does not prove invisibility: a
+            // positioned sibling, image or pseudo-element may paint behind it.
             let document_root = Some(node) == document_element || Some(node) == body;
             let parent_visibility = dom
                 .parent_node(node)
@@ -309,7 +266,6 @@ impl<'a> MarkdownDom<'a> {
                 && !disclosure_path)
                 || uninitialized_template
                 || tracking_pixel
-                || (zero_contrast_leaf && !disclosure_root && !disclosure_path)
                 || (parent_is_disclosure_path && !disclosure_root && !disclosure_path)
                 || dom
                     .parent_node(node)
@@ -439,63 +395,6 @@ fn resolve_srcset(base_url: &Url, value: &str) -> Option<String> {
         })
         .collect();
     (!resolved.is_empty()).then(|| resolved.join(", "))
-}
-
-fn css_color(value: &str) -> Option<(u8, u8, u8, f32)> {
-    let value = value.trim().to_ascii_lowercase();
-    match value.as_str() {
-        "transparent" => return Some((0, 0, 0, 0.0)),
-        "white" => return Some((255, 255, 255, 1.0)),
-        "black" => return Some((0, 0, 0, 1.0)),
-        _ => {}
-    }
-    let (body, alpha) = match (
-        value
-            .strip_prefix("rgba(")
-            .and_then(|body| body.strip_suffix(')')),
-        value
-            .strip_prefix("rgb(")
-            .and_then(|body| body.strip_suffix(')')),
-    ) {
-        (Some(body), _) => (body, true),
-        (_, Some(body)) => (body, false),
-        _ => return None,
-    };
-    let mut parts = body.split(',').map(str::trim);
-    let red = parts.next()?.parse().ok()?;
-    let green = parts.next()?.parse().ok()?;
-    let blue = parts.next()?.parse().ok()?;
-    let opacity = if alpha {
-        parts.next()?.parse().ok()?
-    } else {
-        1.0
-    };
-    parts
-        .next()
-        .is_none()
-        .then_some((red, green, blue, opacity))
-}
-
-fn has_element_child(dom: &NativeDom, node: NativeNodeId) -> bool {
-    let mut child = dom.first_child(node);
-    while let Some(id) = child {
-        if matches!(Dom::node_kind(dom, id), NodeKind::Element(_)) {
-            return true;
-        }
-        child = dom.next_sibling(id);
-    }
-    false
-}
-
-fn has_text_child(dom: &NativeDom, node: NativeNodeId) -> bool {
-    let mut child = dom.first_child(node);
-    while let Some(id) = child {
-        if matches!(Dom::node_kind(dom, id), NodeKind::Text(text) if !text.trim().is_empty()) {
-            return true;
-        }
-        child = dom.next_sibling(id);
-    }
-    false
 }
 
 fn within(dom: &NativeDom, mut node: NativeNodeId, ancestor: NativeNodeId) -> bool {
