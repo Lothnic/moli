@@ -181,6 +181,17 @@ impl LayoutSource for NativeLayoutSourceView<'_> {
     }
 
     fn text_selection(&self, node: Self::NodeId) -> Option<LayoutTextSelection> {
+        if self.runtime.active_element_handle() == Some(node)
+            && crate::native_bridge::element::is_text_control(self.runtime, node)
+        {
+            let element = self.host().node(node)?.as_element()?;
+            if element.attribute("disabled").is_none() {
+                return Some(LayoutTextSelection::new(
+                    element.selection_start() as usize,
+                    element.selection_end() as usize,
+                ));
+            }
+        }
         self.text_selections.get(&node).copied()
     }
 

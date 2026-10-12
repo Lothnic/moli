@@ -1385,6 +1385,19 @@ impl ResolvedLayoutStyle {
         self.current_color()
     }
 
+    pub(crate) fn caret_color(&self) -> PaintColor {
+        use style::values::generics::color::ColorOrAuto;
+        let Some(computed) = self.computed.as_ref() else {
+            return self.current_color();
+        };
+        match computed.clone_caret_color().0 {
+            ColorOrAuto::Color(color) => {
+                absolute_paint_color(color.resolve_to_absolute(&computed.clone_color()))
+            }
+            ColorOrAuto::Auto => self.current_color(),
+        }
+    }
+
     pub(crate) const fn accepts_pointer_events(&self) -> bool {
         self.pointer_events
     }

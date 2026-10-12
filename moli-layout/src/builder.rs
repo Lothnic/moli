@@ -320,6 +320,13 @@ where
                         metrics,
                     );
                     let id = world.allocate(box_node);
+                    if matches!(
+                        semantics.category,
+                        crate::LayoutElementCategory::FormControl(_)
+                    ) {
+                        world.boxes[id.index()].text_selection =
+                            self.source.text_selection(source_node);
+                    }
                     world.map_source(source_node, id);
 
                     if is_leaf_element(&semantics, kind, &style) {

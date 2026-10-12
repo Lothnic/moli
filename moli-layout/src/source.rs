@@ -465,7 +465,7 @@ pub(crate) struct LayoutCssImageResources {
     pub(crate) mask: Vec<Option<LayoutImageResource>>,
 }
 
-/// One document selection projected onto a source text node in UTF-16 units.
+/// A document or form-control selection sampled in UTF-16 units.
 ///
 /// Equal endpoints represent a caret. The range is sampled before the
 /// synchronous one-shot pass and copied into pass-local state; paint never
@@ -540,7 +540,7 @@ pub trait LayoutSource {
         None
     }
 
-    /// Returns the active document selection intersecting one source text node.
+    /// Returns the active selection for a source text node or text control.
     fn text_selection(&self, _node: Self::NodeId) -> Option<LayoutTextSelection> {
         None
     }

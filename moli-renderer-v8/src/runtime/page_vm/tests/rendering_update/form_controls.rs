@@ -1,5 +1,57 @@
 use super::*;
 
+#[tokio::test(flavor = "current_thread")]
+async fn focused_text_controls_paint_utf16_selection_and_empty_carets() {
+    run_page_vm_async_test(async move {
+        let loader = crate::network::ResourceRequestClient::new(&FetchConfig::default())?;
+        let mut page = test_page_vm_with_loader_and_document_url(
+            &loader, Vec::new(), Url::parse("https://example.com/text-control-selection.html")?,
+        );
+        page.vm_mut().eval(r#"
+document.head.innerHTML='<style>html,body{margin:0}input,textarea{display:block;width:220px;height:40px;border:0;padding:8px;color:red;caret-color:lime;font:20px/24px sans-serif}::placeholder{color:gray}</style>';
+document.body.innerHTML='<input id=plain><input id=placeholder placeholder=Example><textarea id=area></textarea>';
+'installed'
+"#)?;
+        page.vm_mut().sync_live_document_style_sources();
+        for id in ["plain", "placeholder", "area"] {
+            let mut caret_start = 0.0;
+            let mut selected_right = 0.0;
+            for (state, script, caret, selected) in [
+                ("empty", "el.focus();el.value='';el.setSelectionRange(0,0)", true, false),
+                ("before emoji", "el.value='A😀B';el.setSelectionRange(1,1)", true, false),
+                ("selected emoji", "el.setSelectionRange(1,3)", false, true),
+                ("after emoji", "el.setSelectionRange(3,3)", true, false),
+                ("blurred", "el.blur()", false, false),
+            ] {
+                page.vm_mut().eval(&format!("{{const el=document.getElementById('{id}');{script};}}'updated'"))?;
+                let snapshot = page.vm_mut().screenshot_layout_snapshot(
+                    moli_layout::PaintViewport::new(260, 180, 1.0),
+                )?.expect("text control layout");
+                let fills = snapshot.fragments.iter().filter_map(|fragment| match fragment {
+                    moli_layout::PaintFragment::Fill { shape:moli_layout::PaintShape::Rect(rect),brush:moli_layout::PaintBrush::Solid(color),transform } => Some((transform.map_rect(*rect).bounding_rect(),*color)),
+                    _ => None,
+                }).collect::<Vec<_>>();
+                let carets = fills.iter().filter(|(rect,color)| rect.width == 1.5 && *color == moli_layout::PaintColor::new(0.0,1.0,0.0,1.0)).collect::<Vec<_>>();
+                let selections = fills.iter().filter(|(_,color)| *color == moli_layout::PaintColor::new(180.0/255.0,213.0/255.0,1.0,1.0)).collect::<Vec<_>>();
+                assert_eq!(carets.len(),usize::from(caret),"{id}/{state}: active caret");
+                assert_eq!(selections.len(),usize::from(selected),"{id}/{state}: active selection");
+                if let Some((rect,_))=carets.first() {
+                    assert!(rect.height>0.0,"{id}/{state}: visible caret");
+                    if state=="empty" {assert_eq!(rect.x,8.0,"caret starts at the CSS padding edge");}
+                    if state=="before emoji" {caret_start=rect.x;}
+                    if state=="after emoji" {assert!((rect.x-selected_right).abs()<0.1,"UTF-16 selection ends at the next caret");}
+                }
+                if let Some((rect,_))=selections.first() {
+                    assert!((rect.x-caret_start).abs()<0.1,"selection starts at the previous caret");
+                    assert!(rect.width>0.0);
+                    selected_right=rect.right();
+                }
+            }
+        }
+        Ok::<_,anyhow::Error>(())
+    }).await.expect("text control selection fixture");
+}
+
 fn dark_pixels(image: &moli_paint::RasterImage, x: u32, y: u32, width: u32, height: u32) -> usize {
     (y..y + height)
         .flat_map(|y| (x..x + width).map(move |x| ((y * image.width + x) * 4) as usize))

@@ -247,6 +247,7 @@ pub struct LayoutBox<N> {
     pub(crate) style: ResolvedLayoutStyle,
     pub(crate) text: Option<Arc<str>>,
     pub(crate) text_selection: Option<crate::LayoutTextSelection>,
+    pub(crate) selection_caret_color: Option<crate::PaintColor>,
     /// Shared text/inline layout owned by this formatting-context root.
     pub(crate) inline_layout: Option<InlineFormattingContext>,
     /// Outermost IFC that consumes this box as a flattened or atomic item.
@@ -1185,6 +1186,7 @@ where
             style,
             text,
             text_selection: None,
+            selection_caret_color: None,
             inline_layout: None,
             inline_context_owner: None,
             inline_flattened: false,

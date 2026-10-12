@@ -1134,10 +1134,12 @@ fn resolve_inline_lines(
         for (index, state) in states.iter().enumerate() {
             state_indices.insert(state.box_id.index(), index);
         }
+        let empty_caret = context.text.is_empty()
+            && matches!(context.selection, Some(InlineSelection::Caret { .. }));
         let phantom = css_line_is_phantom(
             line.break_reason(),
             geometries.iter().any(|geometry| geometry.creates_line),
-        );
+        ) && !empty_caret;
         for state in &mut states {
             state.parent = state_indices.get(&state.parent_box.index()).copied();
             state.alignment.anchor = state
@@ -1314,6 +1316,9 @@ fn resolve_inline_lines(
 
         let bounds = if phantom {
             InlineVerticalBounds::ZERO
+        } else if empty_caret {
+            // Empty editors still need their font strut for caret geometry.
+            fallback_root_bounds
         } else if context.uses_quirks_line_height {
             root_bounds.unwrap_or(InlineVerticalBounds::ZERO)
         } else {
@@ -1960,7 +1965,10 @@ pub(crate) fn prepare_inline_contexts<N>(
             continue;
         }
         let input = collect_inline_input(world, owner);
-        if input.units.is_empty() && input.objects.is_empty() {
+        if input.units.is_empty()
+            && input.objects.is_empty()
+            && world.boxes[owner.index()].text_selection.is_none()
+        {
             continue;
         }
         let parley = services.parley_mut();
@@ -2065,7 +2073,19 @@ impl InlineBuildInput {
     where
         N: Copy + Debug + Eq + Hash,
     {
-        let selection = project_inline_selection(world, &self.source_map);
+        let selection = project_inline_selection(world, &self.source_map).or_else(|| {
+            world.boxes[self.root_style.index()]
+                .text_selection
+                .filter(|selection| selection.is_caret())
+                .map(|_| InlineSelection::Caret {
+                    offset: 0,
+                    color: world.boxes[self.root_style.index()]
+                        .selection_caret_color
+                        .unwrap_or_else(|| {
+                            world.boxes[self.root_style.index()].style.caret_color()
+                        }),
+                })
+        });
         let mut root_text_style = world.boxes[self.root_style.index()]
             .style
             .parley_text_style();
@@ -2257,8 +2277,17 @@ where
         };
         if selection.is_caret() {
             if caret.is_none() {
-                caret = caret_output_offset(source_map, entry.box_id, selection.start)
-                    .map(|offset| (offset, world.boxes[entry.box_id.index()].style.text_color()));
+                caret =
+                    caret_output_offset(source_map, entry.box_id, selection.start).map(|offset| {
+                        (
+                            offset,
+                            world.boxes[entry.box_id.index()]
+                                .selection_caret_color
+                                .unwrap_or_else(|| {
+                                    world.boxes[entry.box_id.index()].style.caret_color()
+                                }),
+                        )
+                    });
             }
             continue;
         }

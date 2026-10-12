@@ -24,9 +24,11 @@ where
             form_control_texts(&world.boxes[id.index()].element_semantics)
                 .map(|(texts, placeholder)| (id, texts, placeholder))
         })
-        .filter(|(_, texts, _)| !texts.is_empty())
+        .filter(|(id, texts, _)| {
+            !texts.is_empty() || world.boxes[id.index()].text_selection.is_some()
+        })
         .collect::<Vec<_>>();
-    for (control, texts, placeholder) in controls {
+    for (control, mut texts, placeholder) in controls {
         let Some(owner) = world.boxes[control.index()].source else {
             continue;
         };
@@ -57,6 +59,11 @@ where
             )?
         };
         let text_style = ResolvedLayoutStyle::text_leaf_from(&wrapper_style);
+        let selection = world.boxes[control.index()].text_selection;
+        let caret_color = world.boxes[control.index()].style.caret_color();
+        if texts.is_empty() && selection.is_some() {
+            texts.push(Arc::from(""));
+        }
         for (row, text) in texts.into_iter().enumerate() {
             let mut wrapper = LayoutWorld::new_box(
                 None,
@@ -71,6 +78,8 @@ where
                 None,
             );
             wrapper.inline_formatting_context = true;
+            wrapper.text_selection = selection;
+            wrapper.selection_caret_color = Some(caret_color);
             let wrapper_id = world.allocate(wrapper);
             let text_id = world.allocate(LayoutWorld::new_box(
                 None,
@@ -84,6 +93,8 @@ where
                 text_style.clone(),
                 Some(text),
             ));
+            world.boxes[text_id.index()].text_selection = selection;
+            world.boxes[text_id.index()].selection_caret_color = Some(caret_color);
             world.append_synthesized_child(wrapper_id, text_id)?;
             world.append_synthesized_child(control, wrapper_id)?;
         }
