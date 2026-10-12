@@ -19,6 +19,7 @@ mod dom_parser;
 mod element_construction;
 mod elements_and_events;
 mod files_and_transfer;
+mod mouse_click_target;
 mod pointer_and_mouse;
 mod ranges;
 mod rendered_text;

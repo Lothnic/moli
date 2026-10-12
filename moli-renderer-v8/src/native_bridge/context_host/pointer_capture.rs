@@ -43,6 +43,12 @@ impl JsContextHost {
             .filter(|target| self.dom_host().is_connected(*target))
     }
 
+    pub(crate) fn pointer_capture_target_for_click(&self, pointer_id: i32) -> Option<DomHandle> {
+        // Click keeps the active capture target even when a release listener
+        // detaches it. Capture cleanup still sends lostpointercapture.
+        self.pointer_capture_targets.get(&pointer_id).copied()
+    }
+
     pub(crate) fn pointer_capture_target_is_connected(&self, target: DomHandle) -> bool {
         self.dom_host().is_connected(target)
     }

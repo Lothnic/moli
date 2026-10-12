@@ -300,9 +300,9 @@ fn pointer_capture_routes_mouse_pointer_until_pointerup() {
 }
 
 #[test]
-fn pointer_capture_lost_dispatches_before_compat_mouseup() {
+fn pointer_capture_lost_dispatches_after_compat_mouseup() {
     let mut vm = new_rendered_test_vm(
-        "https://pointer-capture-lost-before-mouseup.test/",
+        "https://pointer-capture-lost-after-mouseup.test/",
         r#"<html><body><div id="target0">capture</div></body></html>"#,
     );
     vm.eval(
@@ -329,14 +329,14 @@ fn pointer_capture_lost_dispatches_before_compat_mouseup() {
     vm.dispatch_mouse_event_at_point(10.0, 11.0, "mousedown", 0, None, 0.0, 0.0)
         .expect("mousedown should dispatch pointerdown");
     vm.dispatch_mouse_event_at_point(10.0, 11.0, "mouseup", 0, None, 0.0, 0.0)
-        .expect("mouseup should dispatch pointerup, lostpointercapture, mouseup");
+        .expect("mouseup should dispatch pointerup, mouseup, lostpointercapture");
 
     let result = vm
         .eval("window.__captureMouseupOrder.join('|')")
         .expect("capture mouseup order log should evaluate");
     assert_eq!(
         result,
-        "pointerdown|gotpointercapture|pointerup|lostpointercapture|mouseup"
+        "pointerdown|gotpointercapture|pointerup|mouseup|lostpointercapture"
     );
 }
 

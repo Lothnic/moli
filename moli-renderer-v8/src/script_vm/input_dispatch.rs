@@ -3,9 +3,7 @@ use std::cell::Cell;
 use std::rc::Rc;
 
 use super::input_dispatch_outcome;
-use super::input_helpers::{
-    MouseReleaseFollowUp, PendingMousePress, mouse_button_mask, single_changed_mouse_button,
-};
+use super::input_helpers::{mouse_button_mask, single_changed_mouse_button};
 use super::inspector::{
     current_selection_state, is_space_key, key_target_info, option_is_disabled, radio_group_members,
 };
@@ -33,7 +31,7 @@ use crate::native_bridge::element::{
     text_control_set_selection_range_with_direction_internal, text_control_value, update_focus,
 };
 use crate::native_bridge::{
-    CurrentInputEvent, CurrentInputEventScope, PointerCaptureDispatchEvent,
+    CurrentInputEvent, CurrentInputEventScope, MouseReleaseFollowUp, PointerCaptureDispatchEvent,
 };
 use crate::runtime::{
     RendererDragData, RendererInputDispatchOutcome, RendererPointerEventProperties,
@@ -84,7 +82,6 @@ const TOUCH_POINTER_ID: i32 = 2;
 struct PreparedMouseInputDispatch {
     button: i32,
     buttons: i32,
-    released_press: Option<PendingMousePress>,
 }
 
 fn touch_pointer_id(touch_id: i32) -> i32 {
@@ -395,6 +392,9 @@ impl ScriptVm {
             pointer,
             modifiers,
         );
+        if event_name == "mouseup" {
+            self._context_host.borrow_mut().clear_mouse_press();
+        }
         self.finish_input_event_dispatch_turn(result)
     }
 
@@ -454,7 +454,7 @@ impl ScriptVm {
             Rc::clone(&self._context_host),
             CurrentInputEvent::mouse(event_name, prepared.button, modifiers),
         );
-        self.dispatch_mouse_event_at_point_with_pointer_and_modifiers_body(
+        let result = self.dispatch_mouse_event_at_point_with_pointer_and_modifiers_body(
             x,
             y,
             event_name,
@@ -465,7 +465,11 @@ impl ScriptVm {
             delta_y,
             pointer,
             modifiers,
-        )
+        );
+        if event_name == "mouseup" {
+            self._context_host.borrow_mut().clear_mouse_press();
+        }
+        result
     }
 
     pub(crate) fn mouse_input_surface_hit(
@@ -490,11 +494,6 @@ impl ScriptVm {
         buttons: Option<i32>,
     ) -> PreparedMouseInputDispatch {
         let previous_pressed_buttons = self.pressed_mouse_buttons;
-        let released_press = if event_name == "mouseup" {
-            self.pending_mouse_press.take()
-        } else {
-            None
-        };
         let button = if button >= 0 {
             button
         } else {
@@ -504,9 +503,10 @@ impl ScriptVm {
                         single_changed_mouse_button(current_buttons & !previous_pressed_buttons)
                     })
                     .unwrap_or(-1),
-                "mouseup" => released_press
-                    .as_ref()
-                    .map(|press| press.button)
+                "mouseup" => self
+                    ._context_host
+                    .borrow()
+                    .mouse_press_button()
                     .or_else(|| {
                         buttons.and_then(|current_buttons| {
                             single_changed_mouse_button(previous_pressed_buttons & !current_buttons)
@@ -523,7 +523,6 @@ impl ScriptVm {
         } else {
             match event_name {
                 "mousedown" => {
-                    self.pending_mouse_press = None;
                     if button_mask != 0 {
                         self.pressed_mouse_buttons |= button_mask;
                     }
@@ -535,11 +534,10 @@ impl ScriptVm {
             }
         }
         let buttons = buttons.unwrap_or(self.pressed_mouse_buttons);
-        PreparedMouseInputDispatch {
-            button,
-            buttons,
-            released_press,
+        if event_name == "mousedown" {
+            self._context_host.borrow_mut().clear_mouse_press();
         }
+        PreparedMouseInputDispatch { button, buttons }
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -556,11 +554,7 @@ impl ScriptVm {
         pointer: RendererPointerEventProperties,
         modifiers: u8,
     ) -> Result<RendererInputDispatchOutcome> {
-        let PreparedMouseInputDispatch {
-            button,
-            buttons,
-            released_press,
-        } = prepared;
+        let PreparedMouseInputDispatch { button, buttons } = prepared;
 
         if let Some(outcome) =
             self.dispatch_active_scrollbar_mouse_event(x, y, event_name, button, buttons)?
@@ -638,6 +632,11 @@ impl ScriptVm {
         let Some(handle) = capture_handle.or(hit_handle).or(wheel_fallback_handle) else {
             return Ok(input_dispatch_outcome(false));
         };
+        if pointer_event_name.is_some() {
+            self._context_host
+                .borrow_mut()
+                .set_mouse_event_target(handle);
+        }
         let root_to_frame = hit
             .filter(|hit| hit.handle == handle)
             .map(|hit| hit.root_to_frame)
@@ -663,30 +662,16 @@ impl ScriptVm {
             && buttons & 1 != 0
             && self.active_drag_session.is_none()
         {
-            self.pending_mouse_press.map(|press| press.handle)
+            self._context_host.borrow().mouse_press_handle()
         } else {
             None
         };
 
-        let follow_up = if event_name == "mouseup" {
-            match released_press {
-                Some(PendingMousePress {
-                    handle: pressed_handle,
-                    button: pressed_button,
-                }) if pressed_handle == handle && pressed_button == button => match button {
-                    0 => Some(MouseReleaseFollowUp::ActivateViaClick),
-                    1 => Some(MouseReleaseFollowUp::DispatchEvent("auxclick")),
-                    2 => Some(MouseReleaseFollowUp::DispatchEvent("contextmenu")),
-                    _ => None,
-                },
-                _ => None,
-            }
-        } else {
-            if event_name == "mousedown" && button >= 0 {
-                self.pending_mouse_press = Some(PendingMousePress { handle, button });
-            }
-            None
-        };
+        if event_name == "mousedown" && button >= 0 {
+            self._context_host
+                .borrow_mut()
+                .begin_mouse_press(handle, button);
+        }
 
         let active_drag_session: *mut Option<ActiveDragSession> = &mut self.active_drag_session;
 
@@ -794,6 +779,7 @@ impl ScriptVm {
                         .active_pointer_capture_target(MOUSE_POINTER_ID)
                         .or(hit_handle)
                         .unwrap_or(pointer_dispatch_handle);
+                    unsafe { &mut *runtime_ptr }.set_mouse_event_target(pointer_dispatch_handle);
                 }
             }
             if let Some((Some(previous_handle), previous_root_to_frame)) = hover_transition {
@@ -873,22 +859,16 @@ impl ScriptVm {
                     suppress_compat_mouse_events = true;
                 }
             }
-            if event_name == "mouseup" {
-                release_pointer_capture_after_pointer_end(
-                    scope,
-                    runtime_ptr,
-                    MOUSE_POINTER_ID,
-                    client_x,
-                    client_y,
-                    button,
-                    buttons,
-                    &pointer,
-                    modifiers,
-                );
-            }
+            let mouse_dispatch_handle = if pointer_event_name.is_some() {
+                unsafe { &*runtime_ptr }.mouse_event_target()
+            } else {
+                Some(pointer_dispatch_handle)
+            };
             let suppress_current_mouse_event =
                 suppress_compat_mouse_events && can_suppress_compat_mouse_event(event_name);
-            if !suppress_current_mouse_event {
+            if !suppress_current_mouse_event
+                && let Some(mouse_dispatch_handle) = mouse_dispatch_handle
+            {
                 let event = if event_name == "wheel" {
                     construct_wheel_event(
                         scope, event_name, client_x, client_y, delta_x, delta_y, button, buttons,
@@ -901,7 +881,7 @@ impl ScriptVm {
                 };
                 if let Some(event) = event {
                     let dispatched =
-                        dispatch_public_event(scope, runtime_ptr, pointer_dispatch_handle, event);
+                        dispatch_public_event(scope, runtime_ptr, mouse_dispatch_handle, event);
                     if event_name == "wheel" && dispatched.allows_default() {
                         let _ = perform_wheel_scroll_default_action(
                             scope,
@@ -925,6 +905,24 @@ impl ScriptVm {
                     }
                 }
             }
+            let captured_click_target = if event_name == "mouseup" {
+                let captured =
+                    unsafe { &*runtime_ptr }.pointer_capture_target_for_click(MOUSE_POINTER_ID);
+                release_pointer_capture_after_pointer_end(
+                    scope,
+                    runtime_ptr,
+                    MOUSE_POINTER_ID,
+                    client_x,
+                    client_y,
+                    button,
+                    buttons,
+                    &pointer,
+                    modifiers,
+                );
+                captured
+            } else {
+                None
+            };
             if let Some(drag_start_handle) = drag_start_handle
                 && !suppress_current_mouse_event
             {
@@ -1011,15 +1009,28 @@ impl ScriptVm {
                     active_drag_session.take();
                 }
             }
+            // Keep the host-owned press alive through the release listeners;
+            // synchronous DOM removals can invalidate it before click targeting.
+            let follow_up = if event_name == "mouseup" {
+                mouse_dispatch_handle.and_then(|target| {
+                    unsafe { &mut *runtime_ptr }.mouse_release_follow_up(
+                        target,
+                        button,
+                        captured_click_target,
+                    )
+                })
+            } else {
+                None
+            };
             match follow_up {
-                Some(MouseReleaseFollowUp::ActivateViaClick) => {
+                Some(MouseReleaseFollowUp::ActivateViaClick(click_target)) => {
                     if event_name == "mouseup" {
                         suppress_compat_mouse_events = false;
                     }
                     let outcome = activate_handle_after_pointer_release(
                         scope,
                         runtime_ptr,
-                        handle,
+                        click_target,
                         client_x,
                         client_y,
                         button,
@@ -1039,11 +1050,14 @@ impl ScriptVm {
                             modifiers,
                         )
                     {
-                        let _ = dispatch_public_event(scope, runtime_ptr, handle, event);
+                        let _ = dispatch_public_event(scope, runtime_ptr, click_target, event);
                     }
                     return Ok(outcome);
                 }
-                Some(MouseReleaseFollowUp::DispatchEvent(follow_up_event_name)) => {
+                Some(MouseReleaseFollowUp::DispatchEvent {
+                    name: follow_up_event_name,
+                    target,
+                }) => {
                     if event_name == "mouseup" {
                         suppress_compat_mouse_events = false;
                     }
@@ -1061,12 +1075,12 @@ impl ScriptVm {
                         buttons,
                         modifiers,
                     ) {
-                        let dispatched = dispatch_public_event(scope, runtime_ptr, handle, event);
+                        let dispatched = dispatch_public_event(scope, runtime_ptr, target, event);
                         if follow_up_event_name == "auxclick" && dispatched.allows_default() {
                             pending_download = perform_auxiliary_link_default_action(
                                 scope,
                                 runtime_ptr,
-                                handle,
+                                target,
                                 button,
                                 modifiers,
                                 &pending_child_navigations_before_event,

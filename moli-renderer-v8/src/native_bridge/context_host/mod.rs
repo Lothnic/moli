@@ -127,6 +127,8 @@ pub(crate) use text_track_loads::{
 mod message_ports;
 mod messages;
 mod module_owner_tasks;
+mod mouse_click;
+pub(crate) use mouse_click::MouseReleaseFollowUp;
 mod navigation;
 mod navigator_overrides;
 mod opfs_tasks;
@@ -935,6 +937,7 @@ pub(crate) struct JsContextHost {
     active_pointer_capture_ids: HashSet<i32>,
     pending_pointer_capture_targets: HashMap<i32, DomHandle>,
     pointer_capture_targets: HashMap<i32, DomHandle>,
+    mouse_input: mouse_click::MouseInputState,
     lazy_media_load_candidates: HashSet<DomHandle>,
     canvas_resources: canvas_resources::CanvasResourceStore,
     image_resources: image_resources::ImageResourceStore,

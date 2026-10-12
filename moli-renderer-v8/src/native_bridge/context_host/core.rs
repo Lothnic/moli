@@ -458,6 +458,7 @@ impl JsContextHost {
             active_pointer_capture_ids: HashSet::new(),
             pending_pointer_capture_targets: HashMap::new(),
             pointer_capture_targets: HashMap::new(),
+            mouse_input: mouse_click::MouseInputState::default(),
             lazy_media_load_candidates: HashSet::new(),
             canvas_resources: super::canvas_resources::CanvasResourceStore::new(
                 visual_resource_generation.clone(),

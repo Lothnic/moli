@@ -4,18 +4,6 @@ use crate::host::ModuleFailurePolicy;
 use crate::module_runtime::{ModuleGraphHandle, ModuleLoadError, ModuleLoadStage};
 use crate::types::ScriptErrorConstructorKind;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) struct PendingMousePress {
-    pub(super) handle: DomHandle,
-    pub(super) button: i32,
-}
-
-#[derive(Clone, Copy)]
-pub(super) enum MouseReleaseFollowUp {
-    ActivateViaClick,
-    DispatchEvent(&'static str),
-}
-
 pub(super) fn mouse_button_mask(button: i32) -> i32 {
     match button {
         0 => 1,
@@ -48,7 +36,7 @@ pub(super) fn single_changed_mouse_button(mask: i32) -> Option<i32> {
 
 pub(super) fn clear_input_dispatch_state(vm: &mut ScriptVm) {
     vm.pressed_mouse_buttons = 0;
-    vm.pending_mouse_press = None;
+    vm._context_host.borrow_mut().clear_mouse_input_state();
     vm.hovered_mouse_handle = None;
     vm.hovered_mouse_root_to_frame = moli_layout::LayoutTransform2D::IDENTITY;
     vm._context_host

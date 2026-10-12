@@ -1,6 +1,13 @@
 use super::*;
 
 impl DomHost {
+    /// Parent in the distributed tree used for rendering and click targeting.
+    /// Shadow roots are transparent; assigned light children belong to slots.
+    pub fn flat_tree_parent(&self, node: DomHandle) -> Option<DomHandle> {
+        let parent = self.composed_parent(node)?;
+        Some(self.shadow_root_host(parent).unwrap_or(parent))
+    }
+
     /// Includes the ShadowRoot as a transparent link. Unassigned light nodes
     /// and replaced slot fallback have no parent in the composed tree.
     pub fn composed_parent(&self, node: DomHandle) -> Option<DomHandle> {
