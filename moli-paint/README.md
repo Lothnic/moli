@@ -12,6 +12,19 @@ The renderer owns the print request, restores media after snapshot capture, and
 returns PDF bytes to both clients without publishing interactive geometry. Vector
 print capture is independent of the full-document bitmap dimension limit.
 
+The entry points and shared code are organized by responsibility:
+
+- `moli/src/fetch_dump/pdf.rs` starts CLI printing; `screenshot.rs` handles PNG exports.
+- `moli-renderer-v8/src/runtime/page_print.rs` owns PDF request/reply types and the
+  print lifecycle. `page_screenshot.rs` owns screenshot/screencast types and capture.
+- `moli-paint/src/validation.rs` validates shared resource references, scope balance
+  and work budgets; `error.rs` defines the public paint errors.
+- `moli-paint/src/geometry.rs` converts shapes and transforms; `scene/` converts
+  drawing primitives into AnyRender commands for both output backends.
+- `moli-paint/src/raster/` allocates and renders pixel surfaces;
+  `pdf/` encodes native PDF content and invokes bounded raster fallbacks for effects
+  that need them. Ordinary PDF text bypasses AnyRender to retain Unicode mappings.
+
 The dependency uses a fixed Git revision with only `raster-images` enabled;
 `simple-text` remains disabled because Parley already performs shaping. Krilla's
 own `pdf-writer` Git pin (`fdf0901`) is recorded in `Cargo.lock`. This revision

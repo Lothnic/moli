@@ -1,6 +1,7 @@
 mod dom;
 mod node_details;
-mod raster;
+mod pdf;
+mod screenshot;
 mod semantic;
 
 #[cfg(test)]
@@ -59,17 +60,18 @@ pub async fn render_page_output_async(
 ) -> Result<Vec<u8>> {
     match command.dump_mode.unwrap_or(DumpFormat::Html) {
         DumpFormat::Screenshot => {
-            raster::render_screenshot(page, RendererScreenshotRegion::Viewport, "screenshot").await
+            screenshot::render_screenshot(page, RendererScreenshotRegion::Viewport, "screenshot")
+                .await
         }
         DumpFormat::ScreenshotFull => {
-            raster::render_screenshot(
+            screenshot::render_screenshot(
                 page,
                 RendererScreenshotRegion::FullDocument,
                 "screenshot_full",
             )
             .await
         }
-        DumpFormat::Pdf => raster::render_pdf(page).await,
+        DumpFormat::Pdf => pdf::render_pdf(page).await,
         _ => render_page_dump_async(page, command)
             .await
             .map(String::into_bytes),

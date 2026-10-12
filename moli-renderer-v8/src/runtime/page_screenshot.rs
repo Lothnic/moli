@@ -1,3 +1,5 @@
+//! Screenshot and screencast requests, replies and pixel capture.
+
 use moli_layout::{
     LayoutRect, LayoutTransform2D, PaintCaptureRegion, PaintCaptureRequest, PaintCaptureSurface,
     PaintViewport,
@@ -6,10 +8,7 @@ use moli_page_types::{LayoutPolicy, ViewportSurface};
 use std::sync::Arc;
 use std::time::Instant;
 
-use super::{
-    PageVm, RendererCaptureScreencastFrameReply, RendererCaptureScreenshotReply,
-    RendererCapturedScreencastFrame, RendererCapturedScreenshot, RendererDocumentLifecycleIdentity,
-};
+use super::{PageVm, RendererDocumentLifecycleIdentity};
 
 #[derive(Default)]
 struct PaintFragmentProfile {
@@ -119,7 +118,10 @@ pub enum RendererScreenshotFormat {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RendererScreenshotPurpose {
     Screenshot,
-    Print { print_background: bool },
+    /// Pixel capture under print media, independent of native PDF output.
+    Print {
+        print_background: bool,
+    },
 }
 
 /// A CDP page-coordinate clip. Validation remains at the renderer boundary so
@@ -172,6 +174,37 @@ pub struct RendererCaptureScreencastFrameRequest {
     pub known_visual_state: Option<RendererVisualStateToken>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RendererCapturedScreenshot {
+    pub mime_type: String,
+    pub width: u32,
+    pub height: u32,
+    pub bytes: Arc<[u8]>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum RendererCaptureScreenshotReply {
+    Captured(RendererCapturedScreenshot),
+    LayoutDisabled,
+    NoDocument,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RendererCapturedScreencastFrame {
+    /// Native viewport dimensions before the encoded frame is fitted to limits.
+    pub viewport_size: (u32, u32),
+    pub image: RendererCapturedScreenshot,
+    pub visual_state: RendererVisualStateToken,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum RendererCaptureScreencastFrameReply {
+    Captured(RendererCapturedScreencastFrame),
+    Unchanged,
+    LayoutDisabled,
+    NoDocument,
+}
+
 impl RendererCaptureScreenshotRequest {
     pub fn viewport_png() -> Self {
         Self {
@@ -188,51 +221,6 @@ impl RendererCaptureScreenshotRequest {
 }
 
 impl PageVm {
-    /// Projects print media and encodes PDF without allocating a full-document
-    /// bitmap or publishing interactive screen geometry. Both output clients
-    /// use this lifecycle, including restoration before any encoding error.
-    pub(super) fn print_to_pdf(
-        &mut self,
-        request: super::RendererPrintToPdfRequest,
-    ) -> anyhow::Result<super::RendererPrintToPdfReply> {
-        use super::RendererPrintToPdfReply as Reply;
-        self.flush_page_action_window(moli_action_window::ActionBarrier::Explicit)?;
-        if self.layout_configuration.policy == LayoutPolicy::Mock {
-            return Ok(Reply::LayoutDisabled);
-        }
-        let previous = self.document_settings.emulated_media.clone();
-        let restore = previous.media.is_none();
-        if restore {
-            let mut print = previous.clone();
-            print.media = Some("print".to_owned());
-            self.set_emulated_media(&print)?;
-        }
-        let surface = self.document_settings.viewport_surface.unwrap_or_default();
-        let viewport = PaintViewport::new(
-            surface.inner_width,
-            surface.inner_height,
-            surface.device_pixel_ratio as f32,
-        );
-        let result = self.vm_mut().paint_layout_snapshot_with_capture(
-            viewport,
-            moli_layout::LayoutFlushReason::Print,
-            PaintCaptureRequest {
-                include_backgrounds: request.print_background,
-                ..PaintCaptureRequest::print_document()
-            },
-        );
-        if restore {
-            self.set_emulated_media(&previous)?;
-        }
-        Ok(match result? {
-            Some(snapshot) => match moli_paint::pdf::pdf_snapshot(&snapshot, &request.options) {
-                Ok(bytes) => Reply::Printed(bytes),
-                Err(error) => Reply::Failed(error.to_string()),
-            },
-            None => Reply::NoDocument,
-        })
-    }
-
     /// Captures an explicit screenshot or print raster. These demands always
     /// execute a fresh paint pass and never carry screencast state.
     pub(super) fn capture_screenshot(

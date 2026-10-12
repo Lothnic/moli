@@ -6028,53 +6028,6 @@ impl RendererRuntimeEvaluationResult {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct RendererCapturedScreenshot {
-    pub mime_type: String,
-    pub width: u32,
-    pub height: u32,
-    pub bytes: Arc<[u8]>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum RendererCaptureScreenshotReply {
-    Captured(RendererCapturedScreenshot),
-    LayoutDisabled,
-    NoDocument,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct RendererCapturedScreencastFrame {
-    /// Native viewport dimensions before the encoded frame is fitted to limits.
-    pub viewport_size: (u32, u32),
-    pub image: RendererCapturedScreenshot,
-    pub visual_state: RendererVisualStateToken,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum RendererCaptureScreencastFrameReply {
-    Captured(RendererCapturedScreencastFrame),
-    Unchanged,
-    LayoutDisabled,
-    NoDocument,
-}
-
-pub use moli_paint::pdf::PdfOptions as RendererPdfOptions;
-
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct RendererPrintToPdfRequest {
-    pub options: RendererPdfOptions,
-    pub print_background: bool,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub enum RendererPrintToPdfReply {
-    Printed(Vec<u8>),
-    Failed(String),
-    LayoutDisabled,
-    NoDocument,
-}
-
 pub enum RendererPageReply {
     WebMcp(std::result::Result<Option<u64>, moli_page_types::RendererWebMcpError>),
     NativeCommandReady(Box<RendererNativeCommandReadyResponse>),

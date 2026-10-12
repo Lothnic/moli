@@ -81,6 +81,7 @@ mod page_entry_residence;
 mod page_generated_dom;
 mod page_geometry;
 mod page_network;
+mod page_print;
 mod page_screenshot;
 mod page_settings;
 mod page_state;
@@ -320,10 +321,15 @@ pub(crate) use self::page_context_cancel::{
     RendererPageContextCancelReason, RendererPageContextCancelReceiver,
     RendererPageContextCancelSender, renderer_page_context_cancel_channel,
 };
+pub use self::page_print::{
+    RendererPdfOptions, RendererPrintToPdfReply, RendererPrintToPdfRequest,
+};
 pub use self::page_screenshot::{
-    RendererCaptureScreencastFrameRequest, RendererCaptureScreenshotRequest,
-    RendererScreenshotClip, RendererScreenshotFormat, RendererScreenshotPurpose,
-    RendererScreenshotRegion, RendererVisualStateToken,
+    RendererCaptureScreencastFrameReply, RendererCaptureScreencastFrameRequest,
+    RendererCaptureScreenshotReply, RendererCaptureScreenshotRequest,
+    RendererCapturedScreencastFrame, RendererCapturedScreenshot, RendererScreenshotClip,
+    RendererScreenshotFormat, RendererScreenshotPurpose, RendererScreenshotRegion,
+    RendererVisualStateToken,
 };
 pub(super) use self::page_state::RendererPageEntry;
 pub use self::page_state::RendererPageRecord;
@@ -335,10 +341,8 @@ pub use self::page_surface::{
     PendingWorkerRuntimeInspectorSessionResponse, RendererAccessibilityPayloadsForObjectId,
     RendererActivityDiagnostics, RendererAgentAttachmentId, RendererAutofillAddressField,
     RendererAutofillCreditCard, RendererAutofillTriggerOutcome, RendererAutofillTriggerRequest,
-    RendererAuxiliaryDocumentResponse, RendererCaptureScreencastFrameReply,
-    RendererCaptureScreenshotReply, RendererCapturedScreencastFrame, RendererCapturedScreenshot,
-    RendererCommandTurnCompletion, RendererCommandTurnOutput, RendererCountEntry,
-    RendererDedicatedWorkerTargetEvent, RendererDedicatedWorkerTargetInfo,
+    RendererAuxiliaryDocumentResponse, RendererCommandTurnCompletion, RendererCommandTurnOutput,
+    RendererCountEntry, RendererDedicatedWorkerTargetEvent, RendererDedicatedWorkerTargetInfo,
     RendererDevToolsAgentToken, RendererDocumentBoxModel, RendererDocumentChildNodeSnapshotEvent,
     RendererDocumentChildNodeSnapshotEvents, RendererDocumentChildNodeSnapshots,
     RendererDocumentFrontendNodeIdsResolution, RendererDocumentHitTestResult,
@@ -369,30 +373,30 @@ pub use self::page_surface::{
     RendererNavigationInitiator, RendererPageCommand, RendererPageCommandPostResponseContinuation,
     RendererPageCookieFacadeSnapshotReply, RendererPageCreationDiagnostics,
     RendererPageDiagnosticsSnapshot, RendererPageDumpFormat, RendererPageDumpOptions,
-    RendererPageDumpStripOptions, RendererPageReply, RendererPageView, RendererPdfOptions,
+    RendererPageDumpStripOptions, RendererPageReply, RendererPageView,
     RendererPendingDownloadActivation, RendererPendingDownloadResponse,
     RendererPendingFileChooserActivation, RendererPendingJavaScriptDialog,
     RendererPendingPopupActivation, RendererPendingSameDocumentNavigation,
     RendererPendingTopLevelHistoryTraversal, RendererPendingWindowOpenEvent,
     RendererPerformanceMetricSnapshot, RendererPointerEventProperties,
-    RendererPopupActivationSource, RendererPopupDisposition, RendererPrintToPdfReply,
-    RendererPrintToPdfRequest, RendererResourceTextSearchOutcome, RendererRuntimeCommandOutput,
-    RendererRuntimeEvaluationResult, RendererRuntimeHeapSpaceUsage, RendererRuntimeHeapUsage,
-    RendererRuntimeInspectorAsyncCompletion, RendererRuntimeInspectorMessage,
-    RendererRuntimeInspectorMessageBatch, RendererRuntimeInspectorProtocolMessage,
-    RendererRuntimeInspectorProtocolMessageValueMut, RendererRuntimeInspectorResponseChannel,
-    RendererRuntimeInspectorResponseSender, RendererRuntimeObservableSourceItem,
-    RendererRuntimeObservableSourceSummary, RendererRuntimeRealmInfo, RendererRuntimeRemoteObject,
-    RendererRuntimeRemoteObjectResolution, RendererScriptExecutionMemoryDiagnostics,
-    RendererScriptSourceMemoryDiagnostics, RendererScrollIntoViewResult,
-    RendererServiceWorkerConsoleMessage, RendererServiceWorkerExceptionMessage,
-    RendererServiceWorkerFetchDiagnostic, RendererServiceWorkerFetchDiagnosticResult,
-    RendererServiceWorkerTargetEvent, RendererServiceWorkerTargetInfo,
-    RendererServiceWorkerVersionStatus, RendererSetDocumentContentResult,
-    RendererSharedWorkerConsoleMessage, RendererSharedWorkerTargetEvent,
-    RendererSharedWorkerTargetInfo, RendererStyleSheetHeader, RendererStyleSheetInventoryUpdate,
-    RendererStyleSheetPayload, RendererSyntheticResponseBody, RendererTextSearchMatch,
-    RendererTouchPoint, RendererWindowDocumentSource, RuntimeConsoleMessageSnapshot,
+    RendererPopupActivationSource, RendererPopupDisposition, RendererResourceTextSearchOutcome,
+    RendererRuntimeCommandOutput, RendererRuntimeEvaluationResult, RendererRuntimeHeapSpaceUsage,
+    RendererRuntimeHeapUsage, RendererRuntimeInspectorAsyncCompletion,
+    RendererRuntimeInspectorMessage, RendererRuntimeInspectorMessageBatch,
+    RendererRuntimeInspectorProtocolMessage, RendererRuntimeInspectorProtocolMessageValueMut,
+    RendererRuntimeInspectorResponseChannel, RendererRuntimeInspectorResponseSender,
+    RendererRuntimeObservableSourceItem, RendererRuntimeObservableSourceSummary,
+    RendererRuntimeRealmInfo, RendererRuntimeRemoteObject, RendererRuntimeRemoteObjectResolution,
+    RendererScriptExecutionMemoryDiagnostics, RendererScriptSourceMemoryDiagnostics,
+    RendererScrollIntoViewResult, RendererServiceWorkerConsoleMessage,
+    RendererServiceWorkerExceptionMessage, RendererServiceWorkerFetchDiagnostic,
+    RendererServiceWorkerFetchDiagnosticResult, RendererServiceWorkerTargetEvent,
+    RendererServiceWorkerTargetInfo, RendererServiceWorkerVersionStatus,
+    RendererSetDocumentContentResult, RendererSharedWorkerConsoleMessage,
+    RendererSharedWorkerTargetEvent, RendererSharedWorkerTargetInfo, RendererStyleSheetHeader,
+    RendererStyleSheetInventoryUpdate, RendererStyleSheetPayload, RendererSyntheticResponseBody,
+    RendererTextSearchMatch, RendererTouchPoint, RendererWindowDocumentSource,
+    RuntimeConsoleMessageSnapshot,
 };
 pub(crate) use self::page_surface::{
     RendererCommandTurnOutputRecorder, RendererDevToolsSessionOutputHost,

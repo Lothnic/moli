@@ -120,7 +120,7 @@ pub(super) fn draw(
             "invalid glyph-to-text cluster mapping".into(),
         ));
     }
-    let matrix = crate::raster::to_backend_transform(run.transform);
+    let matrix = crate::geometry::to_backend_transform(run.transform);
     let font = fonts.get(snapshot, run)?;
     let font_size = run.font_size;
     let skew = run.glyph_skew_radians.unwrap_or_default().tan();

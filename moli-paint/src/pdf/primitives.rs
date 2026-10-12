@@ -225,7 +225,7 @@ impl<'a, 's> PdfPainter<'a, 's> {
                         entry.insert(super::image::from_rgba(&resource.image, interpolate)?);
                     }
                     let data = self.images[&key].clone();
-                    let matrix = crate::raster::to_backend_transform(image.transform)
+                    let matrix = crate::geometry::to_backend_transform(image.transform)
                         * Affine::translate((
                             image.destination.x as f64,
                             image.destination.y as f64,
@@ -245,7 +245,7 @@ impl<'a, 's> PdfPainter<'a, 's> {
                     // Share the existing lowering of border styles, decorations,
                     // gradients and SVG paths. Text bypasses AnyRender entirely.
                     let mut scene = Scene::new();
-                    crate::raster::paint_fragment(&mut scene, self.snapshot, fragment, 1.0);
+                    crate::scene::paint_fragment(&mut scene, self.snapshot, fragment, 1.0);
                     if supported(&scene) {
                         self.commands(scene)?;
                     } else {
@@ -262,8 +262,8 @@ impl<'a, 's> PdfPainter<'a, 's> {
             shape: shape.clone(),
             transform: matrix,
         });
-        let shape = crate::raster::to_backend_shape(shape);
-        let matrix = crate::raster::to_backend_transform(matrix);
+        let shape = crate::geometry::to_backend_shape(shape);
+        let matrix = crate::geometry::to_backend_transform(matrix);
         let shape = matrix * shape;
         let bounds = self.clips.last().unwrap().intersect(shape.bounding_box());
         self.clips.push(bounds);
@@ -540,7 +540,7 @@ fn fragment_bounds(fragment: &PaintFragment) -> Option<Rect> {
         }
         _ => return None,
     };
-    Some(crate::raster::to_backend_transform(matrix).transform_rect_bbox(bounds))
+    Some(crate::geometry::to_backend_transform(matrix).transform_rect_bbox(bounds))
 }
 fn translate_fragment(fragment: &mut PaintFragment, translation: Affine) {
     let matrix = match fragment {
@@ -558,7 +558,7 @@ fn translate_fragment(fragment: &mut PaintFragment, translation: Affine) {
         PaintFragment::PopLayer => return,
     };
     *matrix = PaintTransform2D::new(
-        (translation * crate::raster::to_backend_transform(*matrix)).as_coeffs(),
+        (translation * crate::geometry::to_backend_transform(*matrix)).as_coeffs(),
     );
 }
 

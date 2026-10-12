@@ -1,10 +1,12 @@
+//! PNG screenshot exports from the renderer capture API.
+
 use anyhow::{Context, Result, bail};
 use moli_core::page::{
     Page, RendererCaptureScreenshotReply, RendererCaptureScreenshotRequest,
-    RendererPrintToPdfReply, RendererPrintToPdfRequest, RendererScreenshotRegion,
+    RendererScreenshotRegion,
 };
 
-struct CapturedRaster {
+struct CapturedScreenshot {
     mime_type: String,
     bytes: Vec<u8>,
 }
@@ -16,7 +18,7 @@ pub(super) async fn render_screenshot(
 ) -> Result<Vec<u8>> {
     let mut request = RendererCaptureScreenshotRequest::viewport_png();
     request.region = region;
-    let image = capture_page_raster(page, request, dump_mode).await?;
+    let image = capture_page_screenshot(page, request, dump_mode).await?;
     if image.mime_type != "image/png" {
         bail!(
             "screenshot renderer returned `{}` instead of PNG",
@@ -26,35 +28,11 @@ pub(super) async fn render_screenshot(
     Ok(image.bytes)
 }
 
-pub(super) async fn render_pdf(page: &mut Page) -> Result<Vec<u8>> {
-    let pending = page
-        .start_print_to_pdf(RendererPrintToPdfRequest {
-            // CLI exports preserve page artwork, including white-on-color controls.
-            print_background: true,
-            ..Default::default()
-        })
-        .context("failed to start --dump pdf capture")?;
-    let completion = pending
-        .wait()
-        .await
-        .context("failed to complete --dump pdf capture")?;
-    match page.finish_print_to_pdf(completion)? {
-        RendererPrintToPdfReply::Printed(bytes) => Ok(bytes),
-        RendererPrintToPdfReply::Failed(error) => bail!("{error}"),
-        RendererPrintToPdfReply::LayoutDisabled => {
-            bail!("--dump pdf requires --layout or MOLI_LAYOUT=true")
-        }
-        RendererPrintToPdfReply::NoDocument => {
-            bail!("--dump pdf requires a loaded HTML document")
-        }
-    }
-}
-
-async fn capture_page_raster(
+async fn capture_page_screenshot(
     page: &mut Page,
     request: RendererCaptureScreenshotRequest,
     dump_mode: &str,
-) -> Result<CapturedRaster> {
+) -> Result<CapturedScreenshot> {
     let pending = page
         .start_capture_screenshot_with_request(request)
         .with_context(|| format!("failed to start --dump {dump_mode} capture"))?;
@@ -63,7 +41,7 @@ async fn capture_page_raster(
         .await
         .with_context(|| format!("failed to complete --dump {dump_mode} capture"))?;
     match page.finish_capture_screenshot(completion)? {
-        RendererCaptureScreenshotReply::Captured(image) => Ok(CapturedRaster {
+        RendererCaptureScreenshotReply::Captured(image) => Ok(CapturedScreenshot {
             mime_type: image.mime_type,
             bytes: image.bytes.to_vec(),
         }),

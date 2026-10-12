@@ -123,7 +123,7 @@ pub(super) fn collect(snapshot: &PaintSnapshot) -> Result<Vec<LinkRegion>, PdfEr
         let clip = match shape {
             PaintShape::Rect(rect) => Clip::Rectangle(rectangle(matrix, super::rect(*rect))),
             _ => {
-                let path = matrix * crate::raster::to_backend_shape(shape);
+                let path = matrix * crate::geometry::to_backend_shape(shape);
                 let edges = edges(&path);
                 spend(&mut budget, edges.len())?;
                 Clip::Path(edges, path.bounding_box())

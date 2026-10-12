@@ -75,7 +75,7 @@ impl From<crate::PaintError> for PdfError {
 /// Writes embedded, subsetted fonts and native drawing commands. Device pixel
 /// ratio does not affect page geometry. This does not perform CSS fragmentation.
 pub fn pdf_snapshot(snapshot: &PaintSnapshot, options: &PdfOptions) -> Result<Vec<u8>, PdfError> {
-    let metrics = crate::raster::validate_fragment_stream(snapshot)?;
+    let metrics = crate::validation::validate_fragment_stream(snapshot)?;
     validation::validate(snapshot)?;
     let width = f64::from(snapshot.surface.css_width);
     let height = f64::from(snapshot.surface.css_height);
