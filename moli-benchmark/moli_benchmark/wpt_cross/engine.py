@@ -283,7 +283,7 @@ ENGINES: dict[str, EngineDriver] = {
         default_binary_names=("moli",),
         build_command=_moli_command,
         cli_fetch_command=_moli_fetch,
-        version_args=("version",),
+        version_args=("--version",),
     ),
     "lightpanda": EngineDriver(
         name="lightpanda",
