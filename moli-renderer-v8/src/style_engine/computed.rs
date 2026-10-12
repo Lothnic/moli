@@ -417,7 +417,6 @@ pub(super) fn retained_elements_with_bounded_final_opacity(
                         }
                         let has_bounded_final_state = ui.animation_duration_mod(index).seconds()
                             > 0.0
-                            && ui.animation_delay_mod(index).seconds() <= 0.0
                             && ui.animation_iteration_count_mod(index).0 == 1.0
                             && ui.animation_direction_mod(index) == AnimationDirection::Normal
                             && ui.animation_play_state_mod(index) == AnimationPlayState::Running;

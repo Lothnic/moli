@@ -41,6 +41,7 @@ async fn markdown_uses_live_visibility_and_preserves_disclosure_content() {
                 <p style="opacity:0;animation-name:spin">Animated hidden text</p>
                 <style>@KEYFRAMES fade-in { from { opacity:0 } to { opacity:1 } }</style>
                 <p style="opacity:0;animation:fade-in 0.25s ease-in forwards">Animated revealed text</p>
+                <p style="opacity:0;animation:fade-in 0.25s 90ms ease-in forwards">Delayed animated revealed text</p>
                 <style>@keyframes overridden { to { opacity:1 } } @keyframes overridden { from { opacity:0 } to { opacity:0 } }</style>
                 <p style="opacity:0;animation:overridden 1s forwards">Overridden animation text</p>
                 <style>@keyframes spin { from { transform:rotate(0deg) } to { transform:rotate(1turn) } }</style>
@@ -71,7 +72,7 @@ async fn markdown_uses_live_visibility_and_preserves_disclosure_content() {
         page.vm_mut().eval("document.getElementById('legacy-white-text').setAttribute('color','white')").unwrap();
         for strip_css in [false, true] {
             let output = page.render_page_dump(options(strip_css));
-            for kept in ["Visible body", "Restored child", "Panel content", "ARIA panel content", "Disclosure content", "Closed details content", "Followers 2", "Score 313131", "Parser trap", "Accessible helper", "Faded text", "Animated revealed text", "Visible value Same-color text 8", "CSS override VISIBLE", "Stylesheet override ALSO VISIBLE", "White on black stays visible", "![Article photo](https://example.test/article.jpg)"] {
+            for kept in ["Visible body", "Restored child", "Panel content", "ARIA panel content", "Disclosure content", "Closed details content", "Followers 2", "Score 313131", "Parser trap", "Accessible helper", "Faded text", "Animated revealed text", "Delayed animated revealed text", "Visible value Same-color text 8", "CSS override VISIBLE", "Stylesheet override ALSO VISIBLE", "White on black stays visible", "![Article photo](https://example.test/article.jpg)"] {
                 assert!(output.contains(kept), "missing {kept}: {output}");
             }
             assert!(output.contains("10<sup>−17</sup>"), "{output}");
