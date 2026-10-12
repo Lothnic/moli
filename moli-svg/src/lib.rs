@@ -52,6 +52,29 @@ mod tests {
     }
 
     #[test]
+    fn svg_transform_serialization_preserves_function_and_rotation_center() {
+        for value in [
+            SvgTransform::matrix(SvgMatrixComponents {
+                a: 2.0,
+                b: 3.0,
+                c: 4.0,
+                d: 5.0,
+                e: 1e20,
+                f: -1e20,
+            }),
+            SvgTransform::translate(0.1, 1e20),
+            SvgTransform::scale(2.5, 3.5),
+            SvgTransform::rotate(0.0, 13.0, 17.0),
+            SvgTransform::rotate(90.0, 13.0, 17.0),
+            SvgTransform::skew_x(45.0),
+            SvgTransform::skew_y(-45.0),
+        ] {
+            let parsed = parse_transform_attribute(&value.serialize()).unwrap();
+            assert_eq!(parsed, vec![value]);
+        }
+    }
+
+    #[test]
     fn point_list_parser_rejects_invalid_tokens_and_truncates_incomplete_pairs() {
         assert_eq!(
             parse_point_list("0,0 100,0 100,100 0,100"),
@@ -571,6 +594,26 @@ mod tests {
             vec![10.0, 20.0, 30.0, -40.0]
         );
         assert!(parse_number_list("10 nope 20").is_none());
+    }
+
+    #[test]
+    fn serialized_svg_numbers_round_trip_large_finite_values_and_signed_zero() {
+        for value in [
+            1e20_f64,
+            -1e20,
+            f64::MAX,
+            f64::MIN_POSITIVE,
+            f64::from(f32::MAX),
+            f64::from(f32::from_bits(1)),
+            -0.0,
+        ] {
+            let serialized = serialize_number(value);
+            assert_eq!(
+                serialized.parse::<f64>().unwrap().to_bits(),
+                value.to_bits(),
+                "{serialized} must preserve {value}"
+            );
+        }
     }
 
     #[test]
