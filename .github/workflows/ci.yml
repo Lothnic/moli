@@ -16,6 +16,10 @@ on:
         description: Head commit or ref (defaults to the dispatched commit)
         required: false
         default: ""
+      fetch_diagnostic_url:
+        description: Optional public URL for one native fetch diagnostic (no scoring)
+        required: false
+        default: ""
 
 concurrency:
   group: ci-${{ github.event.pull_request.number || github.ref }}
@@ -949,3 +953,50 @@ jobs:
           uv run --project moli-benchmark --no-sync python
           -m moli_benchmark.sequential_navigate_ci check
           --input "$BENCHMARK_OUTPUT/comparison.json"
+
+  fetch-diagnostic:
+    name: Native fetch diagnostic
+    if: github.event_name == 'workflow_dispatch' && inputs.fetch_diagnostic_url != ''
+    needs: [resolve-refs, build-release-head]
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          ref: ${{ needs.resolve-refs.outputs.head_sha }}
+      - name: Use HEAD release
+        uses: ./.github/actions/use-ci-release
+        with:
+          side: head
+          revision: ${{ needs.resolve-refs.outputs.head_sha }}
+      - name: Record one native fetch
+        shell: bash
+        env:
+          DIAGNOSTIC_URL: ${{ inputs.fetch_diagnostic_url }}
+          DIAGNOSTIC_REVISION: ${{ needs.resolve-refs.outputs.head_sha }}
+        run: |
+          set -euo pipefail
+          output=target/fetch-diagnostic
+          mkdir -p "$output"
+          binary="$PWD/target/ci-bin/moli-release-head/moli"
+          printf '%s\n' "$DIAGNOSTIC_REVISION" > "$output/revision.txt"
+          printf '%s\n' "$DIAGNOSTIC_URL" > "$output/url.txt"
+          sha256sum "$binary" > "$output/binary.sha256"
+          set +e
+          timeout 60s "$binary" fetch --dump markdown --wait-until done \
+            --timeout 45000 --http-timeout 45000 --http-connect-timeout 45000 \
+            --http-max-response-size 20000000 --block-private-networks \
+            --log-level debug "$DIAGNOSTIC_URL" \
+            > "$output/stdout.md" 2> "$output/stderr.log"
+          status=$?
+          set -e
+          printf '%s\n' "$status" > "$output/exit-code.txt"
+      - name: Upload fetch diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: native-fetch-diagnostic
+          path: target/fetch-diagnostic
+          if-no-files-found: error
+          retention-days: 7
