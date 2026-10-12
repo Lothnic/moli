@@ -693,7 +693,7 @@ where
             .element_semantics
             .as_ref()
             .is_some_and(crate::LayoutElementSemantics::is_select_listbox);
-        let inline_padding = if listbox { 2.0 } else { 4.0 };
+        let inline_padding = if listbox { 2.0 } else { 0.0 };
         let content_width = (control_layout.size.width
             - control_layout.border.left
             - control_layout.border.right
