@@ -26,6 +26,7 @@ use crate::{
 };
 
 mod realtime_resize;
+pub(crate) use realtime_resize::RealtimeResizeObserverSampling;
 
 pub(super) struct ObserverCallback {
     callback: WindowWebIdlCallbackFunction,
@@ -309,7 +310,7 @@ impl ObserverCallbackRegistry {
                 .collect();
             let retired_resize = state.realtime_resize.as_mut().map(|entries| {
                 ids.iter()
-                    .filter_map(|id| entries.remove(id))
+                    .filter_map(|id| entries.entries.remove(id))
                     .collect::<Vec<_>>()
             });
             let retired = ids
@@ -331,7 +332,7 @@ impl ObserverCallbackRegistry {
                     let resize = state
                         .realtime_resize
                         .as_mut()
-                        .and_then(|entries| entries.remove(&id));
+                        .and_then(|entries| entries.entries.remove(&id));
                     (state.bindings.remove(&id), resize)
                 };
                 drop(retired);
