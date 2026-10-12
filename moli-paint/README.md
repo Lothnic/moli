@@ -102,7 +102,7 @@ color glyphs. Regenerate it with
 Reader-level regression and artifact generation:
 
 ```sh
-uv run scripts/check-native-pdf.py --moli target/debug/moli
+uv run --locked --script scripts/check-native-pdf.py --moli target/debug/moli
 cd moli-cdp-smoke
 uv run moli-cdp-smoke --group pdf
 ```
@@ -115,7 +115,18 @@ use lopdf for PDF objects and ordinary text; its extractor does not interpret
 ActualText and Type3 text correctly, so it is not the complex-text oracle.
 The reader script also compares rendered solid and gradient button backgrounds
 against CLI screenshots; extracting a white label alone does not establish that
-the label is visible in the PDF.
+the label is visible in the PDF. It checks the white label's visible pixels as
+well as its extracted text. A local fixture server supplies relative URLs, wrapped
+links, rotated and clipped links, an iframe with an SVG icon, and internal ID/named
+anchors. MuPDF checks both targets and hit regions, including PDF QuadPoints and
+destination page numbers. The font fixtures and page resources are bundled;
+these checks do not depend on public websites or system fonts.
+
+CI runs this script against the exact HEAD release artifact in the
+`Native PDF rendering and links` job. Its locked MuPDF dependency and Python 3.12
+match the local command above. Failure blocks the job; PDF files, raster previews,
+screenshots, extracted text and link JSON are uploaded even when a check fails.
+The CI job does not substitute PDF parsing or nonempty text for visual checks.
 
 Validation on 2026-10-12 (Linux x86_64, Rust 1.96.1): `cargo fmt --all`,
 workspace Clippy with all targets/features and warnings denied, and the full
