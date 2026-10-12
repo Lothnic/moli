@@ -319,22 +319,6 @@ impl<'a> MarkdownDom<'a> {
             {
                 suppressed.insert(node);
             }
-            if suppressed.contains(&node) || invisible.contains(&node) {
-                tracing::debug!(
-                    ?node,
-                    node_class = Dom::attribute(dom, node, "class").unwrap_or_default(),
-                    display = ?values.first(),
-                    visibility = computed_visibility,
-                    opacity = ?values.get(2),
-                    zero_contrast_leaf,
-                    uninitialized_template,
-                    tracking_pixel,
-                    disclosure_root,
-                    parent_suppressed = dom.parent_node(node)
-                        .is_some_and(|parent| suppressed.contains(&parent)),
-                    "native Markdown visibility excludes node"
-                );
-            }
             if values.first().is_some_and(|value| {
                 matches!(
                     value.as_str(),
@@ -397,6 +381,22 @@ impl<'a> MarkdownDom<'a> {
             }
             if visibility_mode == VisibilityMode::Hidden && !disclosure_root && !disclosure_path {
                 invisible.insert(node);
+            }
+            if suppressed.contains(&node) || invisible.contains(&node) {
+                tracing::debug!(
+                    ?node,
+                    node_class = Dom::attribute(dom, node, "class").unwrap_or_default(),
+                    display = ?values.first(),
+                    visibility = computed_visibility,
+                    opacity = ?values.get(2),
+                    zero_contrast_leaf,
+                    uninitialized_template,
+                    tracking_pixel,
+                    disclosure_root,
+                    parent_suppressed = dom.parent_node(node)
+                        .is_some_and(|parent| suppressed.contains(&parent)),
+                    "native Markdown visibility excludes node"
+                );
             }
         }
         Self {
