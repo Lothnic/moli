@@ -985,8 +985,8 @@ jobs:
       SOURCE_CASE_COUNT: 40
       SOURCE_DATASET_SHA256: 04e40811fdfcb2bc83c1ea8f5091c4ea916b8389667411a143062bc2f390d59a
       SOURCE_RELEASE_TAG: webfetch-regression-ci-input-04e40811
-      SOURCE_ARCHIVE_NAME: webfetch-regression-40-source-04e40811.tar.gz
-      SOURCE_ARCHIVE_SHA256: 1debeed40ad7751ce8bccf89496baf5f3b7873c1e7c754915496e9342ef7703b
+      SOURCE_ARCHIVE_NAME: webfetch-regression-40-scoped-04e40811.tar.gz
+      SOURCE_ARCHIVE_SHA256: ba83c0cb6509ca85e802cda5dc7c1bf09e1a3d485254ca77095e17f28aabf345
     steps:
       - name: Download the private hash-bound source archive
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
@@ -1040,6 +1040,16 @@ jobs:
           test -d "$bundle/sources"
           test -d "$bundle/list-references"
           test -z "$(find "$bundle" -type l -print -quit)"
+          printf '%s\n' dataset.json list-references sources | sort > "$RUNNER_TEMP/allowed-roots"
+          find "$bundle" -mindepth 1 -maxdepth 1 -printf '%f\n' | sort > "$RUNNER_TEMP/actual-roots"
+          test -z "$(comm -3 "$RUNNER_TEMP/allowed-roots" "$RUNNER_TEMP/actual-roots")"
+          jq -r '.cases[].id' "$bundle/dataset.json" | sort -u > "$RUNNER_TEMP/allowed-cases"
+          find "$bundle/sources" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' \
+            | sort -u > "$RUNNER_TEMP/source-cases"
+          find "$bundle/list-references" -mindepth 1 -maxdepth 1 -type f -name '*.json' \
+            -printf '%f\n' | sed 's/\.json$//' | sort -u > "$RUNNER_TEMP/list-reference-cases"
+          test -z "$(comm -23 "$RUNNER_TEMP/source-cases" "$RUNNER_TEMP/allowed-cases")"
+          test -z "$(comm -23 "$RUNNER_TEMP/list-reference-cases" "$RUNNER_TEMP/allowed-cases")"
           echo "bundle=$bundle" >> "$GITHUB_OUTPUT"
 
       - name: Upload exact frozen inputs
