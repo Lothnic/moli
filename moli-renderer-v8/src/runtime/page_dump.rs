@@ -63,12 +63,7 @@ impl PageVm {
                     projected.push(if is_span { property(7) } else { String::new() });
                     projected.push(if is_image { property(8) } else { String::new() });
                     projected.push(if is_image { property(9) } else { String::new() });
-                    projected.extend([
-                        String::new(),
-                        String::new(),
-                        String::new(),
-                        String::new(),
-                    ]);
+                    projected.extend([String::new(), String::new(), String::new(), String::new()]);
                     projected.push(own_visibility.to_string());
                     (node, projected)
                 })
