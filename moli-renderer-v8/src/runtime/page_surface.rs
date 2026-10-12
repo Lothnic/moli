@@ -5120,6 +5120,7 @@ pub enum RendererPageCommand {
     SerializeDocument,
     LayoutMetrics,
     PublishLayout,
+    PrintToPdf(RendererPrintToPdfRequest),
     CaptureScreenshot(RendererCaptureScreenshotRequest),
     CaptureScreencastFrame(RendererCaptureScreencastFrameRequest),
     BlobBytesForUuid {
@@ -5740,6 +5741,7 @@ impl RendererPageCommand {
             Self::SerializeDocument => Some("SerializeDocument"),
             Self::LayoutMetrics => Some("LayoutMetrics"),
             Self::PublishLayout => Some("PublishLayout"),
+            Self::PrintToPdf(_) => Some("PrintToPdf"),
             Self::CaptureScreenshot(_) => Some("CaptureScreenshot"),
             Self::CaptureScreencastFrame(_) => Some("CaptureScreencastFrame"),
             Self::ScrollNodeIntoViewIfNeeded { .. } => Some("ScrollNodeIntoViewIfNeeded"),
@@ -6057,6 +6059,22 @@ pub enum RendererCaptureScreencastFrameReply {
     NoDocument,
 }
 
+pub use moli_paint::pdf::PdfOptions as RendererPdfOptions;
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct RendererPrintToPdfRequest {
+    pub options: RendererPdfOptions,
+    pub print_background: bool,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum RendererPrintToPdfReply {
+    Printed(Vec<u8>),
+    Failed(String),
+    LayoutDisabled,
+    NoDocument,
+}
+
 pub enum RendererPageReply {
     WebMcp(std::result::Result<Option<u64>, moli_page_types::RendererWebMcpError>),
     NativeCommandReady(Box<RendererNativeCommandReadyResponse>),
@@ -6139,6 +6157,7 @@ pub enum RendererPageReply {
     Usize(usize),
     CookieFacadeSnapshot(Box<RendererPageCookieFacadeSnapshotReply>),
     LayoutMetrics(RendererLayoutMetrics),
+    PrintToPdf(RendererPrintToPdfReply),
     CaptureScreenshot(RendererCaptureScreenshotReply),
     CaptureScreencastFrame(RendererCaptureScreencastFrameReply),
     Unit,

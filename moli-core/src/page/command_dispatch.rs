@@ -402,6 +402,7 @@ impl Page {
             RendererPageReply::PageDiagnosticsSnapshot(_) => "a page diagnostics snapshot reply",
             RendererPageReply::CookieFacadeSnapshot(_) => "a cookie facade snapshot reply",
             RendererPageReply::LayoutMetrics(_) => "a layout metrics reply",
+            RendererPageReply::PrintToPdf(_) => "a print to PDF reply",
             RendererPageReply::CaptureScreenshot(_) => "a capture screenshot reply",
             RendererPageReply::CaptureScreencastFrame(_) => "a capture screencast frame reply",
             RendererPageReply::Unit => "a unit reply",

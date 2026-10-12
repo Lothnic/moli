@@ -102,6 +102,9 @@ async def _open_fixture_target(client: RawCdpClient, fixture: str) -> tuple[str,
               (() => {
                 document.documentElement.style.cssText = 'margin:0;background:white';
                 document.body.style.cssText = 'margin:0;min-height:1800px;background:#123456';
+                document.body.innerHTML = [20, 820, 1620].map((top, i) =>
+                  `<p style="position:absolute;top:${top}px;margin:0">Font Text 123 page ${i + 1}</p>`
+                ).join('');
                 const style = document.createElement('style');
                 style.textContent = '@media print { body { background: #234567 } }';
                 document.head.append(style);
@@ -250,12 +253,15 @@ async def run_pdf_group(
                 ((432.0, 288.0),),
                 "landscape PDF MediaBox",
             )
+            assert_equal(base64_info.page_text, ("Font Text 123 page 1", "Font Text 123 page 2"), "selected PDF text")
+            assert_equal(stream_info.page_text, ("Font Text 123 page 1", "Font Text 123 page 2", "Font Text 123 page 3"), "stream PDF text")
             detail.update(
                 {
                     "selectedPages": base64_info.page_count,
                     "allPages": stream_info.page_count,
                     "landscapeMediaBox": list(landscape_info.media_boxes[0]),
-                    "xrefValidated": True,
+                    "structureValidated": True,
+                    "textExtractionValidated": True,
                 }
             )
         record(results, "page_print_to_pdf", detail)

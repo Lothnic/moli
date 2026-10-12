@@ -1689,6 +1689,30 @@ impl Page {
         )
     }
 
+    pub fn start_print_to_pdf(
+        &self,
+        request: super::RendererPrintToPdfRequest,
+    ) -> Result<PendingPageCommand> {
+        self.start_page_command(RendererPageCommand::PrintToPdf(request))
+    }
+
+    pub fn finish_print_to_pdf(
+        &mut self,
+        completion: CompletedPageCommand,
+    ) -> Result<super::RendererPrintToPdfReply> {
+        anyhow::ensure!(
+            completion.renderer_agent_attachment_id() == self.renderer_agent_attachment_id(),
+            "print to PDF completed for a stale renderer attachment"
+        );
+        let reply = self.finish_page_command(completion);
+        expect_page_reply!(
+            reply,
+            "print to PDF page command",
+            "a print to PDF reply",
+            RendererPageReply::PrintToPdf(result) => Ok(result),
+        )
+    }
+
     pub fn start_capture_screenshot(&self) -> Result<PendingPageCommand> {
         self.start_capture_screenshot_with_request(RendererCaptureScreenshotRequest::viewport_png())
     }

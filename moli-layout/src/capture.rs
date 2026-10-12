@@ -16,6 +16,9 @@ pub enum PaintCaptureRegion {
     Viewport,
     /// The complete document content extent computed by this layout pass.
     FullDocument,
+    /// The complete document for vector printing. The PDF backend applies
+    /// page/work budgets instead of the full-document bitmap dimension limit.
+    PrintDocument,
     /// One explicit page-coordinate rectangle.
     PageClip { rect: LayoutRect, scale: f32 },
     /// Present the existing viewport on a separate raster surface. Scroll
@@ -86,6 +89,14 @@ impl PaintCaptureRequest {
             base_background_color: PaintColor::WHITE,
             max_width: None,
             max_height: None,
+        }
+    }
+
+    /// Captures vector print content without imposing a full-page pixel buffer.
+    pub const fn print_document() -> Self {
+        Self {
+            region: PaintCaptureRegion::PrintDocument,
+            ..Self::full_document()
         }
     }
 
@@ -168,8 +179,12 @@ impl PaintCaptureRequest {
             PaintCaptureRegion::Viewport | PaintCaptureRegion::TransformedViewport { .. } => {
                 (viewport_bounds, 1.0)
             }
-            PaintCaptureRegion::FullDocument => {
-                validate_full_document_extent(content_size.width, content_size.height)?;
+            PaintCaptureRegion::FullDocument | PaintCaptureRegion::PrintDocument => {
+                if self.region == PaintCaptureRegion::FullDocument {
+                    validate_full_document_extent(content_size.width, content_size.height)?;
+                } else {
+                    validate_extent("document content", content_size.width, content_size.height)?;
+                }
                 (
                     LayoutRect::new(
                         -viewport_scroll.x,
@@ -308,6 +323,22 @@ fn invalid_capture(detail: impl Into<String>) -> LayoutError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn vector_print_capture_is_not_limited_by_full_page_bitmap_dimensions() {
+        let viewport = LayoutViewport::new(800, 600, 3.0);
+        let size = LayoutSize::new(800.0, 200_000.0);
+        assert!(
+            PaintCaptureRequest::full_document()
+                .resolve(viewport, LayoutPoint::ZERO, size)
+                .is_err()
+        );
+        let print = PaintCaptureRequest::print_document()
+            .resolve(viewport, LayoutPoint::ZERO, size)
+            .unwrap();
+        assert_eq!(print.surface.css_height, size.height);
+        assert!(!print.paint_root_scrollbars);
+    }
 
     #[test]
     fn full_document_capture_keeps_layout_viewport_and_offsets_scroll() {

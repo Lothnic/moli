@@ -650,6 +650,14 @@ async fn print_to_pdf_returns_base64_pdf_without_publishing_interactive_geometry
     let pdf = screenshot_bytes(&take_response_by_id(&mut ctx, 1112));
     assert!(pdf.starts_with(b"%PDF-1.7"));
     assert!(pdf.ends_with(b"%%EOF\n"));
+    let document = lopdf::Document::load_mem(&pdf).unwrap();
+    assert_eq!(document.extract_text(&[1]).unwrap().trim(), "pdf");
+    assert!(document.objects.values().any(|object| {
+        object
+            .as_dict()
+            .is_ok_and(|dict| dict.has(b"FontFile2") || dict.has(b"FontFile3"))
+    }));
+
     // Printing a cold page must not publish its print-media geometry.
     ctx.process_async(json!({
         "id":1113,"method":"Runtime.evaluate","sessionId":"SID-PDF-BASE64",
@@ -1544,4 +1552,65 @@ async fn get_layout_metrics_targets_inactive_loaded_owner_without_activation() {
         ctx.conn.browser_context.is_none(),
         "inactive Page.getLayoutMetrics should not activate its browser context"
     );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn print_to_pdf_preserves_shaped_text_webfonts_and_selected_pages() {
+    let latin = BASE64_STANDARD.encode(include_bytes!(
+        "../../../../../moli-paint/tests/fixtures/moli-pdf.ttf"
+    ));
+    let cjk = BASE64_STANDARD.encode(include_bytes!(
+        "../../../../../moli-layout/tests/fixtures/moli-cjk.ttf"
+    ));
+    let html = format!(
+        r#"<!doctype html><meta charset="utf-8"><style>
+@font-face{{font-family:Latin;font-weight:400 900;src:url(data:font/ttf;base64,{latin})}}
+@font-face{{font-family:CJK;src:url(data:font/ttf;base64,{cjk})}}
+html,body{{margin:0}} body{{font:650 20px Latin,CJK;white-space:nowrap}}
+.first{{position:absolute;top:20px}} .second{{position:absolute;top:900px}}
+</style><div class=first>Font <span style="color:red">Text</span> 123 中文 office fi</div><div class=second>Second page</div>"#
+    );
+    let url = format!("data:text/html;base64,{}", BASE64_STANDARD.encode(html));
+    let mut ctx = TestContext::new_with_target_discovery_and_optional_resource_fetch_mask(
+        false,
+        moli_core::OptionalResourceFetchMask::FONT,
+    );
+    install_active_screenshot_page(
+        &mut ctx,
+        "BID-PDF-TEXT",
+        "TID-PDF-TEXT",
+        "SID-PDF-TEXT",
+        &url,
+    )
+    .await;
+    ctx.process_async(json!({"id": 1300,"method":"Emulation.setDeviceMetricsOverride","sessionId":"SID-PDF-TEXT","params":{"width":800,"height":300,"deviceScaleFactor":2,"mobile":false}})).await;
+    take_response_by_id(&mut ctx, 1300);
+    for (id, ranges, expected) in [
+        (1301, "", "Font Text 123 中文 office fi Second page"),
+        (1302, "2", "Second page"),
+    ] {
+        ctx.process_async(json!({"id":id,"method":"Page.printToPDF","sessionId":"SID-PDF-TEXT","params":{"paperWidth":4.0,"paperHeight":4.0,"marginTop":0,"marginBottom":0,"marginLeft":0,"marginRight":0,"pageRanges":ranges}})).await;
+        let pdf = screenshot_bytes(&take_response_by_id(&mut ctx, id));
+        let document = lopdf::Document::load_mem(&pdf).unwrap();
+        let pages: Vec<_> = document.get_pages().keys().copied().collect();
+        let text = document
+            .extract_text(&pages)
+            .unwrap()
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert_eq!(text, expected);
+        assert_eq!(pages.len(), if ranges.is_empty() { 2 } else { 1 });
+        assert!(
+            document
+                .objects
+                .values()
+                .any(|object| object.as_dict().is_ok_and(|dict| {
+                    dict.get(b"BaseFont")
+                        .and_then(lopdf::Object::as_name)
+                        .is_ok_and(|name| String::from_utf8_lossy(name).contains("MoliPDF"))
+                })),
+            "the configured web font must actually be loaded and embedded"
+        );
+    }
 }

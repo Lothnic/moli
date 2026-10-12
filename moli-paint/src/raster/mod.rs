@@ -263,13 +263,15 @@ fn unpremultiply_rgba(rgba: &mut [u8]) {
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-struct PaintStreamMetrics {
+pub(crate) struct PaintStreamMetrics {
     max_filter_depth: usize,
     glyph_count: usize,
-    operation_count: usize,
+    pub(crate) operation_count: usize,
 }
 
-fn validate_fragment_stream(snapshot: &PaintSnapshot) -> Result<PaintStreamMetrics, PaintError> {
+pub(crate) fn validate_fragment_stream(
+    snapshot: &PaintSnapshot,
+) -> Result<PaintStreamMetrics, PaintError> {
     let mut layers = Vec::new();
     let mut filter_depth = 0usize;
     let mut metrics = PaintStreamMetrics {
@@ -604,7 +606,7 @@ fn matching_layer_pop(fragments: &[PaintFragment], push_index: usize) -> usize {
     unreachable!("paint stream validation rejects unclosed layers")
 }
 
-fn paint_fragment(
+pub(crate) fn paint_fragment(
     scene: &mut impl PaintScene,
     snapshot: &PaintSnapshot,
     fragment: &PaintFragment,
@@ -1793,7 +1795,7 @@ fn backend_gradient_stops(stops: &[moli_layout::PaintGradientStop]) -> Vec<(f32,
         .collect()
 }
 
-fn to_backend_shape(shape: &PaintShape) -> BezPath {
+pub(crate) fn to_backend_shape(shape: &PaintShape) -> BezPath {
     match shape {
         PaintShape::Rect(rect) => to_backend_rect(*rect)
             .map(|rect| rect_path(rect, true))
@@ -2002,7 +2004,7 @@ fn device_transform(transform: PaintTransform2D, scale: f64) -> Affine {
     Affine::scale(scale) * to_backend_transform(transform)
 }
 
-fn to_backend_transform(transform: PaintTransform2D) -> Affine {
+pub(crate) fn to_backend_transform(transform: PaintTransform2D) -> Affine {
     if transform.is_finite() {
         Affine::new(transform.coefficients)
     } else {
@@ -2602,6 +2604,7 @@ mod tests {
 
         let mut glyph = snapshot(2, 2, 1.0);
         glyph.push_fragment(PaintFragment::GlyphRun(moli_layout::PaintGlyphRun {
+            text: None,
             font: moli_layout::PaintFontId::from_index(0),
             font_size: 12.0,
             normalized_coords: Vec::new(),
@@ -2635,6 +2638,7 @@ mod tests {
         );
         let font = snapshot.intern_font(&font);
         snapshot.push_fragment(PaintFragment::GlyphRun(moli_layout::PaintGlyphRun {
+            text: None,
             font,
             font_size: 50.0,
             normalized_coords: Vec::new(),

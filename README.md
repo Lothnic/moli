@@ -382,7 +382,7 @@ Its current intentional boundaries include:
   paint architecture.
 - It does not pursue pixel-for-pixel parity with Chrome or provide
   high-fidelity Canvas/WebGL/media playback.
-- `--layout` supports software screenshots and raster-backed CDP PDF
+- `--layout` supports software screenshots and native CDP/CLI PDF with embedded fonts
   generation, but not every Chrome screenshot or print mode is implemented.
 
 Unsupported protocol paths return explicit errors — Moli never pretends that a

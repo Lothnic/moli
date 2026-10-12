@@ -164,6 +164,8 @@ pub(crate) struct InlineStructuralBox {
 
 #[derive(Debug)]
 pub(crate) struct InlineFormattingContext {
+    /// The actual whitespace-processed text supplied to the shaper.
+    pub(crate) text: String,
     pub(crate) root_style: LayoutBoxId,
     /// Reusable Parley layout for intrinsic and final-width probes. Line
     /// breaking replaces only Parley's line output while retaining the shaped
@@ -2185,6 +2187,7 @@ impl InlineBuildInput {
             .map(|(_, object, _)| object)
             .collect();
         InlineFormattingContext {
+            text: self.text,
             root_style: self.root_style,
             measurement_layout: Some(layout),
             laid_out: None,
@@ -3352,6 +3355,7 @@ mod tests {
         layout.break_all_lines(Some(80.0));
 
         let context = InlineFormattingContext {
+            text: "".into(),
             root_style: root,
             measurement_layout: Some(layout.clone()),
             laid_out: None,

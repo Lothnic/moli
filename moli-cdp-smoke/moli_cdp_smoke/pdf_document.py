@@ -1,7 +1,9 @@
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
+from io import BytesIO
+
+from pypdf import PdfReader
 
 from .assertions import SmokeError
 
@@ -10,7 +12,7 @@ from .assertions import SmokeError
 class MoliPdfInfo:
     page_count: int
     media_boxes: tuple[tuple[float, float], ...]
-    xref_offset: int
+    page_text: tuple[str, ...]
 
 
 def assert_pdf_envelope(data: bytes, label: str) -> None:
@@ -21,33 +23,53 @@ def assert_pdf_envelope(data: bytes, label: str) -> None:
 
 
 def inspect_moli_pdf(data: bytes, label: str) -> MoliPdfInfo:
+    """Inspect actual PDF objects, including compressed objects and Form resources."""
     assert_pdf_envelope(data, label)
-    if b"\xff\xd8" not in data or b"\xff\xd9" not in data:
-        raise SmokeError(f"{label} did not contain the rendered JPEG payload")
-    startxref = re.search(rb"startxref\s+(\d+)\s+%%EOF\s*$", data)
-    if startxref is None:
-        raise SmokeError(f"{label} did not contain a terminal startxref offset")
-    xref_offset = int(startxref.group(1))
-    if data[xref_offset : xref_offset + 4] != b"xref":
-        raise SmokeError(f"{label} startxref did not point at the xref table")
+    try:
+        reader = PdfReader(BytesIO(data), strict=True)
+        fonts = []
+        visited = set()
 
-    pages = re.search(rb"/Type /Pages /Kids \[[^]]*] /Count (\d+)", data)
-    if pages is None:
-        raise SmokeError(f"{label} did not contain the Moli Pages tree")
-    page_count = int(pages.group(1))
-    media_boxes = tuple(
-        (float(width), float(height))
-        for width, height in re.findall(
-            rb"/MediaBox \[0 0 ([0-9.]+) ([0-9.]+)]",
-            data,
+        def resolve(value):
+            return value.get_object() if hasattr(value, "get_object") else value
+
+        def inspect_resources(resources):
+            resources = resolve(resources)
+            if id(resources) in visited:
+                return
+            visited.add(id(resources))
+            for ref in resolve(resources.get("/Font", {})).values():
+                font = ref.get_object()
+                if "/ToUnicode" not in font or not font["/ToUnicode"].get_data():
+                    raise SmokeError(f"{label} has text without a Unicode mapping")
+                faces = font.get("/DescendantFonts", [font])
+                for face in faces:
+                    descriptor = face.get_object().get("/FontDescriptor")
+                    if descriptor is None or not any(
+                        key in descriptor.get_object()
+                        and descriptor.get_object()[key].get_data()
+                        for key in ("/FontFile", "/FontFile2", "/FontFile3")
+                    ):
+                        raise SmokeError(f"{label} has a font without embedded data")
+                fonts.append(font)
+            for ref in resolve(resources.get("/XObject", {})).values():
+                obj = ref.get_object()
+                if "/Resources" in obj:
+                    inspect_resources(obj["/Resources"])
+
+        for page in reader.pages:
+            inspect_resources(page.get("/Resources", {}))
+        if not fonts:
+            raise SmokeError(f"{label} did not contain embedded text fonts")
+        return MoliPdfInfo(
+            page_count=len(reader.pages),
+            media_boxes=tuple(
+                (float(page.mediabox.width), float(page.mediabox.height))
+                for page in reader.pages
+            ),
+            page_text=tuple(" ".join(page.extract_text().split()) for page in reader.pages),
         )
-    )
-    if len(media_boxes) != page_count:
-        raise SmokeError(
-            f"{label} Pages count/media boxes disagree: {page_count} vs {media_boxes!r}"
-        )
-    return MoliPdfInfo(
-        page_count=page_count,
-        media_boxes=media_boxes,
-        xref_offset=xref_offset,
-    )
+    except SmokeError:
+        raise
+    except Exception as error:
+        raise SmokeError(f"{label} was not a readable PDF: {error}") from error

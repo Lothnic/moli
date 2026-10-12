@@ -838,6 +838,9 @@ impl PageVm {
                 self.vm_mut().publish_layout()?;
                 Ok(RendererPageReply::Unit)
             }
+            RendererPageCommand::PrintToPdf(request) => self
+                .print_to_pdf(request)
+                .map(RendererPageReply::PrintToPdf),
             RendererPageCommand::CaptureScreenshot(request) => self
                 .capture_screenshot(request)
                 .map(RendererPageReply::CaptureScreenshot),

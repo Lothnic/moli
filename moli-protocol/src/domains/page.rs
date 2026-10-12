@@ -127,22 +127,6 @@ fn missing_page_target_error_message(
     }
 }
 
-/// Builds a letter-sized raster PDF using the same defaults as
-/// `Page.printToPDF`.
-pub fn build_default_raster_pdf(
-    jpeg: &[u8],
-    image_width: u32,
-    image_height: u32,
-) -> anyhow::Result<Vec<u8>> {
-    pdf::build_raster_pdf(
-        jpeg,
-        image_width,
-        image_height,
-        &pdf::RasterPdfOptions::default(),
-    )
-    .map_err(|error| anyhow::anyhow!(error.message().to_owned()))
-}
-
 use child_frame_activity::PagePreparedChildFrameDocumentActivity;
 pub(crate) use child_frame_activity::{
     PagePreparedChildFrameActivity, PagePreparedChildFrameTreeEvent,
@@ -247,7 +231,6 @@ enum PendingPageCommandKind {
     },
     PrintToPdf {
         pending: PendingPageCommand,
-        options: pdf::RasterPdfOptions,
         transfer_mode: DevToolsPrintToPdfTransferMode,
     },
     Navigate(Box<navigation::PendingNavigateLoadCommand>),
@@ -315,7 +298,6 @@ enum CompletedPageCommandKind {
     },
     PrintToPdf {
         completed: Box<Result<CompletedPageCommand, String>>,
-        options: pdf::RasterPdfOptions,
         transfer_mode: DevToolsPrintToPdfTransferMode,
     },
     Navigate(Box<navigation::CompletedNavigateLoadCommand>),
@@ -464,11 +446,9 @@ impl PendingPageCommandDispatch {
             }
             PendingPageCommandKind::PrintToPdf {
                 pending,
-                options,
                 transfer_mode,
             } => CompletedPageCommandKind::PrintToPdf {
                 completed: Box::new(pending.wait().await.map_err(|error| error.to_string())),
-                options,
                 transfer_mode,
             },
             PendingPageCommandKind::Navigate(pending) => {
@@ -2329,7 +2309,6 @@ pub(crate) async fn complete_pending_page_command(
         }
         CompletedPageCommandKind::PrintToPdf {
             completed,
-            options,
             transfer_mode,
         } => {
             let completion = match *completed {
@@ -2349,15 +2328,20 @@ pub(crate) async fn complete_pending_page_command(
                     ));
                 }
             };
-            let image = match page.finish_capture_screenshot(completion) {
-                Ok(RendererCaptureScreenshotReply::Captured(image)) => image,
-                Ok(RendererCaptureScreenshotReply::LayoutDisabled) => {
+            let pdf = match page.finish_print_to_pdf(completion) {
+                Ok(moli_core::page::RendererPrintToPdfReply::Printed(bytes)) => bytes,
+                Ok(moli_core::page::RendererPrintToPdfReply::Failed(message)) => {
+                    return PageCommandTaskStep::Complete(CommandOutputPlan::error(
+                        -32000, message,
+                    ));
+                }
+                Ok(moli_core::page::RendererPrintToPdfReply::LayoutDisabled) => {
                     return PageCommandTaskStep::Complete(CommandOutputPlan::error(
                         -32000,
                         PRINT_TO_PDF_LAYOUT_DISABLED_MESSAGE,
                     ));
                 }
-                Ok(RendererCaptureScreenshotReply::NoDocument) => {
+                Ok(moli_core::page::RendererPrintToPdfReply::NoDocument) => {
                     return PageCommandTaskStep::Complete(CommandOutputPlan::error(
                         -32000,
                         "NoDocumentLoaded",
@@ -2367,26 +2351,6 @@ pub(crate) async fn complete_pending_page_command(
                     return PageCommandTaskStep::Complete(CommandOutputPlan::error(
                         -32000,
                         format!("Failed to capture PDF content: {error}"),
-                    ));
-                }
-            };
-            if image.mime_type != "image/jpeg" {
-                return PageCommandTaskStep::Complete(CommandOutputPlan::error(
-                    -32000,
-                    "Printing failed: renderer returned a non-JPEG raster",
-                ));
-            }
-            let pdf = match pdf::build_raster_pdf(
-                image.bytes.as_ref(),
-                image.width,
-                image.height,
-                &options,
-            ) {
-                Ok(pdf) => pdf,
-                Err(error) => {
-                    return PageCommandTaskStep::Complete(CommandOutputPlan::error(
-                        error.code(),
-                        error.message(),
                     ));
                 }
             };

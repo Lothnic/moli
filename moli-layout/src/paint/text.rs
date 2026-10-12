@@ -116,7 +116,12 @@ fn project_text_phase<N>(
         );
     }
 
+    let text: Option<std::sync::Arc<str>> = (snapshot.retain_text_semantics
+        && phase == TextPaintPhase::Foreground)
+        .then(|| std::sync::Arc::from(context.text.as_str()));
     for (line_index, line) in text_layout.lines().enumerate() {
+        let mut mapped_run = None;
+        let mut cluster_ranges = Vec::new().into_iter();
         metrics.text_line_count = metrics.text_line_count.saturating_add(1);
         let line_is_culled =
             local_cull.is_some_and(|cull| {
@@ -146,6 +151,21 @@ fn project_text_phase<N>(
                 PositionedLayoutItem::InlineBox(_) => continue,
                 PositionedLayoutItem::GlyphRun(glyph_run) => glyph_run,
             };
+            let run = glyph_run.run();
+            if text.is_some() && mapped_run != Some(run.index()) {
+                cluster_ranges = glyph_cluster_ranges(run).into_iter();
+                mapped_run = Some(run.index());
+            }
+            // Advance even for masked/hidden style runs, so styled portions of
+            // the same Parley run keep their original cluster associations.
+            let clusters = cluster_ranges
+                .by_ref()
+                .take(if text.is_some() {
+                    glyph_run.glyphs().count()
+                } else {
+                    0
+                })
+                .collect();
             if let Some(TextClipMaskScope::InlineBox(target)) = mask_scope
                 && !context.style_is_within_box(usize::from(glyph_run.style_index()), target)
             {
@@ -154,7 +174,6 @@ fn project_text_phase<N>(
             if !glyph_run.style().brush.paint {
                 continue;
             }
-            let run = glyph_run.run();
             let vertical_offset = line_placement
                 .map(|placement| placement.item_offset(item_index))
                 .unwrap_or_default();
@@ -198,6 +217,10 @@ fn project_text_phase<N>(
                 glyph_skew_radians: synthesis.skew().map(f32::to_radians),
                 glyph_embolden,
                 glyphs,
+                text: text.as_ref().map(|text| crate::PaintTextSemantics {
+                    text: text.clone(),
+                    clusters,
+                }),
                 transform,
             };
             let brush = &glyph_run.style().brush;
@@ -265,6 +288,30 @@ fn project_text_phase<N>(
             }
         }
     }
+}
+
+fn glyph_cluster_ranges(
+    run: &parley::Run<'_, crate::stylo_to_parley::TextBrush>,
+) -> Vec<std::ops::Range<usize>> {
+    // Join ligature continuations in logical order first: in RTL their
+    // visual order puts the continuation *before* the glyph-bearing cluster.
+    let mut atoms: Vec<(std::ops::Range<usize>, usize)> = Vec::new();
+    for cluster in run.clusters() {
+        if cluster.is_ligature_continuation() {
+            if let Some((range, _)) = atoms.last_mut() {
+                range.end = cluster.text_range().end;
+            }
+        } else {
+            atoms.push((cluster.text_range(), cluster.glyphs().count()));
+        }
+    }
+    if run.is_rtl() {
+        atoms.reverse();
+    }
+    atoms
+        .into_iter()
+        .flat_map(|(range, count)| std::iter::repeat_n(range, count))
+        .collect()
 }
 
 fn project_selection(

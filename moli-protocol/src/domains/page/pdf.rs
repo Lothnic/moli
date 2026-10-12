@@ -1,5 +1,3 @@
-use std::{collections::BTreeSet, io::Write as _};
-
 use crate::automation::DevToolsPrintToPdfCommand;
 
 const POINTS_PER_INCH: f64 = 72.0;
@@ -7,10 +5,9 @@ const DEFAULT_MARGIN_INCHES: f64 = 1.0 / 2.54;
 const DEFAULT_PAGE_WIDTH_INCHES: f64 = 8.5;
 const DEFAULT_PAGE_HEIGHT_INCHES: f64 = 11.0;
 const MAX_PAGE_DIMENSION_INCHES: f64 = 200.0;
-const MAX_PAGE_COUNT: usize = 100_000;
 
 #[derive(Clone, Debug, PartialEq)]
-pub(super) struct RasterPdfOptions {
+pub(super) struct PrintPdfOptions {
     page_width_points: f64,
     page_height_points: f64,
     margin_top_points: f64,
@@ -21,7 +18,7 @@ pub(super) struct RasterPdfOptions {
     page_ranges: Vec<PageRange>,
 }
 
-impl Default for RasterPdfOptions {
+impl Default for PrintPdfOptions {
     fn default() -> Self {
         Self {
             page_width_points: DEFAULT_PAGE_WIDTH_INCHES * POINTS_PER_INCH,
@@ -72,7 +69,7 @@ impl PdfError {
     }
 }
 
-impl RasterPdfOptions {
+impl PrintPdfOptions {
     pub(super) fn from_command(command: &DevToolsPrintToPdfCommand) -> Result<Self, PdfError> {
         let scale = command.scale.unwrap_or(1.0);
         if !scale.is_finite() || !(0.1..=2.0).contains(&scale) {
@@ -117,32 +114,6 @@ impl RasterPdfOptions {
             scale,
             page_ranges: parse_page_ranges(command.page_ranges.as_deref().unwrap_or(""))?,
         })
-    }
-
-    fn printable_width(&self) -> f64 {
-        self.page_width_points - self.margin_left_points - self.margin_right_points
-    }
-
-    fn printable_height(&self) -> f64 {
-        self.page_height_points - self.margin_top_points - self.margin_bottom_points
-    }
-
-    fn selected_pages(&self, page_count: usize) -> Result<Vec<usize>, PdfError> {
-        if self.page_ranges.is_empty() {
-            return Ok((0..page_count).collect());
-        }
-        let mut pages = BTreeSet::new();
-        for range in &self.page_ranges {
-            if range.first >= page_count {
-                continue;
-            }
-            let last = range.last.min(page_count.saturating_sub(1));
-            pages.extend(range.first..=last);
-        }
-        if pages.is_empty() {
-            return Err(PdfError::server("Page range exceeds page count"));
-        }
-        Ok(pages.into_iter().collect())
     }
 }
 
@@ -220,147 +191,44 @@ fn page_range_syntax_error() -> PdfError {
     PdfError::server("Page range syntax error")
 }
 
-/// Wraps one full-document JPEG in a paginated PDF.
-///
-/// The raster is kept as one shared image XObject. Each output page clips and
-/// translates that image to expose the corresponding document slice, avoiding
-/// another decode/encode pass and keeping the result deterministic.
-pub(super) fn build_raster_pdf(
-    jpeg: &[u8],
-    image_width: u32,
-    image_height: u32,
-    options: &RasterPdfOptions,
-) -> Result<Vec<u8>, PdfError> {
-    if jpeg.is_empty() || image_width == 0 || image_height == 0 {
-        return Err(PdfError::server("Printing failed"));
-    }
-
-    let printable_width = options.printable_width();
-    let printable_height = options.printable_height();
-    let display_width = printable_width * options.scale;
-    let display_height = display_width * f64::from(image_height) / f64::from(image_width);
-    if !display_height.is_finite() || display_height <= 0.0 {
-        return Err(PdfError::server("Printing failed"));
-    }
-    let page_count = (display_height / printable_height).ceil().max(1.0) as usize;
-    if page_count > MAX_PAGE_COUNT {
-        return Err(PdfError::server(format!(
-            "Printing failed: document exceeds {MAX_PAGE_COUNT} pages"
-        )));
-    }
-    let selected_pages = options.selected_pages(page_count)?;
-
-    let page_object_ids = (0..selected_pages.len())
-        .map(|index| 4 + index * 2)
-        .collect::<Vec<_>>();
-    let object_count = 3 + selected_pages.len() * 2;
-    let mut objects = vec![Vec::new(); object_count + 1];
-    objects[1] = b"<< /Type /Catalog /Pages 2 0 R >>".to_vec();
-
-    let kids = page_object_ids
-        .iter()
-        .map(|id| format!("{id} 0 R"))
-        .collect::<Vec<_>>()
-        .join(" ");
-    objects[2] = format!(
-        "<< /Type /Pages /Kids [{kids}] /Count {} >>",
-        selected_pages.len()
-    )
-    .into_bytes();
-
-    let image_dictionary = format!(
-        "<< /Type /XObject /Subtype /Image /Width {image_width} /Height {image_height} \
-         /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length {} >>\nstream\n",
-        jpeg.len()
-    );
-    let mut image_object = image_dictionary.into_bytes();
-    image_object.extend_from_slice(jpeg);
-    image_object.extend_from_slice(b"\nendstream");
-    objects[3] = image_object;
-
-    for (output_index, source_page) in selected_pages.iter().copied().enumerate() {
-        let page_id = page_object_ids[output_index];
-        let content_id = page_id + 1;
-        objects[page_id] = format!(
-            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {} {}] \
-             /Resources << /XObject << /Im0 3 0 R >> >> /Contents {content_id} 0 R >>",
-            pdf_number(options.page_width_points),
-            pdf_number(options.page_height_points),
-        )
-        .into_bytes();
-
-        let clip_bottom = options.margin_bottom_points;
-        let image_bottom = options.page_height_points - options.margin_top_points - display_height
-            + source_page as f64 * printable_height;
-        let content = format!(
-            "q\n{} {} {} {} re W n\n{} 0 0 {} {} {} cm\n/Im0 Do\nQ\n",
-            pdf_number(options.margin_left_points),
-            pdf_number(clip_bottom),
-            pdf_number(printable_width),
-            pdf_number(printable_height),
-            pdf_number(display_width),
-            pdf_number(display_height),
-            pdf_number(options.margin_left_points),
-            pdf_number(image_bottom),
-        );
-        objects[content_id] = stream_object(content.as_bytes());
-    }
-
-    serialize_pdf(objects)
-}
-
-fn stream_object(bytes: &[u8]) -> Vec<u8> {
-    let mut object = format!("<< /Length {} >>\nstream\n", bytes.len()).into_bytes();
-    object.extend_from_slice(bytes);
-    object.extend_from_slice(b"endstream");
-    object
-}
-
-fn serialize_pdf(objects: Vec<Vec<u8>>) -> Result<Vec<u8>, PdfError> {
-    let mut output = b"%PDF-1.7\n%\xE2\xE3\xCF\xD3\n".to_vec();
-    let mut offsets = vec![0usize; objects.len()];
-    for (id, object) in objects.iter().enumerate().skip(1) {
-        if object.is_empty() {
-            return Err(PdfError::server("Printing failed"));
+impl PrintPdfOptions {
+    pub(super) fn into_renderer_options(self) -> moli_core::page::RendererPdfOptions {
+        moli_core::page::RendererPdfOptions {
+            width: self.page_width_points,
+            height: self.page_height_points,
+            margin_top: self.margin_top_points,
+            margin_bottom: self.margin_bottom_points,
+            margin_left: self.margin_left_points,
+            margin_right: self.margin_right_points,
+            scale: self.scale,
+            page_ranges: self
+                .page_ranges
+                .into_iter()
+                .map(|range| range.first..=range.last)
+                .collect(),
         }
-        offsets[id] = output.len();
-        let _ = writeln!(output, "{id} 0 obj");
-        output.extend_from_slice(object);
-        output.extend_from_slice(b"\nendobj\n");
     }
-
-    let xref_offset = output.len();
-    let _ = write!(output, "xref\n0 {}\n", objects.len());
-    output.extend_from_slice(b"0000000000 65535 f \n");
-    for offset in offsets.into_iter().skip(1) {
-        let _ = writeln!(output, "{offset:010} 00000 n ");
-    }
-    let _ = write!(
-        output,
-        "trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref_offset}\n%%EOF\n",
-        objects.len()
-    );
-    Ok(output)
-}
-
-fn pdf_number(value: f64) -> String {
-    let mut value = format!("{value:.4}");
-    while value.ends_with('0') {
-        value.pop();
-    }
-    if value.ends_with('.') {
-        value.pop();
-    }
-    if value == "-0" {
-        value = "0".to_owned();
-    }
-    value
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::automation::{AutomationContext, DevToolsPrintToPdfTransferMode, FrontendProtocol};
+
+    fn build_pdf(
+        snapshot: &moli_layout::PaintSnapshot,
+        options: &PrintPdfOptions,
+    ) -> Result<Vec<u8>, PdfError> {
+        moli_paint::pdf::pdf_snapshot(snapshot, &options.clone().into_renderer_options())
+            .map_err(|error| PdfError::server(error.to_string()))
+    }
+
+    fn snapshot(width: u32, height: u32) -> moli_layout::PaintSnapshot {
+        moli_layout::PaintSnapshot::new(
+            moli_layout::PaintViewport::new(width, height, 1.0),
+            moli_layout::PaintColor::WHITE,
+        )
+    }
 
     fn command() -> DevToolsPrintToPdfCommand {
         DevToolsPrintToPdfCommand {
@@ -394,15 +262,18 @@ mod tests {
         command.margin_bottom = Some(0.0);
         command.margin_left = Some(0.0);
         command.margin_right = Some(0.0);
-        let options = RasterPdfOptions::from_command(&command).unwrap();
-        let pdf = build_raster_pdf(&[0xff, 0xd8, 0xff, 0xd9], 400, 900, &options).unwrap();
+        let options = PrintPdfOptions::from_command(&command).unwrap();
+        let pdf = build_pdf(&snapshot(400, 900), &options).unwrap();
         let text = String::from_utf8_lossy(&pdf);
 
         assert!(pdf.starts_with(b"%PDF-1.7"));
         assert!(pdf.ends_with(b"%%EOF\n"));
         assert!(text.contains("/Count 3"));
-        assert_eq!(text.matches("/Type /Page ").count(), 3);
-        assert_eq!(text.matches("/Subtype /Image").count(), 1);
+        assert_eq!(
+            lopdf::Document::load_mem(&pdf).unwrap().get_pages().len(),
+            3
+        );
+        assert_eq!(text.matches("/Subtype /Image").count(), 0);
 
         let xref_offset = text
             .rsplit_once("startxref\n")
@@ -424,31 +295,43 @@ mod tests {
         command.margin_left = Some(0.0);
         command.margin_right = Some(0.0);
         command.page_ranges = Some("3, 1-2,2".to_owned());
-        let options = RasterPdfOptions::from_command(&command).unwrap();
-        let pdf = build_raster_pdf(&[0xff, 0xd8, 0xff, 0xd9], 800, 2400, &options).unwrap();
-        let text = String::from_utf8_lossy(&pdf);
-
-        assert!(text.contains("/MediaBox [0 0 720 576]"));
-        assert!(text.contains("/Count 3"));
+        let options = PrintPdfOptions::from_command(&command).unwrap();
+        let pdf = build_pdf(&snapshot(800, 2400), &options).unwrap();
+        let document = lopdf::Document::load_mem(&pdf).unwrap();
+        assert_eq!(document.get_pages().len(), 3);
+        for id in document.get_pages().values() {
+            let media_box = document
+                .get_dictionary(*id)
+                .unwrap()
+                .get(b"MediaBox")
+                .unwrap()
+                .as_array()
+                .unwrap();
+            let dimensions: Vec<_> = media_box
+                .iter()
+                .map(|value| value.as_float().unwrap())
+                .collect();
+            assert_eq!(dimensions, vec![0.0, 0.0, 720.0, 576.0]);
+        }
     }
 
     #[test]
     fn validates_chromium_scale_and_page_range_errors() {
         let mut invalid_scale = command();
         invalid_scale.scale = Some(2.01);
-        let error = RasterPdfOptions::from_command(&invalid_scale).unwrap_err();
+        let error = PrintPdfOptions::from_command(&invalid_scale).unwrap_err();
         assert_eq!(error.code(), -32602);
         assert_eq!(error.message(), "scale is outside of [0.1 - 2] range");
 
         let mut invalid_range = command();
         invalid_range.page_ranges = Some("4-2".to_owned());
-        let error = RasterPdfOptions::from_command(&invalid_range).unwrap_err();
+        let error = PrintPdfOptions::from_command(&invalid_range).unwrap_err();
         assert_eq!(error.code(), -32000);
         assert_eq!(error.message(), "Page range is invalid (start > end)");
 
         let mut syntax_error = command();
         syntax_error.page_ranges = Some("1-a".to_owned());
-        let error = RasterPdfOptions::from_command(&syntax_error).unwrap_err();
+        let error = PrintPdfOptions::from_command(&syntax_error).unwrap_err();
         assert_eq!(error.message(), "Page range syntax error");
     }
 
@@ -460,8 +343,8 @@ mod tests {
         command.margin_bottom = Some(0.0);
         command.margin_left = Some(0.0);
         command.margin_right = Some(0.0);
-        let options = RasterPdfOptions::from_command(&command).unwrap();
-        let error = build_raster_pdf(&[0xff, 0xd8, 0xff, 0xd9], 800, 600, &options).unwrap_err();
+        let options = PrintPdfOptions::from_command(&command).unwrap();
+        let error = build_pdf(&snapshot(800, 600), &options).unwrap_err();
         assert_eq!(error.message(), "Page range exceeds page count");
     }
 }

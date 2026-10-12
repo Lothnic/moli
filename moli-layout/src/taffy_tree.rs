@@ -3115,6 +3115,7 @@ pub(crate) fn single_subject_block_alignment_offset(
 
 fn empty_inline_context() -> InlineFormattingContext {
     InlineFormattingContext {
+        text: "".into(),
         root_style: LayoutBoxId::from_index(0),
         measurement_layout: Some(parley::Layout::default()),
         laid_out: None,

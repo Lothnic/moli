@@ -131,6 +131,7 @@ enum UnavailableReplacedContentPaint {
 pub(crate) fn project_paint_snapshot<N>(
     projection: &OutputProjection<'_, N>,
     capture: ResolvedPaintCapture,
+    retain_text_semantics: bool,
     embedded_frames: &mut HashMap<LayoutBoxId, PaintSnapshot>,
 ) -> PaintProjectionResult
 where
@@ -143,6 +144,7 @@ where
         (capture.base_background_color, None)
     };
     let mut snapshot = PaintSnapshot::new(projection.viewport, canvas_color);
+    snapshot.retain_text_semantics = retain_text_semantics;
     snapshot.surface = capture.surface;
     snapshot.viewport_to_surface = capture.viewport_to_surface;
     snapshot.content_size = projection.document_content_size();

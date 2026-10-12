@@ -636,8 +636,19 @@ pub struct PaintGlyphRun {
     pub glyph_embolden: PaintPoint,
     /// Fully positioned glyphs.
     pub glyphs: Vec<PaintGlyph>,
+    /// Logical text and UTF-8 cluster ranges, shared with other runs in this paragraph.
+    /// Masks and other purely visual glyphs have no text semantics.
+    pub text: Option<PaintTextSemantics>,
     /// Maps the glyph positions from their layout coordinate space to viewport CSS pixels.
     pub transform: PaintTransform2D,
+}
+
+/// Owned text mapping retained across the layout/paint boundary for document export.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PaintTextSemantics {
+    pub text: std::sync::Arc<str>,
+    /// One range per positioned glyph; a cluster may cover several glyphs or characters.
+    pub clusters: Vec<std::ops::Range<usize>>,
 }
 
 /// CSS line style for an owned text-decoration command.
@@ -876,6 +887,8 @@ impl PaintDiagnostic {
 /// representation before returning.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PaintSnapshot {
+    /// Print projections retain Unicode mappings; raster-only captures omit them.
+    pub(crate) retain_text_semantics: bool,
     /// Live CSS layout viewport used to build this snapshot.
     pub viewport: PaintViewport,
     /// Short-lived raster surface selected for this capture.
@@ -905,6 +918,7 @@ impl PaintSnapshot {
     /// Creates an empty snapshot for a viewport and canvas color.
     pub fn new(viewport: PaintViewport, canvas_color: PaintColor) -> Self {
         Self {
+            retain_text_semantics: false,
             viewport,
             surface: PaintCaptureSurface::for_viewport(viewport),
             viewport_to_surface: PaintTransform2D::IDENTITY,

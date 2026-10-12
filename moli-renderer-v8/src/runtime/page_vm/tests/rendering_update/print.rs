@@ -1,7 +1,52 @@
 use super::*;
 use crate::runtime::{
-    RendererCaptureScreenshotReply, RendererCaptureScreenshotRequest, RendererScreenshotPurpose,
+    RendererCaptureScreenshotReply, RendererCaptureScreenshotRequest, RendererPrintToPdfReply,
+    RendererPrintToPdfRequest, RendererScreenshotPurpose,
 };
+
+#[tokio::test(flavor = "current_thread")]
+async fn native_pdf_restores_media_on_success_and_failure_and_keeps_iframe_text() {
+    run_page_vm_async_test(async move {
+        let loader = crate::network::ResourceRequestClient::new(&FetchConfig::default())?;
+        let mut page_vm = test_page_vm_with_loader_and_document_url(
+            &loader, Vec::new(), Url::parse("https://example.com/native-print.html")?,
+        );
+        page_vm.vm_mut().eval(r#"
+document.head.innerHTML = `<style>
+.print { display:none } @media print { .screen { display:none } .print { display:block } }
+</style>`;
+document.body.innerHTML = '<p class=screen>Screen parent</p><p class=print>Print parent</p><iframe id=child></iframe>';
+child.contentDocument.body.innerHTML = '<p>Iframe text</p>';
+'installed'
+"#)?;
+        let extract = |reply| -> anyhow::Result<String> {
+            let RendererPrintToPdfReply::Printed(bytes) = reply else { anyhow::bail!("expected PDF, got {reply:?}"); };
+            let doc = lopdf::Document::load_mem(&bytes)?;
+            Ok(doc.extract_text(&doc.get_pages().keys().copied().collect::<Vec<_>>())?
+                .split_whitespace().collect::<Vec<_>>().join(" "))
+        };
+        let cold = page_vm.vm().layout_snapshot_cache_observability_for_test().2;
+        assert_eq!(extract(page_vm.print_to_pdf(Default::default())?)?, "Print parent Iframe text");
+        assert_eq!(page_vm.vm().layout_snapshot_cache_observability_for_test().2, cold);
+        assert_eq!(page_vm.vm_mut().eval("matchMedia('print').matches")?, "false");
+
+        page_vm.capture_screenshot(RendererCaptureScreenshotRequest::viewport_png())?;
+        let warm = page_vm.vm().layout_snapshot_cache_observability_for_test().2;
+        let mut invalid = RendererPrintToPdfRequest::default();
+        invalid.options.width = 0.0;
+        assert!(matches!(page_vm.print_to_pdf(invalid)?, RendererPrintToPdfReply::Failed(_)));
+        assert_eq!(page_vm.vm().layout_snapshot_cache_observability_for_test().2, warm);
+        assert_eq!(page_vm.vm_mut().eval("matchMedia('print').matches")?, "false");
+
+        let mut media = page_vm.document_settings.emulated_media.clone();
+        media.media = Some("screen".to_owned());
+        page_vm.set_emulated_media(&media)?;
+        assert_eq!(extract(page_vm.print_to_pdf(Default::default())?)?, "Screen parent Iframe text");
+        assert_eq!(page_vm.document_settings.emulated_media, media);
+        assert_eq!(page_vm.vm().layout_snapshot_cache_observability_for_test().2, warm);
+        Ok::<_, anyhow::Error>(())
+    }).await.expect("native printing preserves media and interactive state");
+}
 
 #[tokio::test(flavor = "current_thread")]
 async fn print_capture_preserves_published_geometry_frame_viewports_and_mouse_targets() {

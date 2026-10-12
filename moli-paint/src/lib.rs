@@ -1,4 +1,4 @@
-//! CPU rasterization for owned Moli paint snapshots.
+//! PDF output and CPU rasterization for owned Moli paint snapshots.
 //!
 //! The implementation is intentionally a narrow adaptation of the AnyRender
 //! screenshot path used by Blitz at commit
@@ -6,6 +6,7 @@
 //! AnyRender code is licensed under MIT OR Apache-2.0. No Blitz DOM or retained
 //! layout state is copied into this crate.
 
+pub mod pdf;
 mod raster;
 
 pub use moli_image::RgbaImage as RasterImage;

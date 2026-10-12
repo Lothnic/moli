@@ -610,7 +610,7 @@ pub(super) fn start_devtools_print_to_pdf_command(
             PRINT_TO_PDF_LAYOUT_DISABLED_MESSAGE,
         ));
     }
-    let options = match pdf::RasterPdfOptions::from_command(&command) {
+    let options = match pdf::PrintPdfOptions::from_command(&command) {
         Ok(options) => options,
         Err(error) => {
             return PageCommandTaskStep::Complete(CommandOutputPlan::error(
@@ -630,25 +630,15 @@ pub(super) fn start_devtools_print_to_pdf_command(
             return PageCommandTaskStep::Complete(CommandOutputPlan::error(-32000, message));
         }
     };
-    let request = RendererCaptureScreenshotRequest {
-        base_background_color: [255; 4],
-        purpose: RendererScreenshotPurpose::Print {
-            print_background: command.print_background.unwrap_or(false),
-        },
-        format: RendererScreenshotFormat::Jpeg,
-        quality: 90,
-        region: RendererScreenshotRegion::FullDocument,
-        optimize_for_speed: false,
-        max_width: None,
-        max_height: None,
-    };
-    match page.start_capture_screenshot_with_request(request) {
+    match page.start_print_to_pdf(moli_core::page::RendererPrintToPdfRequest {
+        options: options.into_renderer_options(),
+        print_background: command.print_background.unwrap_or(false),
+    }) {
         Ok(pending) => PageCommandTaskStep::Pending(PendingPageCommandDispatch {
             command_id,
             owner_scope,
             kind: Box::new(PendingPageCommandKind::PrintToPdf {
                 pending,
-                options,
                 transfer_mode,
             }),
         }),

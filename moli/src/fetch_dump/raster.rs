@@ -1,13 +1,11 @@
 use anyhow::{Context, Result, bail};
 use moli_core::page::{
     Page, RendererCaptureScreenshotReply, RendererCaptureScreenshotRequest,
-    RendererScreenshotFormat, RendererScreenshotPurpose, RendererScreenshotRegion,
+    RendererPrintToPdfReply, RendererScreenshotRegion,
 };
 
 struct CapturedRaster {
     mime_type: String,
-    width: u32,
-    height: u32,
     bytes: Vec<u8>,
 }
 
@@ -29,31 +27,23 @@ pub(super) async fn render_screenshot(
 }
 
 pub(super) async fn render_pdf(page: &mut Page) -> Result<Vec<u8>> {
-    let image = capture_page_raster(
-        page,
-        RendererCaptureScreenshotRequest {
-            base_background_color: [255; 4],
-            purpose: RendererScreenshotPurpose::Print {
-                print_background: false,
-            },
-            format: RendererScreenshotFormat::Jpeg,
-            quality: 90,
-            region: RendererScreenshotRegion::FullDocument,
-            optimize_for_speed: false,
-            max_width: None,
-            max_height: None,
-        },
-        "pdf",
-    )
-    .await?;
-    if image.mime_type != "image/jpeg" {
-        bail!(
-            "PDF renderer returned `{}` instead of JPEG",
-            image.mime_type
-        );
+    let pending = page
+        .start_print_to_pdf(Default::default())
+        .context("failed to start --dump pdf capture")?;
+    let completion = pending
+        .wait()
+        .await
+        .context("failed to complete --dump pdf capture")?;
+    match page.finish_print_to_pdf(completion)? {
+        RendererPrintToPdfReply::Printed(bytes) => Ok(bytes),
+        RendererPrintToPdfReply::Failed(error) => bail!("{error}"),
+        RendererPrintToPdfReply::LayoutDisabled => {
+            bail!("--dump pdf requires --layout or MOLI_LAYOUT=true")
+        }
+        RendererPrintToPdfReply::NoDocument => {
+            bail!("--dump pdf requires a loaded HTML document")
+        }
     }
-    moli_protocol::build_default_raster_pdf(&image.bytes, image.width, image.height)
-        .context("failed to encode PDF output")
 }
 
 async fn capture_page_raster(
@@ -71,8 +61,6 @@ async fn capture_page_raster(
     match page.finish_capture_screenshot(completion)? {
         RendererCaptureScreenshotReply::Captured(image) => Ok(CapturedRaster {
             mime_type: image.mime_type,
-            width: image.width,
-            height: image.height,
             bytes: image.bytes.to_vec(),
         }),
         RendererCaptureScreenshotReply::LayoutDisabled => {

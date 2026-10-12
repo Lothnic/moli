@@ -188,6 +188,51 @@ impl RendererCaptureScreenshotRequest {
 }
 
 impl PageVm {
+    /// Projects print media and encodes PDF without allocating a full-document
+    /// bitmap or publishing interactive screen geometry. Both output clients
+    /// use this lifecycle, including restoration before any encoding error.
+    pub(super) fn print_to_pdf(
+        &mut self,
+        request: super::RendererPrintToPdfRequest,
+    ) -> anyhow::Result<super::RendererPrintToPdfReply> {
+        use super::RendererPrintToPdfReply as Reply;
+        self.flush_page_action_window(moli_action_window::ActionBarrier::Explicit)?;
+        if self.layout_configuration.policy == LayoutPolicy::Mock {
+            return Ok(Reply::LayoutDisabled);
+        }
+        let previous = self.document_settings.emulated_media.clone();
+        let restore = previous.media.is_none();
+        if restore {
+            let mut print = previous.clone();
+            print.media = Some("print".to_owned());
+            self.set_emulated_media(&print)?;
+        }
+        let surface = self.document_settings.viewport_surface.unwrap_or_default();
+        let viewport = PaintViewport::new(
+            surface.inner_width,
+            surface.inner_height,
+            surface.device_pixel_ratio as f32,
+        );
+        let result = self.vm_mut().paint_layout_snapshot_with_capture(
+            viewport,
+            moli_layout::LayoutFlushReason::Print,
+            PaintCaptureRequest {
+                include_backgrounds: request.print_background,
+                ..PaintCaptureRequest::print_document()
+            },
+        );
+        if restore {
+            self.set_emulated_media(&previous)?;
+        }
+        Ok(match result? {
+            Some(snapshot) => match moli_paint::pdf::pdf_snapshot(&snapshot, &request.options) {
+                Ok(bytes) => Reply::Printed(bytes),
+                Err(error) => Reply::Failed(error.to_string()),
+            },
+            None => Reply::NoDocument,
+        })
+    }
+
     /// Captures an explicit screenshot or print raster. These demands always
     /// execute a fresh paint pass and never carry screencast state.
     pub(super) fn capture_screenshot(

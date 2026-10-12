@@ -69,7 +69,12 @@ where
             request
                 .resolve(viewport, projection.viewport_scroll, content_size)
                 .map(|capture| {
-                    crate::paint::project_paint_snapshot(&projection, capture, &mut embedded_paint)
+                    crate::paint::project_paint_snapshot(
+                        &projection,
+                        capture,
+                        reason == LayoutFlushReason::Print,
+                        &mut embedded_paint,
+                    )
                 })
         })
         .transpose()?

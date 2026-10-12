@@ -1123,7 +1123,11 @@ fn cli_dump_full_screenshot_captures_tall_page_without_prior_layout() -> Result<
 
 #[test]
 fn cli_dump_pdf_writes_pdf_bytes() -> Result<()> {
-    let output = run_fetch_cli_with_dump_and_args("about:blank", "pdf", &["--layout"])?;
+    let url = format!(
+        "data:text/html;base64,{}",
+        BASE64_STANDARD.encode("<!doctype html><p>Font Text 123</p>")
+    );
+    let output = run_fetch_cli_with_dump_and_args(&url, "pdf", &["--layout"])?;
     assert!(
         output.status.success(),
         "moli fetch failed: stdout_bytes={}\nstderr={}",
@@ -1131,12 +1135,9 @@ fn cli_dump_pdf_writes_pdf_bytes() -> Result<()> {
         String::from_utf8_lossy(&output.stderr)
     );
     assert!(output.stdout.starts_with(b"%PDF-1.7\n"));
-    assert!(
-        output
-            .stdout
-            .windows(b"/Type /Pages".len())
-            .any(|window| window == b"/Type /Pages")
-    );
+    let document = lopdf::Document::load_mem(&output.stdout)?;
+    assert_eq!(document.get_pages().len(), 1);
+    assert_eq!(document.extract_text(&[1])?.trim(), "Font Text 123");
     assert!(output.stdout.ends_with(b"%%EOF\n"));
     Ok(())
 }

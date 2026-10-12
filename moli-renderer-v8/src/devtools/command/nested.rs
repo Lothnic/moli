@@ -157,6 +157,7 @@ impl RendererPageCommand {
             | Self::ResetNavigationHistory
             | Self::SetFileInputFilesForBackendNodeId { .. }
             | Self::RenderPageDump { .. }
+            | Self::PrintToPdf(..)
             | Self::CaptureScreenshot(..)
             | Self::SearchResourceByLines(..)
             | Self::ContinuePendingSubresourceFetch { .. }
