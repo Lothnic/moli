@@ -48,6 +48,7 @@ fn build_native_layout_pass_recursive(
     environment_override: Option<crate::style_engine::StyloStyleEnvironment>,
     document_stack: &mut Vec<DomHandle>,
 ) -> Result<LayoutPassResult<DomHandle>, moli_layout::LayoutError> {
+    let profile_started = moli_trace::cpu_profile_enabled().then(std::time::Instant::now);
     let document = runtime
         .dom_host()
         .owner_document_handle(root)
@@ -61,6 +62,7 @@ fn build_native_layout_pass_recursive(
         root,
         request.requests_paint(),
     );
+    let source_ready = profile_started.map(|_| std::time::Instant::now());
     let mut styles = style_resolver::NativeLayoutStyleResolver::new(
         runtime,
         root,
@@ -68,6 +70,7 @@ fn build_native_layout_pass_recursive(
         request.viewport,
         environment_override,
     );
+    let styles_ready = profile_started.map(|_| std::time::Instant::now());
     let result = {
         let mut frames = NativeEmbeddedFrameRenderer {
             runtime,
@@ -114,6 +117,24 @@ fn build_native_layout_pass_recursive(
             )
         }
     };
+    if let (Some(started), Some(source_ready), Some(styles_ready)) =
+        (profile_started, source_ready, styles_ready)
+    {
+        let finished = std::time::Instant::now();
+        tracing::info!(
+            target: "moli_cpu_profile",
+            stage = "layout_native_adapter",
+            document = document.index_u32(),
+            root = ?root,
+            reason = ?request.reason,
+            total_us = finished.duration_since(started).as_micros(),
+            source_setup_us = source_ready.duration_since(started).as_micros(),
+            style_setup_us = styles_ready.duration_since(source_ready).as_micros(),
+            backend_us = finished.duration_since(styles_ready).as_micros(),
+            backend_reported_us = result.as_ref().map(|pass| pass.metrics.elapsed.as_micros()).ok(),
+            success = result.is_ok(),
+        );
+    }
     styles.trace_profile(document);
     document_stack.pop();
     result
