@@ -24,7 +24,7 @@ on:
       browser_eval_ref:
         description: Exact browser-eval commit containing the certified runner
         required: false
-        default: "4c76d16b9b156076a8e0c978980202ca528fa12b"
+        default: "12e8d80148b9160b6cc983b60bf3787061392435"
 
 concurrency:
   group: ci-${{ github.event.pull_request.number || github.ref }}
@@ -1131,9 +1131,9 @@ jobs:
                 retain_complete_diagnostic_log: true,
                 max_diagnostic_bytes: 100000000
               },
-              "moli-stack-1428": {
-                type: "moli_webfetch", label: "Moli stack through PR #1428",
-                source_url: "https://github.com/lexmount/moli/pull/1428",
+              "moli-stack-1432": {
+                type: "moli_webfetch", label: "Moli stack through PR #1432",
+                source_url: "https://github.com/lexmount/moli/pull/1432",
                 binary: $candidate, expected_reported_version: $candidate_version,
                 expected_binary_sha256: $candidate_sha,
                 dns_mode: "system", wait_until: "done",
@@ -1178,7 +1178,7 @@ jobs:
             --dataset "$dataset" \
             --output "$root/evidence" \
             --work-root "$root/work" \
-            --providers moli,moli-stack-1428 \
+            --providers moli,moli-stack-1432 \
             --case-ids "$case_ids" \
             --provider-config "$root/providers.json" \
             --workers 1 \
@@ -1199,7 +1199,7 @@ jobs:
             --output-json "$root/comparison-audit.json" \
             --output-markdown "$root/comparison-audit.md" \
             --stable-provider moli \
-            --candidate-provider moli-stack-1428
+            --candidate-provider moli-stack-1432
 
       - name: Render completion summary
         if: ${{ always() && !cancelled() }}
