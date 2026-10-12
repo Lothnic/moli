@@ -1,7 +1,7 @@
 use anyhow::{Context, Result, bail};
 use moli_core::page::{
     Page, RendererCaptureScreenshotReply, RendererCaptureScreenshotRequest,
-    RendererPrintToPdfReply, RendererScreenshotRegion,
+    RendererPrintToPdfReply, RendererPrintToPdfRequest, RendererScreenshotRegion,
 };
 
 struct CapturedRaster {
@@ -28,7 +28,11 @@ pub(super) async fn render_screenshot(
 
 pub(super) async fn render_pdf(page: &mut Page) -> Result<Vec<u8>> {
     let pending = page
-        .start_print_to_pdf(Default::default())
+        .start_print_to_pdf(RendererPrintToPdfRequest {
+            // CLI exports preserve page artwork, including white-on-color controls.
+            print_background: true,
+            ..Default::default()
+        })
         .context("failed to start --dump pdf capture")?;
     let completion = pending
         .wait()

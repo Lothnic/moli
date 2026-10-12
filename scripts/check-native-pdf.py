@@ -65,6 +65,35 @@ def capture(binary, output, name, html):
     return text, info
 
 
+def check_button_backgrounds(binary, output, html):
+    screenshot = output / "backgrounds-screenshot.png"
+    result = subprocess.run(
+        [str(binary), "fetch", "--font", "--layout", "--wait-until", "load",
+         "--log-level", "error", "--http-no-proxy", "*", "--dump", "screenshot",
+         data_url(html.encode(), "text/html")],
+        capture_output=True, check=True, timeout=120,
+    )
+    screenshot.write_bytes(result.stdout)
+    reference = pymupdf.Pixmap(screenshot)
+    with pymupdf.open(output / "backgrounds.pdf") as document:
+        page = document[0]
+        # CLI PDF fits the viewport width inside the default 1 cm margins.
+        margin = 72 / 2.54
+        scale = (page.rect.width - 2 * margin) / reference.width
+        clip = pymupdf.Rect(margin, margin, page.rect.width - margin,
+                            margin + reference.height * scale)
+        rendered = page.get_pixmap(matrix=pymupdf.Matrix(1 / scale, 1 / scale), clip=clip)
+        rendered.save(output / "backgrounds-rendered.png")
+        for x, y in [(110, 112), (320, 112), (460, 112)]:
+            expected = reference.pixel(x, y)[:3]
+            actual = rendered.pixel(round(margin / scale + x - rendered.x),
+                                    round(margin / scale + y - rendered.y))[:3]
+            assert min(expected) < 180, ("missing screenshot background", x, y, expected)
+            assert max(abs(a - b) for a, b in zip(actual, expected)) <= 3, (
+                "PDF button background differs from screenshot", x, y, actual, expected
+            )
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--moli", type=Path, default=ROOT / "target/debug/moli")
@@ -84,6 +113,15 @@ body{{font:20px PDFTest,CJK;margin:24px}} p{{margin:16px 0}}
     assert text == "Font Text 123", text
     assert results["minimal"]["image_count"] == 0
     assert any("+MoliPDFTest" in font for font in results["minimal"]["fonts"])
+
+    html = style + """<style>
+button{position:absolute;left:100px;top:100px;width:180px;height:60px;
+color:white;background:#325dff;border:0;border-radius:12px;font:20px PDFTest}
+#gradient{left:300px;background:linear-gradient(90deg in srgb,#325dff,#9864ff)}
+</style><button>Search</button><button id=gradient>Gradient</button>"""
+    text, results["backgrounds"] = capture(args.moli.resolve(), args.output_dir, "backgrounds", html)
+    assert text == "Search Gradient", text
+    check_button_backgrounds(args.moli.resolve(), args.output_dir, html)
 
     expected = ["Font Text 123 中文", "office fi ffi á", "Second page a", "abc אבג xyz",
                 "Color ★", "Weight 650", "Italic"]

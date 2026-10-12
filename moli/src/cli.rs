@@ -111,8 +111,8 @@ pub struct FetchArgs {
     /// Select the fetch output format. When omitted, rendered HTML documents
     /// are serialized and raw responses such as PDFs or videos are written
     /// verbatim. `screenshot` writes a viewport PNG, `screenshot_full` writes a
-    /// full-document PNG, and `pdf` writes a paginated PDF directly to stdout;
-    /// all three require layout. Dump output is quiet by default; pass
+    /// full-document PNG, and `pdf` writes a paginated PDF with CSS backgrounds
+    /// directly to stdout; all three require layout. Dump output is quiet by default; pass
     /// `--log-level` to opt into diagnostic logs.
     #[arg(short, long, value_enum)]
     pub dump: Option<DumpFormat>,
