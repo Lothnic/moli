@@ -42,6 +42,7 @@ async fn markdown_uses_live_visibility_and_preserves_disclosure_content() {
                 <style>@KEYFRAMES fade-in { from { opacity:0 } to { opacity:1 } }</style>
                 <p style="opacity:0;animation:fade-in 0.25s ease-in forwards">Animated revealed text</p>
                 <p style="opacity:0;animation:fade-in 0.25s 90ms ease-in forwards">Delayed animated revealed text</p>
+                <p style="opacity:0;animation:fade-in 0.25s 90ms ease-in">Delayed no-fill hidden text</p>
                 <style>@keyframes overridden { to { opacity:1 } } @keyframes overridden { from { opacity:0 } to { opacity:0 } }</style>
                 <p style="opacity:0;animation:overridden 1s forwards">Overridden animation text</p>
                 <style>@keyframes spin { from { transform:rotate(0deg) } to { transform:rotate(1turn) } }</style>
@@ -80,7 +81,7 @@ async fn markdown_uses_live_visibility_and_preserves_disclosure_content() {
             assert!(output.contains("Active\nReviewed"), "{output}");
             assert!(!output.contains("tracking.gif"), "{output}");
             assert!(output.contains("Upload complete"), "{output}");
-            for omitted in ["Translation pending", "Share metadata", "Hidden ancestor", "Inherited hidden", "Cookie template", "Followers 92", "Animated hidden text", "Overridden animation text", "Animated rotation text", "Zero-duration reveal text", "Repeating reveal text", "Reverse reveal text", "Transparent parent", "Transparent child", "product.name", "Vue template"] {
+            for omitted in ["Translation pending", "Share metadata", "Hidden ancestor", "Inherited hidden", "Cookie template", "Followers 92", "Animated hidden text", "Delayed no-fill hidden text", "Overridden animation text", "Animated rotation text", "Zero-duration reveal text", "Repeating reveal text", "Reverse reveal text", "Transparent parent", "Transparent child", "product.name", "Vue template"] {
                 assert!(!output.contains(omitted), "leaked {omitted}: {output}");
             }
             assert!(output.contains("Account settings"), "{output}");
