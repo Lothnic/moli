@@ -2196,6 +2196,7 @@ mod post_parse;
 mod queue_microtask;
 mod readable_algorithm_arrays;
 mod realtime_cssom;
+mod realtime_frames;
 mod realtime_layout;
 mod realtime_publication;
 mod realtime_resources;
