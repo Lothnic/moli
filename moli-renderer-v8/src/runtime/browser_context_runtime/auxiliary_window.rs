@@ -12,6 +12,7 @@ pub struct RendererAuxiliaryWindow(Arc<AuxiliaryWindowState>);
 struct AuxiliaryWindowState {
     id: u64,
     closed: AtomicBool,
+    is_popup: AtomicBool,
     frame_sandbox: crate::document_runtime::DocumentSandboxPolicy,
 }
 
@@ -23,6 +24,7 @@ impl RendererAuxiliaryWindow {
         Self(Arc::new(AuxiliaryWindowState {
             id,
             closed: AtomicBool::new(false),
+            is_popup: AtomicBool::new(false),
             frame_sandbox,
         }))
     }
@@ -33,6 +35,16 @@ impl RendererAuxiliaryWindow {
 
     pub fn is_closed(&self) -> bool {
         self.0.closed.load(Ordering::Acquire)
+    }
+
+    /// Popup UI state belongs to the browsing context, including after its
+    /// initial Document is transferred from the opener to an independent Page.
+    pub(crate) fn is_popup(&self) -> bool {
+        self.0.is_popup.load(Ordering::Acquire)
+    }
+
+    pub(crate) fn set_is_popup(&self, is_popup: bool) {
+        self.0.is_popup.store(is_popup, Ordering::Release);
     }
 
     pub(crate) fn frame_sandbox(&self) -> crate::document_runtime::DocumentSandboxPolicy {

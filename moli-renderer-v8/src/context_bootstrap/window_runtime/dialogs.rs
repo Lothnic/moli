@@ -319,6 +319,11 @@ pub(crate) fn window_open_callback<'s>(
             true,
         ) {
             Ok(opened) => {
+                if opened.pending_page.is_some()
+                    && let Some(window) = opened.window.as_ref()
+                {
+                    window.set_is_popup(parsed_features.is_popup());
+                }
                 let renderer_navigation = opened.queue_javascript_navigation(scope, &url);
                 let disposition = if opened.pending_page.is_some()
                     || host.protocol_user_gesture_activation()
@@ -391,6 +396,9 @@ pub(crate) fn window_open_callback<'s>(
             crate::RendererPopupDisposition::Background
         };
         let popup_id = opened_popup.popup_id;
+        if opened_popup.created_new_browsing_context {
+            host.set_lightweight_popup_is_popup(popup_id, parsed_features.is_popup());
+        }
         let session_storage_store = host.lightweight_popup_session_storage_store(popup_id);
         let initial_empty_document_storage_key =
             host.lightweight_popup_initial_empty_document_storage_key(popup_id);

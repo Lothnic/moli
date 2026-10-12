@@ -2164,6 +2164,7 @@ fn install_window_runtime_state<'s>(
     install_storage_runtime_state(scope, global)?;
     network_host::initialize_fetch_realm_helpers(scope)?;
     install_public_window_surface_accessors(scope, global)?;
+    super::install_window_bar_props(scope, global, None)?;
 
     Ok(())
 }

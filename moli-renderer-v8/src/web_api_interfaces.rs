@@ -48,6 +48,7 @@ interfaces! {
     AudioWorklet: Worklet;
     AudioWorkletNode: AudioNode;
     BaseAudioContext: EventTarget;
+    BarProp;
     BatteryManager;
     BeforeUnloadEvent: Event;
     BiquadFilterNode: AudioNode;
