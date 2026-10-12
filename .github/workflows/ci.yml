@@ -24,7 +24,7 @@ on:
       browser_eval_ref:
         description: Exact browser-eval commit containing the certified runner
         required: false
-        default: "afd05dc213f36240de7d3e23e884ece5c4d62437"
+        default: "4c76d16b9b156076a8e0c978980202ca528fa12b"
 
 concurrency:
   group: ci-${{ github.event.pull_request.number || github.ref }}
@@ -1127,7 +1127,9 @@ jobs:
                 expected_binary_sha256: $stable_sha,
                 dns_mode: "system", wait_until: "done",
                 block_private_networks: true, uniform_native_parameters: true,
-                max_bytes: 20000000
+                max_bytes: 20000000, log_level: "debug",
+                retain_complete_diagnostic_log: true,
+                max_diagnostic_bytes: 100000000
               },
               "moli-stack-1428": {
                 type: "moli_webfetch", label: "Moli stack through PR #1428",
@@ -1136,7 +1138,9 @@ jobs:
                 expected_binary_sha256: $candidate_sha,
                 dns_mode: "system", wait_until: "done",
                 block_private_networks: true, uniform_native_parameters: true,
-                max_bytes: 20000000
+                max_bytes: 20000000, log_level: "debug",
+                retain_complete_diagnostic_log: true,
+                max_diagnostic_bytes: 100000000
               }
             }}' > "$root/providers.json"
 
