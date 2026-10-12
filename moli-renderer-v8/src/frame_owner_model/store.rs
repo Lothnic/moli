@@ -1540,9 +1540,17 @@ impl FrameOwnerStore {
             return None;
         }
         self.documents.get(&owner.document_id).map(|document| {
-            document
+            let ready = document
                 .lifecycle_progress
-                .can_prepare_complete_transition()
+                .can_prepare_complete_transition();
+            if !ready {
+                tracing::debug!(
+                    ?owner,
+                    lifecycle = ?document.lifecycle_progress,
+                    "main document completion remains blocked"
+                );
+            }
+            ready
         })
     }
 
