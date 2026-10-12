@@ -90,6 +90,15 @@
     }
   }
 
+  function addOperation(list, entry) {
+    const existing = list.find((item) => item.name === entry.name);
+    if (existing) {
+      existing.length = Math.min(existing.length, entry.length);
+    } else {
+      list.push(entry);
+    }
+  }
+
   function parseMember(iface, rawMember) {
     const extendedAttributes = leadingExtendedAttributeNames(rawMember);
     let member = stripExtendedAttributes(rawMember);
@@ -119,7 +128,7 @@
       /^static\s+[\s\S]+?\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(([\s\S]*)\)$/,
     );
     if (staticOperation) {
-      addUnique(iface.staticOperations, {
+      addOperation(iface.staticOperations, {
         name: staticOperation[1],
         length: requiredArgumentCount(staticOperation[2]),
         unforgeable: extendedAttributes.has("LegacyUnforgeable"),
@@ -131,7 +140,7 @@
       /^[\s\S]+?\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(([\s\S]*)\)$/,
     );
     if (operation) {
-      addUnique(iface.operations, {
+      addOperation(iface.operations, {
         name: operation[1],
         length: requiredArgumentCount(operation[2]),
         unforgeable: extendedAttributes.has("LegacyUnforgeable"),
