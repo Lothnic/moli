@@ -16,6 +16,15 @@ on:
         description: Head commit or ref (defaults to the dispatched commit)
         required: false
         default: ""
+      run_webfetch_comparison:
+        description: Run the complete 430-case stable-versus-HEAD Web Fetch cohort
+        required: false
+        type: boolean
+        default: false
+      browser_eval_ref:
+        description: Exact browser-eval commit containing the certified runner
+        required: false
+        default: "43d30cb3106cf2ef4e5a8c308503f0fe59f2ad4b"
 
 concurrency:
   group: ci-${{ github.event.pull_request.number || github.ref }}
@@ -84,6 +93,7 @@ jobs:
 
   format:
     name: Format
+    if: ${{ inputs.run_webfetch_comparison != true }}
     runs-on: ubuntu-latest
     container: rust:1.96.1-bookworm
     steps:
@@ -98,6 +108,7 @@ jobs:
 
   clippy:
     name: Clippy
+    if: ${{ inputs.run_webfetch_comparison != true }}
     runs-on: ubuntu-latest
     container: rust:1.96.1-bookworm
     steps:
@@ -121,6 +132,7 @@ jobs:
 
   nextest:
     name: Nextest
+    if: ${{ inputs.run_webfetch_comparison != true }}
     runs-on: [self-hosted, moli-ci]
     container:
       image: rust:1.96.1-bookworm
@@ -153,6 +165,7 @@ jobs:
 
   windows-persistent-storage:
     name: Windows persistent storage
+    if: ${{ inputs.run_webfetch_comparison != true }}
     runs-on: windows-2025
     timeout-minutes: 25
     steps:
@@ -176,6 +189,7 @@ jobs:
 
   python-harness-tests:
     name: Python harness tests
+    if: ${{ inputs.run_webfetch_comparison != true }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -227,6 +241,7 @@ jobs:
 
   node-harness-tests:
     name: Node harness and fixture tests
+    if: ${{ inputs.run_webfetch_comparison != true }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -300,6 +315,7 @@ jobs:
 
   build-release-base:
     name: Build release · common ancestor
+    if: ${{ inputs.run_webfetch_comparison != true }}
     needs: resolve-refs
     runs-on: [self-hosted, moli-ci]
     timeout-minutes: 180
@@ -343,6 +359,7 @@ jobs:
 
   webmainbench:
     name: WebMainBench · 545 pages
+    if: ${{ inputs.run_webfetch_comparison != true }}
     needs: [resolve-refs, build-release-head]
     # Run on the hosted VM: unshare needs a network namespace, which is not
     # available in the default Docker job container.
@@ -405,6 +422,7 @@ jobs:
 
   cdp-smoke:
     name: CDP smoke
+    if: ${{ inputs.run_webfetch_comparison != true }}
     needs: [resolve-refs, build-release-head]
     runs-on: ubuntu-latest
     timeout-minutes: 60
@@ -451,6 +469,7 @@ jobs:
 
   webdriver-smoke:
     name: WebDriver smoke
+    if: ${{ inputs.run_webfetch_comparison != true }}
     needs: [resolve-refs, build-release-head]
     runs-on: ubuntu-latest
     timeout-minutes: 60
@@ -494,6 +513,7 @@ jobs:
 
   frontend-differential:
     name: Frontend differential · 1020 cases
+    if: ${{ inputs.run_webfetch_comparison != true }}
     needs: [resolve-refs, build-release-head]
     runs-on: [self-hosted, moli-ci]
     timeout-minutes: 45
@@ -576,6 +596,7 @@ jobs:
 
   runtime-contracts:
     name: Runtime and CDP session contracts
+    if: ${{ inputs.run_webfetch_comparison != true }}
     needs: [resolve-refs, build-release-head]
     runs-on: [self-hosted, moli-ci]
     timeout-minutes: 30
@@ -621,6 +642,7 @@ jobs:
 
   agent-episode:
     name: Agent episodes · Moli vs Chromium
+    if: ${{ inputs.run_webfetch_comparison != true }}
     needs: [resolve-refs, build-release-head]
     runs-on: [self-hosted, moli-ci]
     timeout-minutes: 45
@@ -678,6 +700,7 @@ jobs:
 
   release-regression:
     name: Release startup, size, and matrix A/B
+    if: ${{ inputs.run_webfetch_comparison != true }}
     needs: [resolve-refs, build-release-head, build-release-base]
     runs-on: [self-hosted, moli-ci]
     timeout-minutes: 60
@@ -745,6 +768,7 @@ jobs:
 
   spider-fixture:
     name: Deterministic Spider fixture
+    if: ${{ inputs.run_webfetch_comparison != true }}
     needs: [resolve-refs, build-release-head]
     runs-on: [self-hosted, moli-ci]
     timeout-minutes: 20
@@ -786,9 +810,10 @@ jobs:
     name: Spider public-web A/B
     needs: [resolve-refs, build-release-head, build-release-base]
     if: >-
-      github.event_name != 'pull_request' ||
+      inputs.run_webfetch_comparison != true &&
+      (github.event_name != 'pull_request' ||
       (github.event.pull_request.head.repo.full_name == github.repository &&
-      github.actor != 'dependabot[bot]')
+      github.actor != 'dependabot[bot]'))
     runs-on: [self-hosted, moli-ci]
     timeout-minutes: 90
     container: rust:1.96.1-bookworm
@@ -843,9 +868,10 @@ jobs:
     name: Sequential navigation soak · 200 A/B
     needs: [resolve-refs, build-release-head, build-release-base]
     if: >-
-      github.event_name != 'pull_request' ||
+      inputs.run_webfetch_comparison != true &&
+      (github.event_name != 'pull_request' ||
       (github.event.pull_request.head.repo.full_name == github.repository &&
-      github.actor != 'dependabot[bot]')
+      github.actor != 'dependabot[bot]'))
     runs-on: [self-hosted, moli-ci]
     timeout-minutes: 90
     container: rust:1.96.1-bookworm
@@ -949,3 +975,185 @@ jobs:
           uv run --project moli-benchmark --no-sync python
           -m moli_benchmark.sequential_navigate_ci check
           --input "$BENCHMARK_OUTPUT/comparison.json"
+
+  webfetch-comparison:
+    name: Web Fetch · 430 cases · stable vs HEAD
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_webfetch_comparison == true }}
+    needs: [resolve-refs, build-release-head]
+    runs-on: [self-hosted, moli-ci]
+    timeout-minutes: 720
+    container:
+      image: rust:1.96.1-bookworm
+      volumes:
+        - moli-ci-cargo-home-1-96-1-v1:/usr/local/cargo
+        - moli-ci-rustup-home-1-96-1-v1:/usr/local/rustup
+    env:
+      BROWSER_EVAL_DATA_HOME: ${{ github.workspace }}/target/webfetch-comparison/data-home
+      SNAPSHOT_ID: webfetch-430-ver-a10d677a
+      SNAPSHOT_MANIFEST_URL: https://artifact-site.lexmount.cn/api/preview/jGXOOJwkdBK_/manifest.json?__artifact_share=IqGpMUYHWat-dw4n8usQttTptoPzboAo&__artifact_version=ver_a10d677a5efb4553a96ef201dae9faec
+      SNAPSHOT_MANIFEST_SHA256: 47d79b47c3692ce9f0a1028518c4363e08313b8efa363e6849650eaf6ca34e4f
+      SNAPSHOT_DATASET_SHA256: 3a83b3c4568c07739443fc130581fded07510df202a616e28b3152abb70352be
+      STABLE_ARCHIVE_URL: https://github.com/lexmount/moli/releases/download/v1.1.15/moli-x86_64-unknown-linux-gnu.tar.gz
+      STABLE_ARCHIVE_SHA256: f7c9455451bffd4d3a6353431b3596c1d18ad4d9fe6725d8d4033f6fff5fa59d
+      STABLE_BINARY_SHA256: 7a53cdd071ae60a2f8ff6d08107f67f6b0f1d6247a9acd970d2bcec77ff15b50
+    steps:
+      - name: Checkout exact candidate
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          ref: ${{ needs.resolve-refs.outputs.head_sha }}
+
+      - name: Use candidate release
+        uses: ./.github/actions/use-ci-release
+        with:
+          side: head
+          revision: ${{ needs.resolve-refs.outputs.head_sha }}
+
+      - name: Checkout exact browser-eval runner
+        uses: actions/checkout@v4
+        with:
+          repository: lexmount/browser-eval
+          persist-credentials: false
+          ref: ${{ inputs.browser_eval_ref }}
+          path: browser-eval
+
+      - name: Install cohort dependencies
+        run: |
+          set -euo pipefail
+          apt-get update
+          apt-get install --yes --no-install-recommends ca-certificates curl jq
+
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          version: 0.11.14
+          python-version: "3.11"
+          enable-cache: true
+          cache-dependency-glob: browser-eval/uv.lock
+
+      - name: Install the frozen evaluation environment
+        run: uv sync --project browser-eval --frozen --extra reference-audit
+
+      - name: Restore the pinned 430-case inputs
+        run: >-
+          uv run --project browser-eval --frozen python
+          browser-eval/scripts/import_reference_inputs.py
+          --packed-manifest-url "$SNAPSHOT_MANIFEST_URL"
+          --expected-manifest-sha256 "$SNAPSHOT_MANIFEST_SHA256"
+          --expected-dataset-sha256 "$SNAPSHOT_DATASET_SHA256"
+          --snapshot-id "$SNAPSHOT_ID"
+
+      - name: Pin stable and candidate executables
+        shell: bash
+        run: |
+          set -euo pipefail
+          root=$PWD/target/webfetch-comparison
+          mkdir -p "$root/bin/stable" "$root/download"
+          curl --fail --location --retry 3 --output "$root/download/moli-stable.tar.gz" \
+            "$STABLE_ARCHIVE_URL"
+          echo "$STABLE_ARCHIVE_SHA256  $root/download/moli-stable.tar.gz" | sha256sum --check
+          tar -xzf "$root/download/moli-stable.tar.gz" -C "$root/bin/stable"
+          mapfile -t stable_bins < <(find "$root/bin/stable" -type f -name moli -perm -u+x -print)
+          test "${#stable_bins[@]}" -eq 1
+          install -m 0755 "${stable_bins[0]}" "$root/bin/moli-1.1.15"
+          echo "$STABLE_BINARY_SHA256  $root/bin/moli-1.1.15" | sha256sum --check
+
+          candidate=$PWD/target/ci-bin/moli-release-head/moli
+          test -x "$candidate"
+          candidate_sha=$(sha256sum "$candidate" | cut -d' ' -f1)
+          stable_version=$("$root/bin/moli-1.1.15" --version)
+          candidate_version=$("$candidate" --version)
+          test "$stable_version" = "moli 1.1.15"
+
+          jq -n \
+            --arg stable "$root/bin/moli-1.1.15" \
+            --arg stable_sha "$STABLE_BINARY_SHA256" \
+            --arg stable_version "$stable_version" \
+            --arg candidate "$candidate" \
+            --arg candidate_sha "$candidate_sha" \
+            --arg candidate_version "$candidate_version" \
+            '{schema_version: 1, providers: {
+              "moli-1.1.15": {
+                type: "moli_webfetch", label: "Moli 1.1.15",
+                binary: $stable, expected_reported_version: $stable_version,
+                expected_binary_sha256: $stable_sha,
+                dns_mode: "system", wait_until: "done",
+                block_private_networks: true, uniform_native_parameters: true,
+                max_bytes: 20000000
+              },
+              "moli-stack-1428": {
+                type: "moli_webfetch", label: "Moli stack through PR #1428",
+                source_url: "https://github.com/lexmount/moli/pull/1428",
+                binary: $candidate, expected_reported_version: $candidate_version,
+                expected_binary_sha256: $candidate_sha,
+                dns_mode: "system", wait_until: "done",
+                block_private_networks: true, uniform_native_parameters: true,
+                max_bytes: 20000000
+              }
+            }}' > "$root/providers.json"
+
+          jq -n \
+            --arg run_url "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+            --arg candidate_revision "${{ needs.resolve-refs.outputs.head_sha }}" \
+            --arg candidate_sha "$candidate_sha" \
+            --arg candidate_version "$candidate_version" \
+            --arg stable_sha "$STABLE_BINARY_SHA256" \
+            --arg browser_eval_revision "${{ inputs.browser_eval_ref }}" \
+            --arg manifest_sha "$SNAPSHOT_MANIFEST_SHA256" \
+            --arg dataset_sha "$SNAPSHOT_DATASET_SHA256" \
+            '{schema_version: 1, run_url: $run_url,
+              candidate: {revision: $candidate_revision, binary_sha256: $candidate_sha,
+                reported_version: $candidate_version},
+              stable: {release: "v1.1.15", source_revision: "eaaf6f2dbfe26bf8de33387cd3ae6c31d0931a0e",
+                binary_sha256: $stable_sha},
+              runner: {repository: "lexmount/browser-eval", revision: $browser_eval_revision},
+              inputs: {manifest_sha256: $manifest_sha, dataset_sha256: $dataset_sha,
+                case_count: 430},
+              execution: {workers: 1, call_order: "case-alternating", runs: 1,
+                caller_retries: 0, retrieval_mode: "native"}}' > "$root/run-receipt.json"
+
+      - name: Run the complete certified cohort
+        shell: bash
+        run: |
+          set -euo pipefail
+          root=$PWD/target/webfetch-comparison
+          dataset="$BROWSER_EVAL_DATA_HOME/reference-inputs/$SNAPSHOT_ID/dataset.json"
+          case_ids=$(uv run --project browser-eval --frozen python -c \
+            'import json,sys; print(",".join(row["id"] for row in json.load(open(sys.argv[1]))["cases"]))' \
+            "$dataset")
+          test "$(tr ',' '\n' <<< "$case_ids" | wc -l)" -eq 430
+          uv run --project browser-eval --frozen python \
+            browser-eval/scripts/run_certified_benchmark.py \
+            --dataset "$dataset" \
+            --output "$root/evidence" \
+            --work-root "$root/work" \
+            --providers moli-1.1.15,moli-stack-1428 \
+            --case-ids "$case_ids" \
+            --provider-config "$root/providers.json" \
+            --workers 1 \
+            --call-order case-alternating \
+            --retrieval-mode native
+
+      - name: Render completion summary
+        if: ${{ always() && !cancelled() }}
+        continue-on-error: true
+        run: |
+          root=$PWD/target/webfetch-comparison
+          if [[ -f "$root/evidence/results.jsonl" ]]; then
+            calls=$(wc -l < "$root/evidence/results.jsonl")
+            printf '## Web Fetch comparison\n\n- Recorded calls: %s / 860\n- Candidate: `%s`\n' \
+              "$calls" '${{ needs.resolve-refs.outputs.head_sha }}' >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload the complete private evidence
+        if: ${{ always() && !cancelled() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: webfetch-comparison-${{ needs.resolve-refs.outputs.head_sha }}
+          path: |
+            target/webfetch-comparison/evidence
+            target/webfetch-comparison/work
+            target/webfetch-comparison/providers.json
+            target/webfetch-comparison/run-receipt.json
+            target/webfetch-comparison/data-home/reference-inputs/*/import-receipt.json
+          if-no-files-found: warn
+          retention-days: 14
