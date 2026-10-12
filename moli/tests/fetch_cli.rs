@@ -1143,6 +1143,49 @@ fn cli_dump_pdf_writes_pdf_bytes() -> Result<()> {
 }
 
 #[test]
+fn cli_dump_pdf_preserves_button_backgrounds() -> Result<()> {
+    let html = concat!(
+        "<!doctype html><style>html,body{margin:0}",
+        "button{position:absolute;left:100px;top:100px;width:180px;height:60px;",
+        "color:white;background:#325dff;border:0;border-radius:12px}",
+        "</style><button>Search</button>",
+    );
+    let url = format!("data:text/html;base64,{}", BASE64_STANDARD.encode(html));
+    let output = run_fetch_cli_with_dump_and_args(&url, "pdf", &["--layout"])?;
+    assert!(
+        output.status.success(),
+        "moli fetch failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let document = lopdf::Document::load_mem(&output.stdout)?;
+    assert_eq!(document.extract_text(&[1])?.trim(), "Search");
+    let page_id = document.get_pages()[&1];
+    let content = lopdf::content::Content::decode(&document.get_page_content(page_id))?;
+    let background = content.operations.iter().position(|operation| {
+        operation.operator == "rg"
+            && operation.operands.len() == 3
+            && operation
+                .operands
+                .iter()
+                .zip([50.0 / 255.0, 93.0 / 255.0, 1.0])
+                .all(|(operand, expected)| {
+                    operand
+                        .as_float()
+                        .is_ok_and(|value| (value - expected).abs() < 0.0001)
+                })
+    });
+    let background = background.expect("white button text needs its blue CSS background");
+    assert!(
+        content.operations[background + 1..]
+            .iter()
+            .take_while(|operation| operation.operator != "rg")
+            .any(|operation| matches!(operation.operator.as_str(), "f" | "f*")),
+        "the button background must paint a filled path"
+    );
+    Ok(())
+}
+
+#[test]
 fn binary_dump_modes_require_layout() -> Result<()> {
     for dump in ["screenshot", "screenshot_full", "pdf"] {
         let output = run_fetch_cli_with_dump_and_args("about:blank", dump, &[])?;

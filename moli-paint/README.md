@@ -4,6 +4,10 @@
 `pdf::pdf_snapshot` consumes the same owned snapshot and writes PDF through
 upstream [Krilla at `5eb4e1f`](https://github.com/LaurenzV/krilla/commit/5eb4e1fb24a24ce78b533c23b080969917530c32).
 CDP `Page.printToPDF` and CLI `--dump pdf` use the PDF backend.
+CLI PDF exports include CSS backgrounds, preserving colored controls and white
+text on colored backgrounds. CDP continues to use its `printBackground` option,
+which defaults to false. Both paths apply print media styles unless explicitly
+overridden.
 The renderer owns the print request, restores media after snapshot capture, and
 returns PDF bytes to both clients without publishing interactive geometry. Vector
 print capture is independent of the full-document bitmap dimension limit.
@@ -103,10 +107,13 @@ clusters, repeated base letters, color glyphs, opacity, shadows, filters and a
 per-process timings/sampled peak RSS in `target/native-pdf-check/`. The Rust tests
 use lopdf for PDF objects and ordinary text; its extractor does not interpret
 ActualText and Type3 text correctly, so it is not the complex-text oracle.
+The reader script also compares rendered solid and gradient button backgrounds
+against CLI screenshots; extracting a white label alone does not establish that
+the label is visible in the PDF.
 
 Validation on 2026-10-12 (Linux x86_64, Rust 1.96.1): `cargo fmt --all`,
 workspace Clippy with all targets/features and warnings denied, and the full
-nextest run passed (20,011 tests; 17 skipped). The Python smoke unit suite passed
+nextest run passed (20,012 tests; 17 skipped). The Python smoke unit suite passed
 43 tests. The real PDF smoke group passed with both debug and release binaries.
 The visual comparison covered borders, rounded clips, an sRGB gradient, alpha
 image, SVG paths, transformed text, opacity, shadow and blur. Interior gradient
