@@ -65,3 +65,5 @@ mod stylesheet_and_document_lifecycle;
 
 mod cssom_arguments;
 mod cssom_write_conversion;
+
+mod cssom_identity;
