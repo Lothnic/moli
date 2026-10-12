@@ -227,27 +227,27 @@ Chaque benchmark mesure la fidélité du contenu, la compatibilité de l’autom
 | Benchmark | Périmètre | Mesure |
 | --- | --- | --- |
 | Web Fetch · WebMainBench | 545 pages HTML figées ; 5 navigateurs | Conservation du texte, du code, des formules et des tableaux |
-| Automatisation Lexbench | 1 308 tâches comparables | Compatibilité des outils d’automatisation et de la plateforme Web |
-| Ressources Lexbench | Travail terminé par les quatre moteurs locaux dans une exécution de 557 tâches | CPU et mémoire pour le même travail |
-| WPT et tests de régression | Sélections distinctes de tests fonctionnels | Comportement attendu et régressions |
+| Automatisation du navigateur | 1 308 tests d’actions du navigateur et de fonctions Web | Ouverture de pages, clics, saisie de formulaires et vérification du DOM et des événements |
+| Consommation CPU et mémoire | Tâches terminées par les quatre navigateurs locaux dans une exécution de 557 tâches | Temps CPU et mémoire nécessaires aux mêmes tâches |
+| Standards Web et tests de régression | Sélection de tests WPT et tests propres au projet | Comportement correct du DOM, de CSS et de JavaScript ; détection des régressions |
 
 ### Web Fetch : extraction du contenu de 545 pages
 
-Moli extrait du contenu sur les 545 pages de test et obtient la meilleure similarité globale des cinq navigateurs : 39,27 %, soit 4,27 points de pourcentage devant Lightpanda. Son meilleur résultat concerne la conservation du code : 91,06 % de similarité, avec 6,35 points d’avance sur le deuxième navigateur. La comparaison utilise le même HTML figé et des références de contenu principal établies par des humains.
+Moli a extrait le contenu principal des 545 pages de test et obtenu le meilleur score global de similarité parmi les cinq navigateurs : 39,27 %, soit 4,27 points de pourcentage de plus que Lightpanda. Il arrive également en tête pour la conservation du code, avec 91,06 % de similarité, soit 6,35 points de pourcentage de plus que le deuxième. Les cinq navigateurs ont traité les mêmes pages HTML sauvegardées, et leurs résultats ont été comparés à des références de contenu principal préparées manuellement.
 
 | Méthode | Contenu principal produit | Global | Texte | Code | Formules | Contenu des tableaux | Structure des tableaux |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| Moli | 545/545 | **39.27%** | 40.73% | **91.06%** | 28.20% | 22.62% | 13.75% |
-| Lightpanda 0.4.1 | 545/545 | 35.00% | 41.52% | 84.71% | 12.97% | 21.81% | **14.00%** |
-| Obscura 0.2.2 | 543/545 | 31.03% | **41.88%** | 81.82% | **31.39%** | 0.03% | 0.00% |
-| Chrome for Testing 154.0.8037.57 | 545/545 | 27.02% | 39.40% | 35.86% | 21.12% | **25.01%** | 13.73% |
-| Kitesurf (service hébergé) | 524/545 | 33.43% | 36.99% | 80.70% | 19.32% | 18.25% | 11.87% |
+| Moli | 545/545 | **39,27 %** | 40,73 % | **91,06 %** | 28,20 % | 22,62 % | 13,75 % |
+| Lightpanda 0.4.1 | 545/545 | 35,00 % | 41,52 % | 84,71 % | 12,97 % | 21,81 % | **14,00 %** |
+| Obscura 0.2.2 | 543/545 | 31,03 % | **41,88 %** | 81,82 % | **31,39 %** | 0,03 % | 0,00 % |
+| Chrome for Testing 154.0.8037.57 | 545/545 | 27,02 % | 39,40 % | 35,86 % | 21,12 % | **25,01 %** | 13,73 % |
+| Kitesurf (service hébergé) | 524/545 | 33,43 % | 36,99 % | 80,70 % | 19,32 % | 18,25 % | 11,87 % |
 
 [Reproduire avec browser-eval](https://github.com/lexmount/browser-eval).
 
-### Automatisation et compatibilité de la plateforme Web
+### Automatisation du navigateur
 
-Le corpus complet de [Lexbench-Headless-Browser](https://github.com/lexmount/Lexbench-Headless-Browser) contient 1 928 tâches couvrant le CDP brut, 13 outils d'automatisation aux versions épinglées, dont Playwright, Puppeteer et Selenium, ainsi que la sémantique de la plateforme Web. Pour inclure Kitesurf, disponible uniquement sous forme de point d'accès distant, le graphique ci-dessous utilise 1 308 tâches comparables. Tous les navigateurs suivent les mêmes règles de sélection.
+Le corpus complet de [Lexbench-Headless-Browser](https://github.com/lexmount/Lexbench-Headless-Browser) contient 1 928 tâches couvrant le CDP brut, 13 outils d'automatisation aux versions épinglées, dont Playwright, Puppeteer et Selenium, ainsi que la sémantique de la plateforme Web. Le graphique compare les cinq navigateurs sur 1 308 tâches. Les groupes d’outils affectés par des problèmes d’interface du service distant, ou dont les échecs ne pouvaient pas être attribués clairement au navigateur ou au pilote, ont été exclus pour tous les navigateurs. Le rapport lié ci-dessous détaille ces exclusions.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../assets/lexbench-five-engine-caliber-b-dark.jpg">
@@ -256,9 +256,9 @@ Le corpus complet de [Lexbench-Headless-Browser](https://github.com/lexmount/Lex
 
 **Moli 0.1.1 a réussi 1 071 tâches, soit un taux de 81,88 %**, devant Kitesurf à 62,08 %, Lightpanda à 53,29 % et Obscura à 44,88 % ; Chrome, utilisé comme référence, a atteint 99,85 %. Kitesurf a été exécuté avec k=1, les tâches non couvertes comptent comme non réussies et les conditions de reproduction d'un service distant diffèrent de celles des binaires locaux. Les résultats complets figurent dans le [rapport à cinq moteurs](https://github.com/lexmount/Lexbench-Headless-Browser/blob/kitesurf-eval/docs/reports/five-engine-report-20260813.md) du benchmark.
 
-### Coût en ressources : mesures distinctes
+### Consommation CPU et mémoire
 
-Ces mesures utilisent d’autres tâches et des versions historiques. Elles ne mesurent pas la vitesse ni la mémoire du test Web Fetch ci-dessus. Le temps CPU, la RSS et la PSS sont des métriques distinctes.
+Les résultats ci-dessous proviennent d’une autre exécution de Lexbench, avec les versions des navigateurs utilisées à l’époque.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../assets/lexbench-efficiency-map-dark.jpg">
@@ -287,7 +287,7 @@ Il s’agit d’un seul exemple de charge, pas de la distribution des ressources
 
 Dans la sélection WPT actuelle qui valide le périmètre de Moli comme navigateur pour agents, une exécution complète a réussi **1 612 000 tests**.
 
-Le nombre de tests WPT réussis décrit la couverture de cette sélection, pas la compatibilité globale avec Chrome. La suite nextest vérifie les régressions propres au projet.
+Les tests nextest du projet détectent également les régressions.
 
 ## Périmètre du projet
 

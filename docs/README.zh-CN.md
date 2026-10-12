@@ -225,13 +225,13 @@ Moli 是一个独立的浏览器内核，而不是对 Chromium 的封装。它�
 | 评测 | 范围 | 回答的问题 |
 | --- | --- | --- |
 | Web Fetch · WebMainBench | 545 份冻结 HTML，5 款浏览器 | 正文、代码、公式和表格保留得如何？ |
-| Lexbench 自动化 | 1,308 道可比任务 | 自动化工具与 Web 平台行为支持得如何？ |
-| Lexbench 资源测试 | 557 道任务中的四引擎共同完成部分 | 完成相同工作需要多少 CPU 和内存？ |
-| WPT 与回归测试 | 单独的功能测试集合 | 已支持的行为是否符合预期、是否发生回退？ |
+| 浏览器自动化 | 1,308 项浏览器操作与 Web 功能测试 | 打开页面、点击、填表，以及 DOM、事件等 Web 行为 |
+| CPU 与内存开销 | 557 项任务中四个本地浏览器都完成的部分 | 完成相同任务用了多少 CPU 时间和内存 |
+| Web 标准与回归测试 | 选定的 WPT 测试与项目自身测试 | DOM、CSS、JavaScript 行为是否正确，已支持的功能是否回退？ |
 
 ### Web Fetch：545 页内容提取
 
-Moli 在全部 545 个测试页面中提取到正文，综合相似度为 39.27%，在五款浏览器中最高，比 Lightpanda 高 4.27 个百分点。代码保留是最突出的优势：相似度达 91.06%，比第二名高 6.35 个百分点。五款浏览器使用相同的冻结 HTML，与人工正文参考比较。
+Moli 在全部 545 个测试页面中提取到正文，综合相似度为 39.27%，在五款浏览器中最高，比 Lightpanda 高 4.27 个百分点。代码保留也排名第一，相似度为 91.06%，比第二名高 6.35 个百分点。五款浏览器处理相同的 HTML 快照，提取结果与人工整理的正文参考进行比较。
 
 | 方法 | 生成正文 | 综合 | 全文 | 代码 | 公式 | 表格内容 | 表格结构 |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -243,9 +243,9 @@ Moli 在全部 545 个测试页面中提取到正文，综合相似度为 39.27%
 
 [用 browser-eval 复现](https://github.com/lexmount/browser-eval)。
 
-### 自动化与 Web 平台兼容性
+### 浏览器自动化
 
-[Lexbench-Headless-Browser](https://github.com/lexmount/Lexbench-Headless-Browser) 的完整任务集包含 1,928 道任务，覆盖裸 CDP、Playwright、Puppeteer、Selenium 等 13 个固定版本的自动化工具及 Web 平台语义。为了加入仅提供远程端点的 Kitesurf，下图采用其中 1,308 道可比任务，所有浏览器使用相同的任务筛选规则。
+[Lexbench-Headless-Browser](https://github.com/lexmount/Lexbench-Headless-Browser) 的完整任务集包含 1,928 道任务，覆盖裸 CDP、Playwright、Puppeteer、Selenium 等 13 个固定版本的自动化工具及 Web 平台语义。下图比较其中 1,308 项测试。出现远程服务接口问题，或无法判断失败来自浏览器还是驱动的工具组，已从五款浏览器的结果中统一排除，具体范围见下方报告。
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../assets/lexbench-five-engine-caliber-b-dark.jpg">
@@ -254,9 +254,9 @@ Moli 在全部 545 个测试页面中提取到正文，综合相似度为 39.27%
 
 **Moli 0.1.1 通过了 1,071 道任务，成功率为 81.88%**，高于 Kitesurf 的 62.08%、Lightpanda 的 53.29% 和 Obscura 的 44.88%；参照引擎 Chrome 为 99.85%。Kitesurf 以 k=1 运行，未覆盖任务按未通过计，远程服务的复现条件也与本地二进制不同。完整结果见 benchmark 的[五引擎报告](https://github.com/lexmount/Lexbench-Headless-Browser/blob/kitesurf-eval/docs/reports/five-engine-report-20260813.md)。
 
-### 资源开销：独立测量
+### CPU 与内存开销
 
-下列资源结果来自不同任务与历史版本，不作为上面 Web Fetch 的速度或内存成绩。CPU、RSS 和 PSS 也不能直接混成同一指标。
+下面的资源结果来自另一轮 Lexbench 测试，使用当时的浏览器版本。
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../assets/lexbench-efficiency-map-dark.jpg">
@@ -285,7 +285,7 @@ Kitesurf 是远程服务，无法测量 CPU、内存和进程数，因此资源�
 
 在目前用于验证 Moli 智能体浏览器功能范围的 WPT 测试集合中，一次完整运行有 **161.2 万项测试通过**。
 
-WPT 通过项数描述该轮选定集合的覆盖，不是与 Chrome 的整体兼容率；nextest 用于项目自身的回归验收。
+项目另用 nextest 测试套件检查功能回退。
 
 ## 项目范围
 

@@ -311,17 +311,13 @@ browser ranking.
 | Benchmark | Scope | What it measures |
 | --- | --- | --- |
 | Web Fetch · WebMainBench | 545 frozen HTML pages; 5 browsers | Preservation of text, code, formulas, and tables |
-| Lexbench automation | 1,308 comparable tasks | Automation-tool and web-platform compatibility |
-| Lexbench resources | Work completed by all four local engines within a 557-task run | CPU and memory for the same completed work |
-| WPT and regression tests | Separate functional test selections | Expected behavior and regressions |
+| Browser automation | 1,308 browser-operation and web-platform tests | Opening pages, clicking, filling forms, and checking DOM and event behavior |
+| CPU and memory use | Tasks completed by all four local browsers in a 557-task run | CPU time and memory needed for the same tasks |
+| Web standards and regression tests | Selected WPT tests and the project’s own tests | Correct DOM, CSS and JavaScript behavior; checks for regressions |
 
 ### Web Fetch: content extraction across 545 pages
 
-Moli extracts content from all 545 test pages and scores highest overall among
-the five browsers: 39.27%, ahead of Lightpanda by 4.27 percentage points. Its
-strongest result is code preservation, at 91.06% similarity—6.35 points ahead of
-the next browser. The comparison uses identical frozen HTML and human
-main-content references.
+Moli extracted main content from all 545 test pages and had the highest overall similarity score among the five browsers: 39.27%, 4.27 percentage points ahead of Lightpanda. It also led in code preservation, with 91.06% similarity, 6.35 percentage points ahead of the runner-up. All five browsers processed the same saved HTML pages, and their outputs were compared with manually prepared main-content references.
 
 | Method | Body produced | Overall | Text | Code | Formula | Table content | Table structure |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -333,13 +329,11 @@ main-content references.
 
 [Reproduce with browser-eval](https://github.com/lexmount/browser-eval).
 
-### Automation and web-platform compatibility
+### Browser automation
 
 The full [Lexbench-Headless-Browser](https://github.com/lexmount/Lexbench-Headless-Browser)
 corpus contains 1,928 tasks covering raw CDP, 13 pinned automation tools
-including Playwright, Puppeteer and Selenium, and web-platform semantics. To
-include Kitesurf, which is only available as a remote endpoint, the chart below
-uses 1,308 comparable tasks. All browsers use the same task selection rules.
+including Playwright, Puppeteer and Selenium, and web-platform semantics. The chart uses 1,308 tasks to compare all five browsers. Tool groups affected by remote-service interface problems, or whose failures could not be distinguished from driver problems, were excluded from every browser’s results; the linked report lists those exclusions.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/lexbench-five-engine-caliber-b-dark.jpg">
@@ -354,10 +348,9 @@ of local binaries. See the benchmark's
 [five-engine report](https://github.com/lexmount/Lexbench-Headless-Browser/blob/kitesurf-eval/docs/reports/five-engine-report-20260813.md)
 for the full results.
 
-### Resource cost: separate measurements
+### CPU and memory use
 
-These resource measurements use different tasks and historical versions; they
-are not Web Fetch speed or memory results. CPU time, RSS, and PSS are distinct metrics.
+The resource results below come from a separate Lexbench run using the browser versions available at the time.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/lexbench-efficiency-map-dark.jpg">
@@ -394,8 +387,7 @@ This is one workload sample, not the resource distribution of all automation tas
 In the current WPT selection used to validate Moli's agent-browser scope, one
 full run passed **1.612 million tests**.
 
-The WPT pass count describes that selected run's coverage, not overall Chrome
-compatibility. The project's nextest suite checks its own regressions.
+The project’s nextest suite also checks for regressions.
 
 ## Project scope
 
