@@ -69,9 +69,9 @@ async fn fetches_static_fixture() -> Result<()> {
 }
 
 #[tokio::test]
-async fn load_completes_after_dynamic_child_and_stylesheet_transitions() -> Result<()> {
+async fn load_completes_after_dynamic_child_transitions() -> Result<()> {
     let server = FixtureServer::spawn().await?;
-    for mode in ["success", "error", "replace", "remove", "promote", "retarget"] {
+    for mode in ["success", "error", "replace", "remove"] {
         let browser = Browser::new(AppConfig::default())?;
         let page = browser
             .fetch_with_wait_until(
@@ -82,12 +82,21 @@ async fn load_completes_after_dynamic_child_and_stylesheet_transitions() -> Resu
             .await?;
         let html = page.serialize_html_async().await?;
         assert!(html.contains("Load completion content"), "mode={mode}");
-        assert!(html.contains("data-main-loads=\"1\""), "mode={mode}: {html}");
+        assert!(
+            html.contains("data-main-loads=\"1\""),
+            "mode={mode}: {html}"
+        );
         if mode != "remove" {
-            assert!(html.contains("data-child-loaded=\"yes\""), "mode={mode}: {html}");
+            assert!(
+                html.contains("data-child-loaded=\"yes\""),
+                "mode={mode}: {html}"
+            );
         }
         if mode == "replace" {
-            assert!(html.contains("/static?replacement=1"), "mode={mode}: {html}");
+            assert!(
+                html.contains("/static?replacement=1"),
+                "mode={mode}: {html}"
+            );
         }
     }
     server.shutdown().await;

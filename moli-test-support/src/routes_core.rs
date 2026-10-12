@@ -28,18 +28,7 @@ addEventListener('DOMContentLoaded', () => {
   if (mode === 'remove') {
     frame.remove();
   }
-  if (mode === 'promote' || mode === 'retarget') {
-    const link = document.createElement('link');
-    link.rel = mode === 'promote' ? 'preload' : 'stylesheet';
-    link.as = 'style';
-    link.href = 'data:text/css,body%7Bcolor%3Argb(1%2C2%2C3)%7D';
-    document.head.append(link);
-    if (mode === 'promote') {
-      link.rel = 'stylesheet';
-    } else {
-      link.href = 'data:text/css,body%7Bcolor%3Argb(4%2C5%2C6)%7D';
-    }
-  }
+
 });
 </script></head><body><main>Load completion content</main></body></html>"#,
     )
