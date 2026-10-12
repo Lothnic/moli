@@ -435,3 +435,51 @@ async fn markdown_preserves_text_when_dom_ancestry_cannot_prove_painted_contrast
         }
     }).await;
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn markdown_snapshot_tracks_cascaded_styles_and_dynamic_content_across_large_documents() {
+    run_page_vm_async_test(async move {
+        let loader = crate::network::ResourceRequestClient::new(&FetchConfig::default()).expect("loader");
+        let mut page = test_page_vm_with_loader_and_document_url(&loader, Vec::new(), Url::parse("https://example.test/catalog").unwrap());
+        page.vm_mut().eval(r##"
+            document.head.innerHTML = `<style>
+                .catalog { color: black; background-color: white; }
+                .catalog .row > .concealed { display: none; }
+                .catalog .row > .status { visibility: hidden; }
+                .catalog .row > .status > .restored { visibility: visible; }
+                .catalog .row > img { width: 1px; height: 1px; }
+                .catalog .row > .raised { position: relative; top: -2px; }
+            </style>`;
+            document.body.innerHTML = '<main class="catalog">' + Array.from({length: 128}, (_, i) =>
+                `<section class="row"><p>Product ${i}</p><span class="concealed">Secret ${i}</span>
+                <span class="status">Inactive ${i}<span class="restored">Available ${i}</span></span>
+                <span class="raised">2</span><img src="/tracking.gif">
+                <img src="/badge.png" alt="Verified ${i}"></section>`).join('') + '</main>';
+        "##).unwrap();
+        let initial = page.render_page_dump(options(false));
+        for i in 0..128 {
+            assert!(initial.contains(&format!("Product {i}")), "missing product {i}");
+            assert!(initial.contains(&format!("Available {i}")), "missing restored visibility {i}");
+            assert!(initial.contains(&format!("Verified {i}")), "missing meaningful image {i}");
+        }
+        assert!(!initial.contains("Secret "));
+        assert!(!initial.contains("Inactive "));
+        assert!(!initial.contains("tracking.gif"));
+        page.vm_mut().eval(r##"
+            document.querySelector('.catalog').style.backgroundColor = 'black';
+            document.querySelector('.catalog').style.color = 'white';
+            document.querySelectorAll('.concealed').forEach(node => node.style.display = 'inline');
+            document.querySelectorAll('.status').forEach(node => node.style.visibility = 'visible');
+            document.querySelector('.row p').textContent = 'Updated product';
+        "##).unwrap();
+        let updated = page.render_page_dump(options(false));
+        assert!(updated.contains("Updated product"));
+        assert!(!updated.contains("Product 0"));
+        for i in 0..128 {
+            assert!(updated.contains(&format!("Secret {i}")), "missing display update {i}");
+            assert!(updated.contains(&format!("Inactive {i}")), "missing visibility update {i}");
+        }
+        assert_eq!(updated, page.render_page_dump(options(false)));
+        Ok::<(), anyhow::Error>(())
+    }).await.unwrap();
+}

@@ -167,9 +167,9 @@ pub(crate) use shadow_dom::{
 };
 pub(crate) use styles::{
     ComputedStyleRead, StyleMode, active_css_animation_transform_value,
-    computed_style_own_visibility_values_for_document_snapshot,
     computed_style_properties_for_inspector_handle,
-    computed_style_property_values_for_document_snapshot, css_animation_start_applies,
+    computed_style_property_values_for_document_snapshot, computed_style_snapshot_values_for_document,
+    css_animation_start_applies,
     cssom_style_entry_requires_structured_parser,
     cssom_style_property_mutation_affected_names_with_pdb,
     cssom_style_property_mutation_cleanup_names_with_pdb,
