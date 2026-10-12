@@ -3,6 +3,7 @@ use super::*;
 pub(super) fn build_router() -> Router {
     routes_wait::add_wait_routes(Router::new())
         .route("/static", get(static_page))
+        .route("/runtime/load-completion-controls", get(load_completion_controls_page))
         .route(
             "/compat/child-dynamic-markup-document",
             get(child_dynamic_markup_document),
