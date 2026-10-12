@@ -24,7 +24,7 @@ on:
       browser_eval_ref:
         description: Exact browser-eval commit containing the certified runner
         required: false
-        default: "2b19e144038f8a296f6475fe96b939b9887f0a0e"
+        default: "afd05dc213f36240de7d3e23e884ece5c4d62437"
 
 concurrency:
   group: ci-${{ github.event.pull_request.number || github.ref }}
@@ -1055,6 +1055,10 @@ jobs:
           ref: ${{ inputs.browser_eval_ref }}
           path: browser-eval
 
+      - name: Verify the exact browser-eval revision
+        shell: bash
+        run: test "$(git -C browser-eval rev-parse HEAD)" = '${{ inputs.browser_eval_ref }}'
+
       - name: Install cohort dependencies
         run: |
           set -euo pipefail
@@ -1148,7 +1152,7 @@ jobs:
               candidate: {revision: $candidate_revision, binary_sha256: $candidate_sha,
                 reported_version: $candidate_version},
               stable: {release: "v1.1.15", source_revision: "eaaf6f2dbfe26bf8de33387cd3ae6c31d0931a0e",
-                binary_sha256: $stable_sha},
+                binary_sha256: $stable_sha, reported_version: $stable_version},
               runner: {repository: "lexmount/browser-eval", revision: $browser_eval_revision},
               inputs: {dataset_sha256: $dataset_sha, case_count: 430,
                 source: "private CI artifact prepared from the exact frozen unredacted bundle"},
@@ -1177,14 +1181,32 @@ jobs:
             --call-order case-alternating \
             --retrieval-mode native
 
+      - name: Verify completeness and render the paired difference inventory
+        shell: bash
+        run: |
+          set -euo pipefail
+          root=$PWD/target/webfetch-comparison
+          uv run --project browser-eval --frozen python \
+            browser-eval/scripts/audit_fixed_native_comparison.py \
+            --evidence "$root/evidence" \
+            --source-dataset "$root/input/dataset.json" \
+            --provider-config "$root/providers.json" \
+            --run-receipt "$root/run-receipt.json" \
+            --output-json "$root/comparison-audit.json" \
+            --output-markdown "$root/comparison-audit.md" \
+            --stable-provider moli \
+            --candidate-provider moli-stack-1428
+
       - name: Render completion summary
         if: ${{ always() && !cancelled() }}
         continue-on-error: true
         run: |
           root=$PWD/target/webfetch-comparison
-          if [[ -f "$root/evidence/results.jsonl" ]]; then
+          if [[ -f "$root/comparison-audit.md" ]]; then
+            cat "$root/comparison-audit.md" >> "$GITHUB_STEP_SUMMARY"
+          elif [[ -f "$root/evidence/results.jsonl" ]]; then
             calls=$(wc -l < "$root/evidence/results.jsonl")
-            printf '## Web Fetch comparison\n\n- Recorded calls: %s / 860\n- Candidate: `%s`\n' \
+            printf '## Incomplete Web Fetch comparison\n\n- Recorded calls: %s / 860\n- Candidate: `%s`\n' \
               "$calls" '${{ needs.resolve-refs.outputs.head_sha }}' >> "$GITHUB_STEP_SUMMARY"
           fi
 
@@ -1195,8 +1217,11 @@ jobs:
           name: webfetch-comparison-${{ needs.resolve-refs.outputs.head_sha }}
           path: |
             target/webfetch-comparison/evidence
+            target/webfetch-comparison/input
             target/webfetch-comparison/work
             target/webfetch-comparison/providers.json
             target/webfetch-comparison/run-receipt.json
+            target/webfetch-comparison/comparison-audit.json
+            target/webfetch-comparison/comparison-audit.md
           if-no-files-found: warn
           retention-days: 14
