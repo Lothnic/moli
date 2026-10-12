@@ -190,6 +190,8 @@ impl RendererPageCommand {
             | Self::SetViewportSurface(..) => OwnerOnly,
 
             #[cfg(test)]
+            Self::ObserveRealtimeOpportunityForTesting { .. } => OwnerOnly,
+            #[cfg(test)]
             Self::SetStoredDocumentStartScripts(..) | Self::TakeDocumentLifecycleEvents => {
                 OwnerOnly
             }
