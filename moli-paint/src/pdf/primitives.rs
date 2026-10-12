@@ -592,6 +592,7 @@ pub(super) fn visible_cluster_bounds(
     run.text = None;
     if whitespace {
         probe.fragments.push(PaintFragment::Fill {
+            fill_rule: moli_layout::PaintFillRule::NonZero,
             shape: moli_layout::PaintShape::Rect(moli_layout::PaintRect::new(
                 bounds.x0 as f32,
                 bounds.y0 as f32,

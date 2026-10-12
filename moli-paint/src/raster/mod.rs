@@ -2192,6 +2192,7 @@ mod tests {
                 radii: PaintCornerRadii::all(PaintCornerRadius::new(f32::MAX, f32::MAX)),
             },
             brush: PaintBrush::Solid(PaintColor::new(0.0, 0.0, 1.0, 1.0)),
+            fill_rule: moli_layout::PaintFillRule::NonZero,
             transform: PaintTransform2D::IDENTITY,
         });
 

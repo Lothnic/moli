@@ -440,11 +440,6 @@ pub(super) fn install_constructor_template_bindings<'s>(
     install_media_source_template_bindings(scope, template, spec.interface.name());
     install_remote_playback_template_bindings(scope, template, spec.interface.name());
     install_media_key_status_map_template_bindings(scope, template, spec.interface.name());
-    super::super::video_codecs::install_video_codec_template_bindings(
-        scope,
-        template,
-        spec.interface.name(),
-    );
     super::super::media_streams::install(scope, template, spec.interface.name());
     super::super::picture_in_picture::install(scope, template, spec.interface.name());
     super::super::media_recorder::install(scope, template, spec.interface.name());

@@ -274,6 +274,7 @@ fn hidden_masks_and_zero_opacity_do_not_export_source_text() {
     snapshot.fragments.insert(
         3,
         PaintFragment::Fill {
+            fill_rule: moli_layout::PaintFillRule::NonZero,
             shape: PaintShape::Rect(PaintRect::new(0.0, 0.0, 30.0, 100.0)),
             brush: moli_layout::PaintBrush::Solid(PaintColor::BLACK),
             transform: PaintTransform2D::IDENTITY,
