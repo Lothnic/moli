@@ -193,12 +193,39 @@ pub(super) fn parse_detached_document_from_string<'s>(
         );
     }
 
+    parse_detached_xml_document_from_source(
+        scope,
+        runtime.document_url().clone(),
+        source,
+        mime,
+        XmlParseErrorBehavior::ParserErrorDocument,
+    )
+}
+
+#[derive(Clone, Copy)]
+pub(super) enum XmlParseErrorBehavior {
+    ParserErrorDocument,
+    ReturnNone,
+}
+
+pub(super) fn parse_detached_xml_document_from_source<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    document_url: Url,
+    source: &str,
+    mime: &str,
+    error_behavior: XmlParseErrorBehavior,
+) -> Option<v8::Local<'s, v8::Object>> {
     let parser = XmlParser;
-    let parsed = parser.parse(runtime.document_url().clone(), source.to_owned());
+    let parsed = parser.parse(document_url, source.to_owned());
     let parsed = if parsed.parse_errors().is_empty() && native_document_has_element_child(&parsed) {
         parsed
     } else {
-        materialize_xml_parser_error_document(parsed)
+        match error_behavior {
+            XmlParseErrorBehavior::ParserErrorDocument => {
+                materialize_xml_parser_error_document(parsed)
+            }
+            XmlParseErrorBehavior::ReturnNone => return None,
+        }
     };
     build_detached_document_with_content_type(
         scope,
