@@ -1661,8 +1661,48 @@ where
         } else {
             inputs
         };
-        let resolved_intrinsic_inputs =
+        let mut resolved_intrinsic_inputs =
             taffy::compute::resolve_intrinsic_width_inputs(self, node_id, intrinsic_inputs);
+        if inputs.known_dimensions.width.is_none()
+            && resolved_intrinsic_inputs.known_dimensions.width.is_some()
+        {
+            let style = self.get_core_container_style(node_id);
+            if !style.min_size.width.is_intrinsic() && !style.max_size.width.is_intrinsic() {
+                // The intrinsic resolver synthesizes a preferred border-box
+                // width, but only applies intrinsic min/max keywords. Clamp
+                // numeric constraints before handing that width to the leaf:
+                // known dimensions are final sizes and bypass leaf min/max.
+                // Preserve dimensions already fixed by the parent context.
+                let basis = inputs
+                    .constraint_space(self.get_writing_mode(node_id))
+                    .margin_padding_percentage_basis();
+                let padding = style
+                    .padding
+                    .resolve_or_zero(basis, resolve_stylo_calc_value);
+                let border = style
+                    .border
+                    .resolve_or_zero(basis, resolve_stylo_calc_value);
+                let adjustment = if style.box_sizing == BoxSizing::ContentBox {
+                    (padding + border).horizontal_axis_sum()
+                } else {
+                    0.0
+                };
+                let min = style
+                    .min_size
+                    .width
+                    .maybe_resolve(inputs.parent_size.width, resolve_stylo_calc_value)
+                    .maybe_add(adjustment);
+                let max = style
+                    .max_size
+                    .width
+                    .maybe_resolve(inputs.parent_size.width, resolve_stylo_calc_value)
+                    .maybe_add(adjustment);
+                resolved_intrinsic_inputs.known_dimensions.width = resolved_intrinsic_inputs
+                    .known_dimensions
+                    .width
+                    .maybe_clamp(min, max);
+            }
+        }
         let inputs = LayoutInput {
             // The float parent has already removed horizontal margins from the
             // child's available space. Restoring them above is only an adapter
