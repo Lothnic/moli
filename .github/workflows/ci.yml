@@ -24,7 +24,7 @@ on:
       browser_eval_ref:
         description: Exact browser-eval commit containing the certified runner
         required: false
-        default: "32951a4b1ab03c449b569fe105b8f9ef99d108ad"
+        default: "2ec3978c752bfe318a7064bb67cb161a4733ac3e"
 
 concurrency:
   group: ci-${{ github.event.pull_request.number || github.ref }}
@@ -982,10 +982,10 @@ jobs:
     runs-on: [self-hosted, moli-ci]
     timeout-minutes: 20
     env:
-      SOURCE_DATASET_SHA256: d32ec3a78bc8326b555e2a9863bfe80ef8915aadabcb58b50b89ea4e44f0ed44
-      SOURCE_RELEASE_TAG: webfetch-ci-input-d32ec3a7
-      SOURCE_ARCHIVE_NAME: webfetch-430-source-d32ec3a7.tar.gz
-      SOURCE_ARCHIVE_SHA256: 7f9f1f884d80bd0925f3f07229cd55a84593c82418b4d6b08a7bb95655cad6d0
+      SOURCE_DATASET_SHA256: dd3504d82e24cf292a1ec718c6c26774ca9184fe43821f053f1cd031e38a69e3
+      SOURCE_RELEASE_TAG: webfetch-ci-input-dd3504d8
+      SOURCE_ARCHIVE_NAME: webfetch-430-source-dd3504d8.tar.gz
+      SOURCE_ARCHIVE_SHA256: 852b5e1ec872f2ec813f2663e02f7752b117f65a42cf5a84c4955ab6cde3b21d
     steps:
       - name: Download the private hash-bound source archive
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
@@ -1062,7 +1062,7 @@ jobs:
         - moli-ci-cargo-home-1-96-1-v1:/usr/local/cargo
         - moli-ci-rustup-home-1-96-1-v1:/usr/local/rustup
     env:
-      SOURCE_DATASET_SHA256: d32ec3a78bc8326b555e2a9863bfe80ef8915aadabcb58b50b89ea4e44f0ed44
+      SOURCE_DATASET_SHA256: dd3504d82e24cf292a1ec718c6c26774ca9184fe43821f053f1cd031e38a69e3
       STABLE_ARCHIVE_URL: https://github.com/lexmount/moli/releases/download/v1.1.15/moli-x86_64-unknown-linux-gnu.tar.gz
       STABLE_ARCHIVE_SHA256: f7c9455451bffd4d3a6353431b3596c1d18ad4d9fe6725d8d4033f6fff5fa59d
       STABLE_BINARY_SHA256: 7a53cdd071ae60a2f8ff6d08107f67f6b0f1d6247a9acd970d2bcec77ff15b50
