@@ -485,3 +485,39 @@ async fn markdown_snapshot_tracks_cascaded_styles_and_dynamic_content_across_lar
         Ok::<(), anyhow::Error>(())
     }).await.unwrap();
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn markdown_keeps_delayed_reveals_without_exposing_transient_or_hidden_content() {
+    run_page_vm_async_test(async move {
+        let loader = crate::network::ResourceRequestClient::new(&FetchConfig::default()).expect("loader");
+        let mut page = test_page_vm_with_loader_and_document_url(&loader, Vec::new(), Url::parse("https://example.test/content").unwrap());
+        page.vm_mut().eval(r##"
+            document.head.innerHTML = '<style>@keyframes reveal{from{opacity:0}to{opacity:1}}@keyframes conceal{to{opacity:0}}</style>';
+            document.body.innerHTML = `
+                <section style="--delay:90ms">
+                    <p style="opacity:0;animation:reveal .7s var(--delay) forwards">Finite delayed reveal</p>
+                    <p style="opacity:0;animation:reveal .7s var(--delay) both">Both-fill delayed reveal</p>
+                    <p style="opacity:0;animation:conceal .7s var(--delay) forwards">Concealed endpoint</p>
+                    <p style="opacity:0;animation:reveal .7s var(--delay)">Transient no-fill content</p>
+                    <p style="opacity:0;animation:reveal .7s var(--delay) backwards">Transient backwards-fill content</p>
+                    <p style="opacity:0;animation:reveal .7s var(--delay) forwards paused">Paused delayed content</p>
+                    <p style="opacity:0;animation:reveal .7s var(--delay) infinite forwards">Repeating delayed content</p>
+                    <p style="opacity:0;animation:reveal .7s var(--delay) reverse forwards">Reverse delayed content</p>
+                    <p style="opacity:0;animation:reveal .7s var(--delay) forwards,conceal .7s var(--delay) forwards">Conceal wins</p>
+                    <p style="opacity:0;animation:conceal .7s var(--delay) forwards,reveal .7s var(--delay) forwards">Reveal wins</p>
+                    <p style="display:none;opacity:0;animation:reveal .7s var(--delay) forwards">Display-hidden reveal</p>
+                    <p style="visibility:hidden;opacity:0;animation:reveal .7s var(--delay) forwards">Visibility-hidden reveal</p>
+                </section>
+            `;
+        "##).unwrap();
+        for strip_css in [false, true] {
+            let output = page.render_page_dump(options(strip_css));
+            for text in ["Finite delayed reveal", "Both-fill delayed reveal", "Reveal wins"] {
+                assert!(output.contains(text), "missing {text}: {output}");
+            }
+            for text in ["Concealed endpoint", "Transient no-fill content", "Transient backwards-fill content", "Paused delayed content", "Repeating delayed content", "Reverse delayed content", "Conceal wins", "Display-hidden reveal", "Visibility-hidden reveal"] {
+                assert!(!output.contains(text), "leaked {text}: {output}");
+            }
+        }
+    }).await;
+}
