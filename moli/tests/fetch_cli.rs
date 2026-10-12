@@ -2710,7 +2710,10 @@ fn cli_default_done_waits_for_external_script_inserted_after_load() -> Result<()
     );
 
     let stdout = clean_output(&output.stdout);
-    assert!(stdout.contains("id=\"post-load-results\""), "stdout={stdout}");
+    assert!(
+        stdout.contains("id=\"post-load-results\""),
+        "stdout={stdout}"
+    );
     assert!(stdout.contains(">rendered result<"), "stdout={stdout}");
     Ok(())
 }
