@@ -308,12 +308,12 @@ Each benchmark answers a different question: content fidelity, automation
 compatibility, or resource cost. Their scores are not combined into a single
 browser ranking.
 
-| Benchmark | Scope | What it measures |
+| Evaluation | Test suite | Measures |
 | --- | --- | --- |
-| Web Fetch · WebMainBench | 545 frozen HTML pages; 5 browsers | Preservation of text, code, formulas, and tables |
-| Browser automation | 1,308 browser-operation and web-platform tests | Opening pages, clicking, filling forms, and checking DOM and event behavior |
-| CPU and memory use | Tasks completed by all four local browsers in a 557-task run | CPU time and memory needed for the same tasks |
-| Web standards and regression tests | Selected WPT tests and the project’s own tests | Correct DOM, CSS and JavaScript behavior; checks for regressions |
+| Web content extraction | [WebMainBench](https://github.com/lexmount/WebMainBench/tree/lex-main) · 545 HTML snapshots and main-content references | Text, code, formula and table fidelity |
+| Browser automation | [Lexbench](https://github.com/lexmount/Lexbench-Headless-Browser) · 1,308 browser-operation and Web tests | Operation and feature test pass rate |
+| CPU and memory use | [Lexbench](https://github.com/lexmount/Lexbench-Headless-Browser/blob/main/docs/reports/resource-card-20260812.md) · work completed by all four local browsers in 557 CDP/Web tasks | CPU time and peak memory |
+| Standards and regressions | Selected [WPT](https://github.com/web-platform-tests/wpt) tests; [Moli](https://github.com/lexmount/moli/blob/main/.github/workflows/ci.yml) regression tests | Tests passed and functional regressions |
 
 ### Web Fetch: content extraction across 545 pages
 

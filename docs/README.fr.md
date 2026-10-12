@@ -224,12 +224,12 @@ Le document et les styles n'ont qu'une seule source de vérité : le DOM natif, 
 
 Chaque benchmark mesure la fidélité du contenu, la compatibilité de l’automatisation ou le coût en ressources. Les scores ne sont pas réunis dans un classement global des navigateurs.
 
-| Benchmark | Périmètre | Mesure |
+| Évaluation | Jeu de tests | Mesures |
 | --- | --- | --- |
-| Web Fetch · WebMainBench | 545 pages HTML figées ; 5 navigateurs | Conservation du texte, du code, des formules et des tableaux |
-| Automatisation du navigateur | 1 308 tests d’actions du navigateur et de fonctions Web | Ouverture de pages, clics, saisie de formulaires et vérification du DOM et des événements |
-| Consommation CPU et mémoire | Tâches terminées par les quatre navigateurs locaux dans une exécution de 557 tâches | Temps CPU et mémoire nécessaires aux mêmes tâches |
-| Standards Web et tests de régression | Sélection de tests WPT et tests propres au projet | Comportement correct du DOM, de CSS et de JavaScript ; détection des régressions |
+| Extraction de contenu Web | [WebMainBench](https://github.com/lexmount/WebMainBench/tree/lex-main) · 545 instantanés HTML et références du contenu principal | Fidélité du texte, du code, des formules et des tableaux |
+| Automatisation du navigateur | [Lexbench](https://github.com/lexmount/Lexbench-Headless-Browser) · 1 308 tests d’actions et de fonctions Web | Taux de réussite des tests d’actions et de fonctions |
+| CPU et mémoire | [Lexbench](https://github.com/lexmount/Lexbench-Headless-Browser/blob/main/docs/reports/resource-card-20260812.md) · travail terminé par tous sur 557 tâches CDP/Web | Temps CPU et mémoire maximale |
+| Standards et régressions | Sélection de tests [WPT](https://github.com/web-platform-tests/wpt) ; tests de régression [Moli](https://github.com/lexmount/moli/blob/main/.github/workflows/ci.yml) | Tests réussis et régressions |
 
 ### Web Fetch : extraction du contenu de 545 pages
 

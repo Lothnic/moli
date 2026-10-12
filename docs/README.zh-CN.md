@@ -222,12 +222,12 @@ Moli 是一个独立的浏览器内核，而不是对 Chromium 的封装。它�
 
 不同评测回答不同问题。网页转 Markdown 看内容保真度，自动化任务看接口与行为兼容性，资源测试看完成特定工作所需的开销；这些分数不合并成一个浏览器排名。
 
-| 评测 | 范围 | 回答的问题 |
+| 评测方式 | 评测集 | 指标 |
 | --- | --- | --- |
-| Web Fetch · WebMainBench | 545 份冻结 HTML，5 款浏览器 | 正文、代码、公式和表格保留得如何？ |
-| 浏览器自动化 | 1,308 项浏览器操作与 Web 功能测试 | 打开页面、点击、填表，以及 DOM、事件等 Web 行为 |
-| CPU 与内存开销 | 557 项任务中四个本地浏览器都完成的部分 | 完成相同任务用了多少 CPU 时间和内存 |
-| Web 标准与回归测试 | 选定的 WPT 测试与项目自身测试 | DOM、CSS、JavaScript 行为是否正确，已支持的功能是否回退？ |
+| 网页内容提取 | [WebMainBench](https://github.com/lexmount/WebMainBench/tree/lex-main) · 545 份 HTML 快照及正文参考 | 正文、代码、公式、表格保真度 |
+| 浏览器自动化 | [Lexbench](https://github.com/lexmount/Lexbench-Headless-Browser) · 1,308 项浏览器操作与 Web 测试 | 操作与功能测试通过率 |
+| CPU 与内存开销 | [Lexbench](https://github.com/lexmount/Lexbench-Headless-Browser/blob/main/docs/reports/resource-card-20260812.md) · 557 项 CDP/Web 任务中四个本地浏览器共同完成的部分 | CPU 时间、内存峰值 |
+| 标准与回归测试 | 选定的 [WPT](https://github.com/web-platform-tests/wpt) 测试与 [Moli](https://github.com/lexmount/moli/blob/main/.github/workflows/ci.yml) 回归测试 | 测试通过项数、功能回退 |
 
 ### Web Fetch：545 页内容提取
 

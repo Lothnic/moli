@@ -222,12 +222,12 @@ Moli は、Chromium を外から操作するだけの仕組みではなく、独
 
 各ベンチマークは、内容の保持、自動操作の互換性、リソース消費をそれぞれ測定します。異なる評価の点数を一つのブラウザ順位にまとめてはいません。
 
-| ベンチマーク | 対象 | 測定内容 |
+| 評価方法 | テストセット | 指標 |
 | --- | --- | --- |
-| Web Fetch · WebMainBench | 固定した HTML 545 ページ、5 ブラウザ | 本文、コード、数式、表の保持 |
-| ブラウザの自動操作 | ブラウザ操作と Web 機能のテスト 1,308 件 | ページを開く、クリックする、フォームに入力する操作と、DOM・イベントの動作 |
-| CPU・メモリ使用量 | 557 タスクのうちローカル 4 ブラウザすべてが完了した処理 | 同じ処理に必要な CPU 時間とメモリ |
-| Web 標準・回帰テスト | 選定した WPT テストとプロジェクト独自のテスト | DOM・CSS・JavaScript の動作と不具合の再発を確認 |
+| Web ページの内容抽出 | [WebMainBench](https://github.com/lexmount/WebMainBench/tree/lex-main) · HTML スナップショット 545 件と本文の参照データ | 本文・コード・数式・表の保持 |
+| ブラウザの自動操作 | [Lexbench](https://github.com/lexmount/Lexbench-Headless-Browser) · ブラウザ操作・Web 機能テスト 1,308 件 | 操作・機能テストの合格率 |
+| CPU・メモリ使用量 | [Lexbench](https://github.com/lexmount/Lexbench-Headless-Browser/blob/main/docs/reports/resource-card-20260812.md) · CDP/Web の 557 タスク中、ローカル 4 ブラウザが完了した処理 | CPU 時間・ピークメモリ |
+| Web 標準・回帰テスト | 選定した [WPT](https://github.com/web-platform-tests/wpt) テストと [Moli](https://github.com/lexmount/moli/blob/main/.github/workflows/ci.yml) 回帰テスト | 合格件数・不具合の再発 |
 
 ### Web Fetch：545 ページの内容抽出
 

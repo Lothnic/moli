@@ -223,12 +223,12 @@ Dokument und Stil haben genau eine verbindliche Datenquelle: die Integration aus
 
 Die Benchmarks messen Inhaltstreue, Automatisierungskompatibilität oder Ressourcenbedarf. Ihre Ergebnisse werden nicht zu einer gemeinsamen Browserrangliste zusammengefasst.
 
-| Benchmark | Umfang | Messziel |
+| Test | Testsammlung | Messgrößen |
 | --- | --- | --- |
-| Web Fetch · WebMainBench | 545 eingefrorene HTML-Seiten; 5 Browser | Erhalt von Text, Code, Formeln und Tabellen |
-| Browserautomatisierung | 1.308 Tests zu Browseraktionen und Webfunktionen | Seiten öffnen, klicken, Formulare ausfüllen sowie DOM- und Ereignisverhalten prüfen |
-| CPU- und Speicherverbrauch | Von allen vier lokalen Browsern abgeschlossene Aufgaben aus einem Lauf mit 557 Aufgaben | CPU-Zeit und Speicher für dieselben Aufgaben |
-| Webstandards und Regressionstests | Ausgewählte WPT-Tests und projektspezifische Tests | Korrektes DOM-, CSS- und JavaScript-Verhalten; Prüfung auf Regressionen |
+| Extraktion von Webinhalten | [WebMainBench](https://github.com/lexmount/WebMainBench/tree/lex-main) · 545 HTML-Snapshots und Referenztexte | Erhalt von Text, Code, Formeln und Tabellen |
+| Browserautomatisierung | [Lexbench](https://github.com/lexmount/Lexbench-Headless-Browser) · 1.308 Browseraktions- und Webtests | Anteil bestandener Aktions- und Funktionstests |
+| CPU- und Speicherverbrauch | [Lexbench](https://github.com/lexmount/Lexbench-Headless-Browser/blob/main/docs/reports/resource-card-20260812.md) · gemeinsam abgeschlossene Aufgaben aus 557 CDP-/Webaufgaben | CPU-Zeit und maximaler Speicherbedarf |
+| Standards und Regressionen | Ausgewählte [WPT](https://github.com/web-platform-tests/wpt)-Tests; [Moli](https://github.com/lexmount/moli/blob/main/.github/workflows/ci.yml)-Regressionstests | Bestandene Tests und Regressionen |
 
 ### Web Fetch: Inhaltsextraktion auf 545 Seiten
 

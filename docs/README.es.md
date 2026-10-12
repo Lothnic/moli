@@ -224,12 +224,12 @@ El documento y los estilos tienen una única fuente de verdad: la integración d
 
 Cada benchmark mide la fidelidad del contenido, la compatibilidad de la automatización o el consumo de recursos. Sus puntuaciones no se combinan en una clasificación general de navegadores.
 
-| Benchmark | Alcance | Qué mide |
+| Evaluación | Pruebas | Métricas |
 | --- | --- | --- |
-| Web Fetch · WebMainBench | 545 páginas HTML congeladas; 5 navegadores | Conservación de texto, código, fórmulas y tablas |
-| Automatización del navegador | 1.308 pruebas de acciones del navegador y funciones web | Abrir páginas, hacer clic, rellenar formularios y comprobar el DOM y los eventos |
-| Consumo de CPU y memoria | Tareas completadas por los cuatro navegadores locales en una ejecución de 557 tareas | Tiempo de CPU y memoria necesarios para las mismas tareas |
-| Estándares web y pruebas de regresión | Pruebas WPT seleccionadas y pruebas propias del proyecto | Comportamiento correcto del DOM, CSS y JavaScript; detección de regresiones |
+| Extracción de contenido web | [WebMainBench](https://github.com/lexmount/WebMainBench/tree/lex-main) · 545 páginas HTML guardadas y referencias del contenido principal | Fidelidad del texto, código, fórmulas y tablas |
+| Automatización del navegador | [Lexbench](https://github.com/lexmount/Lexbench-Headless-Browser) · 1.308 pruebas de acciones y funciones web | Tasa de éxito de las pruebas de acciones y funciones |
+| CPU y memoria | [Lexbench](https://github.com/lexmount/Lexbench-Headless-Browser/blob/main/docs/reports/resource-card-20260812.md) · trabajo completado por todos en 557 tareas CDP/web | Tiempo de CPU y memoria máxima |
+| Estándares y regresiones | Pruebas [WPT](https://github.com/web-platform-tests/wpt) seleccionadas; pruebas de regresión de [Moli](https://github.com/lexmount/moli/blob/main/.github/workflows/ci.yml) | Pruebas superadas y regresiones |
 
 ### Web Fetch: extracción de contenido en 545 páginas
 
