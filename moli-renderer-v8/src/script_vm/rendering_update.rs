@@ -58,7 +58,8 @@ impl ScriptVm {
     ) -> Result<bool> {
         let task = authorization.into_task();
         let owner = task.owner();
-        self.with_default_context_scope(|scope, host_ptr| {
+        let resize = task.kind() == RendererPageRenderingUpdateTaskKind::ResizeObserver;
+        let applied = self.with_default_context_scope(|scope, host_ptr| {
             unsafe { &mut *host_ptr }
                 .apply_authorized_rendering_update(
                     scope,
@@ -68,7 +69,61 @@ impl ScriptVm {
                     task.kind(),
                 )
                 .ok_or_else(|| anyhow!("authorized rendering update lost its exact payload"))
-        })
+        })?;
+        if resize && applied {
+            self._context_host
+                .borrow_mut()
+                .resize_observer_rendering_update_active = true;
+            let broadcast: Result<bool> = (|| {
+                let mut minimum_depth = 0;
+                let mut undelivered = false;
+                for iteration in 0..32 {
+                    let viewport = self
+                        ._context_host
+                        .borrow()
+                        .layout_viewport_for_document(self.document_runtime.document_handle());
+                    self.with_fresh_layout_pass(
+                        moli_layout::LayoutPassRequest::new(
+                            viewport,
+                            moli_layout::LayoutFlushReason::Explicit,
+                        ),
+                        |_| Ok(()),
+                    )?;
+                    let (depth, skipped) = self.with_default_context_scope(|scope, host_ptr| {
+                        let host = unsafe { &mut *host_ptr };
+                        Ok(host.broadcast_resize_observers_for_target(
+                            scope,
+                            owner.target(),
+                            minimum_depth,
+                        ))
+                    })?;
+                    undelivered = skipped || (iteration == 31 && depth.is_some());
+                    let Some(depth) = depth else {
+                        break;
+                    };
+                    minimum_depth = depth;
+                }
+                Ok(undelivered)
+            })();
+            self._context_host
+                .borrow_mut()
+                .resize_observer_rendering_update_active = false;
+            if broadcast? {
+                self.record_runtime_warning(format_args!(
+                    "ResizeObserver loop completed with undelivered notifications."
+                ));
+                self.with_default_context_scope(|scope, host_ptr| {
+                    unsafe { &mut *host_ptr }
+                        .report_resize_observer_loop_error_for_target(
+                            scope,
+                            host_ptr,
+                            owner.target(),
+                        )
+                        .map_err(anyhow::Error::msg)
+                })?;
+            }
+        }
+        Ok(applied)
     }
 
     pub(crate) fn discard_stale_rendering_update_task(

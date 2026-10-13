@@ -14,6 +14,7 @@ pub(super) enum PendingRenderingUpdatePayload {
     /// The candidate is intentionally resolved at execution time.
     PostParseAutofocus,
     EnvironmentChange(PendingEnvironmentChange),
+    ResizeObserver,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -170,6 +171,68 @@ impl JsContextHost {
         }
     }
 
+    pub(crate) fn broadcast_resize_observers_for_target(
+        &mut self,
+        scope: &mut v8::PinScope<'_, '_>,
+        target: WindowDocumentTaskTarget,
+        minimum_depth: usize,
+    ) -> (Option<usize>, bool) {
+        let Some(resolved) = self.resolve_authorized_window_document_task_context(scope, target)
+        else {
+            return (None, false);
+        };
+        let scope = &mut v8::ContextScope::new(scope, resolved.context);
+        let previous = target.dispatch_scope().enter(scope);
+        let result = crate::context_bootstrap::broadcast_resize_observer_rendering_update(
+            scope,
+            minimum_depth,
+        );
+        target.dispatch_scope().restore(scope, previous);
+        result
+    }
+
+    pub(crate) fn report_resize_observer_loop_error_for_target(
+        &mut self,
+        scope: &mut v8::PinScope<'_, '_>,
+        host_ptr: *mut JsContextHost,
+        target: WindowDocumentTaskTarget,
+    ) -> Result<(), String> {
+        let Some(resolved) = self.resolve_authorized_window_document_task_context(scope, target)
+        else {
+            return Ok(());
+        };
+        let scope = &mut v8::ContextScope::new(scope, resolved.context);
+        let previous = target.dispatch_scope().enter(scope);
+        let result = crate::context_bootstrap::dispatch_window_error_event_with_details(
+            scope,
+            host_ptr,
+            "ResizeObserver loop completed with undelivered notifications.",
+            "",
+            0,
+            0,
+            None,
+        );
+        target.dispatch_scope().restore(scope, previous);
+        result
+    }
+
+    pub(crate) fn queue_resize_observer_rendering_update(
+        &mut self,
+        scope: &mut v8::PinScope<'_, '_>,
+    ) {
+        if self.resize_observer_rendering_update_active {
+            return;
+        }
+        let Some(target) = self.current_window_document_task_target(scope) else {
+            return;
+        };
+        self.queue_rendering_update(
+            target,
+            RendererPageRenderingUpdateTaskKind::ResizeObserver,
+            PendingRenderingUpdatePayload::ResizeObserver,
+        );
+    }
+
     fn queue_rendering_update(
         &mut self,
         target: WindowDocumentTaskTarget,
@@ -243,6 +306,7 @@ impl JsContextHost {
             .remove_exact(task_id, target, kind)?
             .into_payload();
         Some(match payload {
+            PendingRenderingUpdatePayload::ResizeObserver => true,
             PendingRenderingUpdatePayload::DocumentScrollEvents => {
                 self.dispatch_authorized_document_scroll_events(scope, host_ptr, target)
             }

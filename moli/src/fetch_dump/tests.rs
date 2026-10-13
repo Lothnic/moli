@@ -246,6 +246,66 @@ async fn render_markdown_dump_uses_renderer_live_dump() -> Result<()> {
 }
 
 #[tokio::test]
+async fn markdown_dump_includes_content_created_from_observed_layout() -> Result<()> {
+    let config = BrowserConfig::default().with_layout_policy(LayoutPolicy::OnDemand);
+    let (_browser, mut page, http_server) = load_page_with_config(
+        r#"<!doctype html><main id="viewport" style="width:520px;height:80px"></main><script>
+            const viewport = document.getElementById('viewport');
+            const rows = [
+                ['1', 'Ada', '31', 'London', 'active'],
+                ['2', 'Grace', '28', 'New York', 'active'],
+                ['3', 'Linus', '35', 'Helsinki', 'away'],
+                ['4', 'Margaret', '33', 'Toronto', 'active'],
+            ];
+            new ResizeObserver(([entry]) => {
+                const columns = entry.contentRect.width >= 500
+                    ? ['ID', 'Name', 'Age', 'City', 'Status']
+                    : ['ID', 'Name'];
+                viewport.replaceChildren();
+                const header = document.createElement('div');
+                header.textContent = columns.join(' | ');
+                viewport.appendChild(header);
+                for (const row of rows) {
+                    const item = document.createElement('div');
+                    item.textContent = row.slice(0, columns.length).join(' | ');
+                    viewport.appendChild(item);
+                }
+            }).observe(viewport);
+        </script>"#,
+        config,
+    )
+    .await?;
+
+    // Markdown output must observe the settled layout-driven DOM without a
+    // screenshot or a test-only layout publication first.
+    let rendered = render_page_dump_with_options_async(
+        &mut page,
+        DumpFormat::Markdown,
+        StripOptions::default(),
+        false,
+        false,
+        false,
+        None,
+    )
+    .await?;
+
+    assert!(
+        rendered.contains("ID | Name | Age | City | Status"),
+        "{rendered}"
+    );
+    assert!(
+        rendered.contains("1 | Ada | 31 | London | active"),
+        "{rendered}"
+    );
+    assert!(
+        rendered.contains("4 | Margaret | 33 | Toronto | active"),
+        "{rendered}"
+    );
+    http_server.abort();
+    Ok(())
+}
+
+#[tokio::test]
 async fn render_semantic_tree_dump_uses_renderer_live_accessibility_tree() -> Result<()> {
     let (_browser, mut page, http_server) =
         load_page(r#"<!doctype html><html><body><button id="target">old</button></body></html>"#)
