@@ -397,3 +397,32 @@ async fn dom_implementation_derives_receiver_and_argument_conversion_in_each_doc
     assert_eq!(vm.eval("__uiEventResults.includePopup").unwrap(), "false");
     assert_eq!(vm.eval("__uiEventResults.total").unwrap(), "4344");
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn element_creation_options_convert_before_dom_validation_in_each_document_realm() {
+    let loader = static_http_loader(std::iter::empty::<String>());
+    let mut vm = new_page_task_executor_test_vm_with_loader(
+        "https://element-creation-options.test/",
+        &loader,
+    );
+    // Real popup Pages run the same fixture over CDP.
+    vm.exec("globalThis.__elementOptionsIncludePopup = false;", None)
+        .unwrap();
+    vm.exec(include_str!("element_creation_options.js"), None)
+        .unwrap();
+    advance_page_task_executor_until_eval_equals(
+        &mut vm,
+        &loader,
+        "String(globalThis.__uiEventResults?.complete === true)",
+        "true",
+        "element creation options conversion",
+    )
+    .await;
+    assert_eq!(
+        vm.eval("JSON.stringify(__uiEventResults.checks.filter(row => !row.passed))")
+            .unwrap(),
+        "[]",
+    );
+    assert_eq!(vm.eval("__uiEventResults.includePopup").unwrap(), "false");
+    assert_eq!(vm.eval("__uiEventResults.total").unwrap(), "3106");
+}
