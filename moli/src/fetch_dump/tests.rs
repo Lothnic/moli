@@ -529,3 +529,96 @@ async fn render_page_dump_async_includes_network_trace_config_summary() -> Resul
     http_server.abort();
     Ok(())
 }
+
+#[tokio::test]
+async fn markdown_with_frames_preserves_document_positions_nested_and_cross_origin_content()
+-> Result<()> {
+    let (_other_browser, other_page, other_server) = load_page("<base href='/assets/'><p>Cross origin body</p><a href='./details'>Foreign link</a><img src='./cover.png' alt='Foreign image'>").await?;
+    let cross_url = other_page.final_url().to_string();
+    let html = format!(
+        r#"<p>Before</p><iframe srcdoc="&lt;p&gt;Child body&lt;/p&gt;&lt;a href='./local-details'&gt;Local link&lt;/a&gt;&lt;iframe srcdoc='&amp;lt;p&amp;gt;Nested body&amp;lt;/p&amp;gt;'&gt;&lt;/iframe&gt;"></iframe><p>Between</p><iframe src="{cross_url}"></iframe><p>After</p><iframe srcdoc=""></iframe>"#
+    );
+    let (_browser, mut page, server) = load_page(&html).await?;
+    let parent_url = page.final_url().to_string();
+    let plain = render_page_dump_with_options_async(
+        &mut page,
+        DumpFormat::Markdown,
+        StripOptions::default(),
+        false,
+        false,
+        false,
+        None,
+    )
+    .await?;
+    assert!(!plain.contains("Child body") && !plain.contains("Cross origin body"));
+    let framed = render_page_dump_with_options_async(
+        &mut page,
+        DumpFormat::Markdown,
+        StripOptions::default(),
+        false,
+        true,
+        false,
+        None,
+    )
+    .await?;
+    let positions = [
+        "Before",
+        "Child body",
+        "Nested body",
+        "Between",
+        "Cross origin body",
+        "After",
+        "Embedded content",
+    ]
+    .map(|text| {
+        framed
+            .find(text)
+            .unwrap_or_else(|| panic!("missing {text}: {framed}"))
+    });
+    assert!(
+        positions.windows(2).all(|pair| pair[0] < pair[1]),
+        "{framed}"
+    );
+    assert!(
+        framed.contains(&format!("[Local link]({}local-details)", parent_url)),
+        "{framed}"
+    );
+    assert!(
+        framed.contains(&format!("[Foreign link]({}assets/details)", cross_url)),
+        "{framed}"
+    );
+    assert!(
+        framed.contains(&format!("![Foreign image]({}assets/cover.png)", cross_url)),
+        "{framed}"
+    );
+    server.abort();
+    other_server.abort();
+    Ok(())
+}
+
+#[tokio::test]
+async fn markdown_with_frames_uses_latest_frame_document_and_links_for_failures() -> Result<()> {
+    let (_browser, mut page, server) = load_page(r#"<p>Parent</p><iframe id="child" srcdoc="&lt;p&gt;Old body&lt;/p&gt;"></iframe><iframe title="Unavailable" src="http://127.0.0.1:1/missing"></iframe>"#).await?;
+    page.evaluate_runtime_expression_with_await_async("new Promise(resolve => { const frame = document.getElementById('child'); frame.onload=resolve; frame.srcdoc='<p>Latest body</p>'; })", true).await?;
+    let text = render_page_dump_with_options_async(
+        &mut page,
+        DumpFormat::Markdown,
+        StripOptions::default(),
+        false,
+        true,
+        false,
+        None,
+    )
+    .await?;
+    assert!(
+        text.contains("Latest body") && !text.contains("Old body"),
+        "{text}"
+    );
+    assert!(
+        text.contains("[Unavailable](http://127.0.0.1:1/missing)"),
+        "{text}"
+    );
+    server.abort();
+    Ok(())
+}
+
