@@ -2243,6 +2243,9 @@ impl JsContextHost {
                 Some(*old_state),
             );
         }
+        // Native values already advance dom_version, but their content and
+        // intrinsic sizing can change without any pseudo-class transition.
+        self.request_realtime_rendering_opportunity();
     }
 
     pub(crate) fn set_checked_state(
