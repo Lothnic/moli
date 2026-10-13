@@ -3,6 +3,7 @@ use super::*;
 use crate::frame_owner_model::FrameDocumentTaskOwner;
 
 mod child_documents;
+mod child_realm_retention;
 mod child_script_execution;
 mod main_document_lifecycle;
 mod page_runtime;

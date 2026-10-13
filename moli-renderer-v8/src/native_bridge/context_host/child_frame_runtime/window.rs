@@ -33,8 +33,11 @@ struct ChildWindowProxyFacadeContextHandle(DomHandle);
 #[derive(Default)]
 pub(in crate::native_bridge::context_host) struct ChildWindowProxyRecords {
     records: HashMap<DomHandle, ChildWindowProxyRecord>,
-    detached_content_window_wrappers: HashMap<DomHandle, v8::Global<v8::Object>>,
-    detached_content_document_wrappers: HashMap<DomHandle, v8::Global<v8::Object>>,
+    // Live Windows are rooted by `records`; detached projections are traced
+    // through the iframe wrapper's private slots. These identity lookups must
+    // not keep a retired child realm alive after its last author reference.
+    detached_content_window_wrappers: HashMap<DomHandle, v8::Weak<v8::Object>>,
+    detached_content_document_wrappers: HashMap<DomHandle, v8::Weak<v8::Object>>,
 }
 
 #[derive(Default)]
@@ -360,7 +363,7 @@ impl ChildWindowProxyRecords {
     ) -> Option<v8::Local<'s, v8::Object>> {
         self.detached_content_document_wrappers
             .get(&handle)
-            .map(|wrapper| v8::Local::new(scope, wrapper))
+            .and_then(|wrapper| wrapper.to_local(scope))
     }
 
     pub(in crate::native_bridge::context_host) fn set_detached_content_document(
@@ -370,7 +373,7 @@ impl ChildWindowProxyRecords {
         document: v8::Local<'_, v8::Object>,
     ) {
         self.detached_content_document_wrappers
-            .insert(handle, v8::Global::new(scope, document));
+            .insert(handle, v8::Weak::new(scope, document));
     }
 
     pub(in crate::native_bridge::context_host) fn detached_content_window<'s>(
@@ -380,7 +383,7 @@ impl ChildWindowProxyRecords {
     ) -> Option<v8::Local<'s, v8::Object>> {
         self.detached_content_window_wrappers
             .get(&handle)
-            .map(|wrapper| v8::Local::new(scope, wrapper))
+            .and_then(|wrapper| wrapper.to_local(scope))
     }
 
     pub(in crate::native_bridge::context_host) fn set_detached_content_window(
@@ -390,7 +393,7 @@ impl ChildWindowProxyRecords {
         window: v8::Local<'_, v8::Object>,
     ) {
         self.detached_content_window_wrappers
-            .insert(handle, v8::Global::new(scope, window));
+            .insert(handle, v8::Weak::new(scope, window));
     }
 
     pub(in crate::native_bridge::context_host) fn clear_detached_content_surfaces(

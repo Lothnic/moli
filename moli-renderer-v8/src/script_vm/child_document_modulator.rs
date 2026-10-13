@@ -82,12 +82,27 @@ impl ScriptVm {
             if execution_context_retired {
                 self.cancel_history_traversals_for_retiring_window(execution_context_owner);
             }
-            if execution_context_retired
-                && let Some(execution_context_id) = self
+            if execution_context_retired {
+                if let Some(execution_context_id) = self
                     .child_frame_realm_store
                     .context_id_for_local_window_id(retired_owner.local_window_id)
-            {
-                self.destroy_child_default_context(execution_context_id);
+                {
+                    self.destroy_child_default_context(execution_context_id);
+                } else {
+                    // A synchronous contentDocument/contentWindow getter can
+                    // expose a realm before its owner task promotes it. Move
+                    // wrappers into that realm's traced graph before retiring
+                    // the execution binding below discards strong cache entries.
+                    let pending_context = self
+                        .prebootstrapped_child_default_contexts
+                        .borrow()
+                        .values()
+                        .find(|context| context.local_window_id == retired_owner.local_window_id)
+                        .map(|context| context.context.clone());
+                    if let Some(context) = pending_context {
+                        self.clear_context_wrapper_cache_for_context_ptr(&context, false);
+                    }
+                }
             }
             let retired_timer_count = if execution_context_retired {
                 self.document_runtime
