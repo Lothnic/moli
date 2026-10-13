@@ -1134,6 +1134,7 @@ impl RendererOwnerHandle {
                         RenderRuntimeTurn::ContinueLivePagePendingLocationNavigationPhaseOne {
                             token,
                             vm_creation_id,
+                            target_stage: stage,
                             follow_count,
                             completion,
                         },

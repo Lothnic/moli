@@ -529,3 +529,157 @@ async fn render_page_dump_async_includes_network_trace_config_summary() -> Resul
     http_server.abort();
     Ok(())
 }
+
+#[tokio::test]
+async fn markdown_with_frames_preserves_document_positions_nested_and_cross_origin_content()
+-> Result<()> {
+    let (_other_browser, other_page, other_server) = load_page("<base href='/assets/'><p>Cross origin body</p><a href='./details'>Foreign link</a><img src='./cover.png' alt='Foreign image'>").await?;
+    let cross_url = other_page.final_url().to_string();
+    let html = format!(
+        r#"<p>Before</p><iframe srcdoc="&lt;p&gt;Child body&lt;/p&gt;&lt;a href='./local-details'&gt;Local link&lt;/a&gt;&lt;iframe srcdoc='&amp;lt;p&amp;gt;Nested body&amp;lt;/p&amp;gt;'&gt;&lt;/iframe&gt;"></iframe><p>Between</p><iframe src="{cross_url}"></iframe><p>After</p><iframe srcdoc=""></iframe>"#
+    );
+    let (_browser, mut page, server) = load_page(&html).await?;
+    let parent_url = page.final_url().to_string();
+    let plain = render_page_dump_with_options_async(
+        &mut page,
+        DumpFormat::Markdown,
+        StripOptions::default(),
+        false,
+        false,
+        false,
+        None,
+    )
+    .await?;
+    assert!(!plain.contains("Child body") && !plain.contains("Cross origin body"));
+    let framed = render_page_dump_with_options_async(
+        &mut page,
+        DumpFormat::Markdown,
+        StripOptions::default(),
+        false,
+        true,
+        false,
+        None,
+    )
+    .await?;
+    let positions = [
+        "Before",
+        "Child body",
+        "Nested body",
+        "Between",
+        "Cross origin body",
+        "After",
+        "Embedded content",
+    ]
+    .map(|text| {
+        framed
+            .find(text)
+            .unwrap_or_else(|| panic!("missing {text}: {framed}"))
+    });
+    assert!(
+        positions.windows(2).all(|pair| pair[0] < pair[1]),
+        "{framed}"
+    );
+    assert!(
+        framed.contains(&format!("[Local link]({}local-details)", parent_url)),
+        "{framed}"
+    );
+    assert!(
+        framed.contains(&format!("[Foreign link]({}assets/details)", cross_url)),
+        "{framed}"
+    );
+    assert!(
+        framed.contains(&format!("![Foreign image]({}assets/cover.png)", cross_url)),
+        "{framed}"
+    );
+    server.abort();
+    other_server.abort();
+    Ok(())
+}
+
+#[tokio::test]
+async fn markdown_with_frames_uses_latest_frame_document_and_links_for_failures() -> Result<()> {
+    let (_browser, mut page, server) = load_page(r#"<p>Parent</p><iframe id="child" srcdoc="&lt;p&gt;Old body&lt;/p&gt;"></iframe><iframe title="Unavailable" src="http://127.0.0.1:1/missing"></iframe>"#).await?;
+    page.evaluate_runtime_expression_with_await_async("new Promise(resolve => { const frame = document.getElementById('child'); frame.onload=resolve; frame.srcdoc='<p>Latest body</p>'; })", true).await?;
+    let text = render_page_dump_with_options_async(
+        &mut page,
+        DumpFormat::Markdown,
+        StripOptions::default(),
+        false,
+        true,
+        false,
+        None,
+    )
+    .await?;
+    assert!(
+        text.contains("Latest body") && !text.contains("Old body"),
+        "{text}"
+    );
+    assert!(
+        text.contains("[Unavailable](http://127.0.0.1:1/missing)"),
+        "{text}"
+    );
+    server.abort();
+    Ok(())
+}
+
+#[tokio::test]
+async fn fresh_layout_resize_observer_updates_virtual_children_and_deduplicates_sizes() -> Result<()>
+{
+    let config = BrowserConfig::default().with_layout_policy(LayoutPolicy::OnDemand);
+    let (_browser, mut page, server) = load_page_with_config(r#"<div id="box" style="width:120px;height:40px"></div><script>
+        window.widths=[];const box=document.getElementById('box');
+        new ResizeObserver(es=>{const width=es[0].contentRect.width;widths.push(width);if(width>300&&!box.querySelector('span')){const item=document.createElement('span');item.id='virtual-item';item.textContent='Virtual child';box.appendChild(item)}}).observe(box);
+    </script>"#, config).await?;
+    let screenshot = FetchCommandConfig {
+        dump_mode: Some(DumpFormat::Screenshot),
+        ..Default::default()
+    };
+    render_page_output_async(&mut page, &screenshot).await?;
+    page.evaluate_runtime_expression_with_await_async("new Promise((resolve,reject)=>{const end=Date.now()+2000;const poll=()=>widths.includes(120)?resolve():Date.now()>end?reject(new Error('initial resize notification missing')):setTimeout(poll,1);poll()})", true).await?;
+    page.evaluate_runtime_expression_async("document.getElementById('box').style.width='420px'")
+        .await?;
+    render_page_output_async(&mut page, &screenshot).await?;
+    page.evaluate_runtime_expression_with_await_async("new Promise((resolve,reject)=>{const end=Date.now()+2000;const poll=()=>document.getElementById('virtual-item')?resolve():Date.now()>end?reject(new Error('updated resize notification missing')):setTimeout(poll,1);poll()})", true).await?;
+    let widths = page
+        .evaluate_runtime_expression_async("JSON.stringify(widths)")
+        .await?;
+    assert_eq!(widths["value"], "[120,420]");
+    render_page_output_async(&mut page, &screenshot).await?;
+    assert_eq!(
+        page.evaluate_runtime_expression_async("JSON.stringify(widths)")
+            .await?["value"],
+        "[120,420]"
+    );
+    server.abort();
+    Ok(())
+}
+
+#[tokio::test]
+async fn resize_observer_same_depth_feedback_is_bounded() -> Result<()> {
+    let config = BrowserConfig::default().with_layout_policy(LayoutPolicy::OnDemand);
+    let (_browser, mut page, server) = load_page_with_config(r#"<div id="box" style="width:120px;height:20px"></div><script>window.calls=0;window.feedback=false;const box=document.getElementById('box');new ResizeObserver(es=>{calls++;if(feedback)box.style.width=(es[0].contentRect.width+1)+'px'}).observe(box)</script>"#, config).await?;
+    render_page_output_async(
+        &mut page,
+        &FetchCommandConfig {
+            dump_mode: Some(DumpFormat::Screenshot),
+            ..Default::default()
+        },
+    )
+    .await?;
+    page.evaluate_runtime_expression_async(
+        "calls=0;feedback=true;document.getElementById('box').style.width='140px'",
+    )
+    .await?;
+    page.evaluate_runtime_expression_with_await_async(
+        "new Promise((resolve,reject)=>{const end=Date.now()+2000;const poll=()=>calls?resolve():Date.now()>end?reject(new Error('resize callback missing')):setTimeout(poll,1);poll()})",
+        true,
+    )
+    .await?;
+    assert_eq!(
+        page.evaluate_runtime_expression_async("String(calls)")
+            .await?["value"],
+        "1"
+    );
+    server.abort();
+    Ok(())
+}

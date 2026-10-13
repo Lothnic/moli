@@ -798,6 +798,7 @@ enum RenderRuntimeTurn {
     ContinueLivePagePendingLocationNavigationPhaseOne {
         token: RendererPageToken,
         vm_creation_id: u64,
+        target_stage: PageVmInitStage,
         follow_count: usize,
         completion: LivePagePendingNavigationCompletion,
     },
@@ -909,6 +910,7 @@ impl RenderRuntimeTurn {
             Self::ContinueLivePagePendingLocationNavigationPhaseOne {
                 token,
                 vm_creation_id,
+                target_stage,
                 follow_count,
                 completion,
             } => {
@@ -917,6 +919,7 @@ impl RenderRuntimeTurn {
                     Self::ContinueLivePagePendingLocationNavigationPhaseOne {
                         token,
                         vm_creation_id,
+                        target_stage,
                         follow_count,
                         completion,
                     },

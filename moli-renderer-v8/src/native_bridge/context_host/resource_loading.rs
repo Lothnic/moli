@@ -3020,6 +3020,44 @@ impl JsContextHost {
             + self.in_flight_worker_subresource_fetches.len()
     }
 
+    pub(crate) fn has_pending_credentialed_main_window_request(&self) -> bool {
+        let Some(owner) = self.current_main_document_task_owner() else {
+            return false;
+        };
+        let is_current_credentialed_window_request = |pending: &PendingSubresourceFetchState| {
+            pending.credentials_mode == moli_fetch::RequestCredentialsMode::Include
+                && (pending.continuation.is_window_xhr() || pending.continuation.is_window_fetch())
+                && pending
+                    .execution_context
+                    .window_request_target()
+                    .is_some_and(|target| {
+                        target.dispatch_scope() == OwnerDispatchScope::Top
+                            && target.owner()
+                                == super::WindowExecutionContextOwner::Frame(owner.local_window_id)
+                    })
+        };
+
+        self.pending_subresource_fetches
+            .values()
+            .any(is_current_credentialed_window_request)
+            || self
+                .running_subresource_fetches
+                .values()
+                .any(|running| is_current_credentialed_window_request(&running.pending))
+            || self
+                .streaming_subresource_fetches
+                .values()
+                .any(|streaming| is_current_credentialed_window_request(&streaming.pending))
+            || self
+                .pending_subresource_auths
+                .values()
+                .any(|auth| is_current_credentialed_window_request(&auth.pending))
+            || self
+                .pending_subresource_responses
+                .values()
+                .any(|response| is_current_credentialed_window_request(&response.pending))
+    }
+
     pub(crate) fn note_subresource_activity(&mut self) {
         self.subresource_activity_epoch = self.subresource_activity_epoch.wrapping_add(1);
         self.subresource_last_activity_at = std::time::Instant::now();

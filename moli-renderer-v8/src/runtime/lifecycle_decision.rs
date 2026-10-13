@@ -20,6 +20,7 @@ pub struct RendererLifecycleSnapshot {
     pub requested_url: Url,
     pub final_url: Url,
     pub status: u16,
+    pub has_pending_credentialed_window_request: bool,
 }
 
 /// One-shot decision made synchronously when page creation reaches its exact

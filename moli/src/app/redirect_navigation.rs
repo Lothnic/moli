@@ -46,6 +46,15 @@ pub(super) async fn fetch_with_redirect_wait(
                             Instant::now(),
                         ),
                     }
+                } else if target.stage == moli_core::runtime::PageVmInitStage::Load
+                    && target.has_pending_credentialed_window_request
+                {
+                    RendererLifecycleDecision::FollowNextDocumentOrFinish {
+                        navigation_grace_ms: minimum_navigation_wait
+                            .as_millis()
+                            .min(u128::from(u64::MAX))
+                            as u64,
+                    }
                 } else {
                     RendererLifecycleDecision::Finish
                 })
