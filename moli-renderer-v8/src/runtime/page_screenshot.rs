@@ -234,16 +234,7 @@ impl PageVm {
         self.flush_page_action_window(barrier)?;
         let paint_capture = request
             .paint_capture_request(self.document_settings.viewport_surface.unwrap_or_default())?;
-        let environment_override =
-            if matches!(request.purpose, RendererScreenshotPurpose::Print { .. })
-                && self.document_settings.emulated_media.media.is_none()
-            {
-                let mut print = self.document_settings.emulated_media.clone();
-                print.media = Some("print".to_owned());
-                Some(StyloStyleEnvironment::from_emulated_media(&print))
-            } else {
-                None
-            };
+        let environment_override = self.capture_style_environment_override(request.purpose);
         let result = self.capture_image(
             request.format,
             request.quality,
@@ -260,6 +251,21 @@ impl PageVm {
             environment_override,
         );
         result.map(RendererImageCaptureOutcome::into_screenshot_reply)
+    }
+
+    pub(super) fn capture_style_environment_override(
+        &self,
+        purpose: RendererScreenshotPurpose,
+    ) -> Option<StyloStyleEnvironment> {
+        if matches!(purpose, RendererScreenshotPurpose::Print { .. })
+            && self.document_settings.emulated_media.media.is_none()
+        {
+            let mut print = self.document_settings.emulated_media.clone();
+            print.media = Some("print".to_owned());
+            Some(StyloStyleEnvironment::from_emulated_media(&print))
+        } else {
+            None
+        }
     }
 
     /// Polls one screencast subscription. Only this request accepts a known
@@ -381,8 +387,30 @@ impl PageVm {
             .map(|started| started.elapsed().as_micros())
             .unwrap_or_default();
 
+        Self::encode_capture_snapshot(
+            &snapshot,
+            format,
+            quality,
+            optimize_for_speed,
+            reason,
+            layout_us,
+            total_started,
+        )
+        .map(RendererImageCaptureOutcome::Captured)
+    }
+
+    pub(super) fn encode_capture_snapshot(
+        snapshot: &moli_layout::PaintSnapshot,
+        format: RendererScreenshotFormat,
+        quality: u8,
+        optimize_for_speed: bool,
+        reason: moli_layout::LayoutFlushReason,
+        layout_us: u128,
+        total_started: Option<Instant>,
+    ) -> anyhow::Result<RendererCapturedScreenshot> {
+        let profile_enabled = moli_trace::cpu_profile_enabled();
         if profile_enabled {
-            let profile = PaintFragmentProfile::from_snapshot(&snapshot);
+            let profile = PaintFragmentProfile::from_snapshot(snapshot);
             tracing::info!(
                 target: "moli_cpu_profile",
                 stage = "paint_fragment_profile",
@@ -403,7 +431,7 @@ impl PageVm {
         }
 
         let raster_started = profile_enabled.then(Instant::now);
-        let mut raster = moli_paint::raster_snapshot(&snapshot)?;
+        let mut raster = moli_paint::raster_snapshot(snapshot)?;
         let raster_us = raster_started
             .map(|started| started.elapsed().as_micros())
             .unwrap_or_default();
@@ -449,14 +477,12 @@ impl PageVm {
                 total_us = started.elapsed().as_micros(),
             );
         }
-        Ok(RendererImageCaptureOutcome::Captured(
-            RendererCapturedScreenshot {
-                mime_type: mime_type.to_owned(),
-                width,
-                height,
-                bytes: bytes.into(),
-            },
-        ))
+        Ok(RendererCapturedScreenshot {
+            mime_type: mime_type.to_owned(),
+            width,
+            height,
+            bytes: bytes.into(),
+        })
     }
 }
 
@@ -493,7 +519,7 @@ fn visual_state_for_captured_screencast_frame(
 }
 
 impl RendererCaptureScreenshotRequest {
-    fn paint_capture_request(
+    pub(super) fn paint_capture_request(
         &self,
         surface: ViewportSurface,
     ) -> anyhow::Result<PaintCaptureRequest> {
