@@ -811,6 +811,7 @@ pub(crate) fn canvas_context_fill_rect_callback<'s>(
     let mut rectangle = super::path::Canvas2dPathState::default();
     rectangle.rect(parsed.x, parsed.y, parsed.width, parsed.height);
     let fragment = PaintFragment::Fill {
+        fill_rule: moli_layout::PaintFillRule::NonZero,
         shape: PaintShape::Path(rectangle.paint_path()),
         brush: PaintBrush::Solid(context_fill_color(scope, context)),
         transform,
@@ -1182,6 +1183,7 @@ pub(crate) fn canvas_context_fill_callback<'s>(
             return None;
         }
         Some(PaintFragment::Fill {
+            fill_rule: moli_layout::PaintFillRule::NonZero,
             shape: PaintShape::Path(state.paint_path()),
             brush: PaintBrush::Solid(context_fill_color(scope, args.this())),
             transform: PaintTransform2D::IDENTITY,

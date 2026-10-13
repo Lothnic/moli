@@ -62,9 +62,20 @@ pub(crate) fn paint_fragment(
             shape,
             brush,
             transform,
+            fill_rule,
         } => {
             let shape = to_backend_shape(shape);
-            paint_fill(scene, &shape, brush, device_transform(*transform, scale));
+            let rule = match fill_rule {
+                moli_layout::PaintFillRule::NonZero => peniko::Fill::NonZero,
+                moli_layout::PaintFillRule::EvenOdd => peniko::Fill::EvenOdd,
+            };
+            paint_fill(
+                scene,
+                &shape,
+                brush,
+                device_transform(*transform, scale),
+                rule,
+            );
         }
         PaintFragment::Stroke(stroke) => paint_stroke(scene, stroke, scale),
         PaintFragment::Border {

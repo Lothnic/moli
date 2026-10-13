@@ -46,6 +46,7 @@ pub(super) fn validate(snapshot: &PaintSnapshot) -> Result<(), PdfError> {
                 shape: value,
                 brush: paint,
                 transform,
+                ..
             } => (shape(value) && brush(paint), *transform),
             PaintFragment::Stroke(stroke) => (
                 path(&stroke.path)

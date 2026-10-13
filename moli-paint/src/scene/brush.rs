@@ -58,15 +58,12 @@ pub(super) fn paint_fill(
     shape: &BezPath,
     brush: &PaintBrush,
     transform: Affine,
+    rule: Fill,
 ) {
     match brush {
-        PaintBrush::Solid(color) => scene.fill(
-            Fill::NonZero,
-            transform,
-            to_backend_color(*color),
-            None,
-            shape,
-        ),
+        PaintBrush::Solid(color) => {
+            scene.fill(rule, transform, to_backend_color(*color), None, shape)
+        }
         PaintBrush::LinearGradient(gradient) => {
             let gradient = Gradient::new_linear(
                 (f64::from(gradient.start.x), f64::from(gradient.start.y)),
@@ -80,7 +77,7 @@ pub(super) fn paint_fill(
                 gradient.interpolation.hue_direction,
             ))
             .with_stops(backend_gradient_stops(&gradient.stops).as_slice());
-            scene.fill(Fill::NonZero, transform, &gradient, None, shape);
+            scene.fill(rule, transform, &gradient, None, shape);
         }
         PaintBrush::RadialGradient(gradient) => {
             let gradient_brush = Gradient::new_two_point_radial(
@@ -104,7 +101,7 @@ pub(super) fn paint_fill(
             ))
             .with_stops(backend_gradient_stops(&gradient.stops).as_slice());
             scene.fill(
-                Fill::NonZero,
+                rule,
                 transform,
                 &gradient_brush,
                 Some(to_backend_transform(gradient.transform)),
@@ -126,7 +123,7 @@ pub(super) fn paint_fill(
             ))
             .with_stops(backend_gradient_stops(&gradient.stops).as_slice());
             scene.fill(
-                Fill::NonZero,
+                rule,
                 transform,
                 &gradient_brush,
                 Some(to_backend_transform(gradient.transform)),

@@ -274,6 +274,7 @@ fn hidden_masks_and_zero_opacity_do_not_export_source_text() {
     snapshot.fragments.insert(
         3,
         PaintFragment::Fill {
+            fill_rule: moli_layout::PaintFillRule::NonZero,
             shape: PaintShape::Rect(PaintRect::new(0.0, 0.0, 30.0, 100.0)),
             brush: moli_layout::PaintBrush::Solid(PaintColor::BLACK),
             transform: PaintTransform2D::IDENTITY,
@@ -343,4 +344,56 @@ fn boundary_cluster_ownership_follows_the_remaining_clipped_ink() {
     let doc = document(&snapshot, &options());
     assert_eq!(extracted(&doc, &[1]), "");
     assert_eq!(extracted(&doc, &[2]), "Boundary");
+}
+
+#[test]
+fn native_path_fill_rules_reach_pdf_vector_operators() {
+    use moli_layout::{PaintBrush, PaintFillRule, PaintPath, PaintPathElement as E};
+    for (rule, operator) in [
+        (PaintFillRule::NonZero, "f"),
+        (PaintFillRule::EvenOdd, "f*"),
+    ] {
+        let mut snapshot = snapshot();
+        snapshot.push_fragment(PaintFragment::Fill {
+            shape: PaintShape::Path(PaintPath {
+                bounds: PaintRect::new(10., 10., 20., 20.),
+                elements: vec![
+                    E::MoveTo(PaintPoint::new(10., 10.)),
+                    E::LineTo(PaintPoint::new(30., 10.)),
+                    E::LineTo(PaintPoint::new(30., 30.)),
+                    E::LineTo(PaintPoint::new(10., 30.)),
+                    E::Close,
+                ],
+            }),
+            brush: PaintBrush::Solid(PaintColor::BLACK),
+            transform: PaintTransform2D::IDENTITY,
+            fill_rule: rule,
+        });
+        let doc = document(&snapshot, &options());
+        let operations: Vec<_> = doc
+            .objects
+            .values()
+            .filter_map(|object| object.as_stream().ok())
+            .map(|stream| {
+                stream
+                    .decompressed_content()
+                    .unwrap_or_else(|_| stream.content.clone())
+            })
+            .filter_map(|bytes| lopdf::content::Content::decode(&bytes).ok())
+            .flat_map(|content| content.operations)
+            .collect();
+        assert!(
+            operations
+                .iter()
+                .any(|operation| operation.operator == operator),
+            "missing {operator} for {rule:?}"
+        );
+        if rule == PaintFillRule::NonZero {
+            assert!(
+                !operations
+                    .iter()
+                    .any(|operation| operation.operator == "f*")
+            );
+        }
+    }
 }

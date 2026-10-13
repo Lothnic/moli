@@ -29,6 +29,7 @@ fn snapshot(width: u32, height: u32, scale: f32) -> PaintSnapshot {
 fn maximum_corner_radii_leave_pill_corners_unpainted() {
     let mut snapshot = snapshot(120, 40, 1.0);
     snapshot.push_fragment(PaintFragment::Fill {
+        fill_rule: moli_layout::PaintFillRule::NonZero,
         shape: PaintShape::RoundedRect {
             rect: PaintRect::new(0.0, 0.0, 120.0, 40.0),
             radii: PaintCornerRadii::all(PaintCornerRadius::new(f32::MAX, f32::MAX)),
@@ -522,4 +523,39 @@ fn pixel(image: &RasterImage, x: u32, y: u32) -> [u8; 4] {
     image.rgba[offset..offset + 4]
         .try_into()
         .expect("one RGBA pixel")
+}
+
+#[test]
+fn nested_paths_preserve_nonzero_and_evenodd_fill_rules() {
+    use moli_layout::{PaintFillRule, PaintPath, PaintPathElement as E, PaintPoint as P};
+    let path = PaintPath {
+        bounds: PaintRect::new(0., 0., 16., 16.),
+        elements: vec![
+            E::MoveTo(P::new(0., 0.)),
+            E::LineTo(P::new(16., 0.)),
+            E::LineTo(P::new(16., 16.)),
+            E::LineTo(P::new(0., 16.)),
+            E::Close,
+            E::MoveTo(P::new(4., 4.)),
+            E::LineTo(P::new(12., 4.)),
+            E::LineTo(P::new(12., 12.)),
+            E::LineTo(P::new(4., 12.)),
+            E::Close,
+        ],
+    };
+    for (rule, center) in [
+        (PaintFillRule::NonZero, [0, 0, 0, 255]),
+        (PaintFillRule::EvenOdd, [255, 255, 255, 255]),
+    ] {
+        let mut snapshot = snapshot(16, 16, 1.);
+        snapshot.push_fragment(PaintFragment::Fill {
+            shape: PaintShape::Path(path.clone()),
+            brush: PaintBrush::Solid(PaintColor::BLACK),
+            transform: PaintTransform2D::IDENTITY,
+            fill_rule: rule,
+        });
+        let image = raster_snapshot(&snapshot).unwrap();
+        assert_eq!(pixel(&image, 1, 1), [0, 0, 0, 255]);
+        assert_eq!(pixel(&image, 8, 8), center);
+    }
 }

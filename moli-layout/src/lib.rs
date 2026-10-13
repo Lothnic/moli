@@ -76,8 +76,8 @@ pub use scrollbar::{
 pub use snapshot::{
     PaintBlendMode, PaintBorderColors, PaintBorderStyle, PaintBorderStyles, PaintBoxShadow,
     PaintBrush, PaintColor, PaintCompositeMode, PaintConicGradient, PaintCornerRadii,
-    PaintCornerRadius, PaintDiagnostic, PaintDiagnosticSeverity, PaintEdgeSizes, PaintFilter,
-    PaintFontId, PaintFontResource, PaintFragment, PaintGlyph, PaintGlyphRun,
+    PaintCornerRadius, PaintDiagnostic, PaintDiagnosticSeverity, PaintEdgeSizes, PaintFillRule,
+    PaintFilter, PaintFontId, PaintFontResource, PaintFragment, PaintGlyph, PaintGlyphRun,
     PaintGradientColorSpace, PaintGradientExtend, PaintGradientHueDirection,
     PaintGradientInterpolation, PaintGradientStop, PaintImage, PaintImageId, PaintImageResource,
     PaintImageSampling, PaintLineCap, PaintLineJoin, PaintLinearGradient, PaintLink,
