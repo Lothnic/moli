@@ -1989,15 +1989,12 @@ pub(crate) fn canvas_context_put_image_data_callback<'s>(
         else {
             return;
         };
-        let Some(dirty_rect) = normalized_image_data_dirty_rect(
-            scope,
+        let dirty_rect = moli_canvas::ImageDataRect::new(
             parsed.dirty_x,
             parsed.dirty_y,
             parsed.dirty_width,
             parsed.dirty_height,
-        ) else {
-            return;
-        };
+        );
         (parsed.image_data, parsed.dx, parsed.dy, Some(dirty_rect))
     } else {
         let Some(parsed) = webidl::parse_args::<CanvasContextPutImageDataArgs>(scope, &args) else {
@@ -2017,11 +2014,9 @@ pub(crate) fn canvas_context_put_image_data_callback<'s>(
         return;
     };
 
-    let (dirty_x, dirty_y, dirty_width, dirty_height) = if args.length() >= 7 {
-        dirty_rect.unwrap_or((0, 0, 0, 0))
-    } else {
-        (0, 0, source_width as i32, source_height as i32)
-    };
+    let dirty_rect = dirty_rect.unwrap_or_else(|| {
+        moli_canvas::ImageDataRect::new(0, 0, source_width as i32, source_height as i32)
+    });
 
     let _ = with_canvas_like_pixels_mut(scope, canvas, |pixels, width, height| {
         blit_image_data(
@@ -2033,10 +2028,7 @@ pub(crate) fn canvas_context_put_image_data_callback<'s>(
             source_height,
             dx,
             dy,
-            dirty_x,
-            dirty_y,
-            dirty_width,
-            dirty_height,
+            dirty_rect,
         );
     });
 }
@@ -2050,33 +2042,21 @@ pub(crate) fn canvas_context_get_image_data_callback<'s>(
         rv.set(v8::undefined(scope).into());
         return;
     };
-    let Some(width) = positive_image_data_dimension_from_long(scope, parsed.sw) else {
-        rv.set(v8::undefined(scope).into());
+    let rect = moli_canvas::ImageDataRect::new(parsed.sx, parsed.sy, parsed.sw, parsed.sh);
+    let (width, height) = (rect.width(), rect.height());
+    if width == 0 || height == 0 {
+        webidl::throw_index_size_error(scope);
         return;
-    };
-    let Some(height) = positive_image_data_dimension_from_long(scope, parsed.sh) else {
-        rv.set(v8::undefined(scope).into());
-        return;
-    };
+    }
     if byte_len(width, height).is_none() {
         webidl::throw_index_size_error(scope);
         rv.set(v8::undefined(scope).into());
         return;
     }
-    let source_x = parsed.sx;
-    let source_y = parsed.sy;
     let bytes = if let Some(canvas) = canvas_owner_from_context(scope, args.this()) {
         canvas_like_pixels_copy(scope, canvas)
             .map(|(pixels, canvas_width, canvas_height)| {
-                extract_image_data(
-                    &pixels,
-                    canvas_width,
-                    canvas_height,
-                    source_x,
-                    source_y,
-                    width,
-                    height,
-                )
+                extract_image_data(&pixels, canvas_width, canvas_height, rect)
             })
             .unwrap_or_else(|| blank_image_data(width, height))
     } else {
@@ -2111,48 +2091,6 @@ fn image_data_dimension_from_long(scope: &mut v8::PinScope<'_, '_>, value: i32) 
         return None;
     }
     Some(value.unsigned_abs())
-}
-
-fn positive_image_data_dimension_from_long(
-    scope: &mut v8::PinScope<'_, '_>,
-    value: i32,
-) -> Option<u32> {
-    if value <= 0 {
-        webidl::throw_index_size_error(scope);
-        return None;
-    }
-    Some(value as u32)
-}
-
-fn normalized_image_data_dirty_rect(
-    scope: &mut v8::PinScope<'_, '_>,
-    dirty_x: i32,
-    dirty_y: i32,
-    dirty_width: i32,
-    dirty_height: i32,
-) -> Option<(i32, i32, i32, i32)> {
-    let (dirty_x, dirty_width) = normalized_dirty_axis(scope, dirty_x, dirty_width)?;
-    let (dirty_y, dirty_height) = normalized_dirty_axis(scope, dirty_y, dirty_height)?;
-    Some((dirty_x, dirty_y, dirty_width, dirty_height))
-}
-
-fn normalized_dirty_axis(
-    scope: &mut v8::PinScope<'_, '_>,
-    start: i32,
-    span: i32,
-) -> Option<(i32, i32)> {
-    if span >= 0 {
-        return Some((start, span));
-    }
-    if span == i32::MIN {
-        webidl::throw_index_size_error(scope);
-        return None;
-    }
-    let start = start.checked_add(span).or_else(|| {
-        webidl::throw_index_size_error(scope);
-        None
-    })?;
-    Some((start, -span))
 }
 
 fn normalized_rect<'s>(

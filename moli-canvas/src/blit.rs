@@ -1,27 +1,22 @@
 use crate::pixel::{copy_rgba8_rect, scale_rgba8};
-use crate::types::{DrawImageBlit, Rgba8Rect, ScaleFilter, byte_len, surface_matches_len};
+use crate::types::{
+    DrawImageBlit, ImageDataRect, Rgba8Rect, ScaleFilter, byte_len, surface_matches_len,
+};
 
 pub fn extract_image_data(
     pixels: &[u8],
     canvas_width: u32,
     canvas_height: u32,
-    source_x: i32,
-    source_y: i32,
-    width: u32,
-    height: u32,
+    rect: ImageDataRect,
 ) -> Vec<u8> {
+    let (width, height) = (rect.width, rect.height);
     let mut out = vec![0; byte_len(width, height).unwrap_or(0)];
     if !surface_matches_len(pixels, canvas_width, canvas_height) {
         return out;
     }
-    let Some((source_rect, dest_x, dest_y)) = clipped_source_rect_for_extract(
-        source_x,
-        source_y,
-        width,
-        height,
-        canvas_width,
-        canvas_height,
-    ) else {
+    let Some((source_rect, dest_x, dest_y)) =
+        clipped_source_rect_for_extract(rect, canvas_width, canvas_height)
+    else {
         return out;
     };
     let _ = copy_rgba8_rect(
@@ -39,17 +34,14 @@ pub fn extract_image_data(
 }
 
 fn clipped_source_rect_for_extract(
-    source_x: i32,
-    source_y: i32,
-    width: u32,
-    height: u32,
+    rect: ImageDataRect,
     canvas_width: u32,
     canvas_height: u32,
 ) -> Option<(Rgba8Rect, u32, u32)> {
-    let left = source_x as i64;
-    let top = source_y as i64;
-    let right = left.checked_add(width as i64)?;
-    let bottom = top.checked_add(height as i64)?;
+    let left = rect.x;
+    let top = rect.y;
+    let right = left + i64::from(rect.width);
+    let bottom = top + i64::from(rect.height);
     let copy_left = left.max(0).min(canvas_width as i64);
     let copy_top = top.max(0).min(canvas_height as i64);
     let copy_right = right.max(0).min(canvas_width as i64);
@@ -80,15 +72,12 @@ pub fn blit_image_data(
     source_height: u32,
     dx: i32,
     dy: i32,
-    dirty_x: i32,
-    dirty_y: i32,
-    dirty_width: i32,
-    dirty_height: i32,
+    dirty_rect: ImageDataRect,
 ) {
     if !surface_matches_len(pixels, canvas_width, canvas_height)
         || !surface_matches_len(source, source_width, source_height)
-        || dirty_width <= 0
-        || dirty_height <= 0
+        || dirty_rect.width == 0
+        || dirty_rect.height == 0
     {
         return;
     }
@@ -99,10 +88,7 @@ pub fn blit_image_data(
         canvas_height,
         dx,
         dy,
-        dirty_x,
-        dirty_y,
-        dirty_width,
-        dirty_height,
+        dirty_rect,
     ) else {
         return;
     };
@@ -119,7 +105,6 @@ pub fn blit_image_data(
     );
 }
 
-#[allow(clippy::too_many_arguments)]
 fn clipped_blit_rect(
     source_width: u32,
     source_height: u32,
@@ -127,40 +112,20 @@ fn clipped_blit_rect(
     dest_height: u32,
     dest_x: i32,
     dest_y: i32,
-    dirty_x: i32,
-    dirty_y: i32,
-    dirty_width: i32,
-    dirty_height: i32,
+    dirty_rect: ImageDataRect,
 ) -> Option<(Rgba8Rect, u32, u32)> {
-    let mut source_left = (dirty_x as i64).max(0).min(source_width as i64);
-    let mut source_top = (dirty_y as i64).max(0).min(source_height as i64);
-    let mut source_right = (dirty_x as i64)
-        .checked_add(dirty_width as i64)?
-        .max(0)
-        .min(source_width as i64);
-    let mut source_bottom = (dirty_y as i64)
-        .checked_add(dirty_height as i64)?
-        .max(0)
-        .min(source_height as i64);
-    let mut target_x = dest_x as i64;
-    let mut target_y = dest_y as i64;
-
-    if target_x < 0 {
-        let skip = -target_x;
-        source_left += skip;
-        target_x = 0;
-    }
-    if target_y < 0 {
-        let skip = -target_y;
-        source_top += skip;
-        target_y = 0;
-    }
-    if target_x + (source_right - source_left) > dest_width as i64 {
-        source_right -= target_x + (source_right - source_left) - dest_width as i64;
-    }
-    if target_y + (source_bottom - source_top) > dest_height as i64 {
-        source_bottom -= target_y + (source_bottom - source_top) - dest_height as i64;
-    }
+    // Intersect in source coordinates. A source pixel (x, y) is always written
+    // to (dest_x + x, dest_y + y), even when the dirty rectangle is clipped.
+    let dest_x = i64::from(dest_x);
+    let dest_y = i64::from(dest_y);
+    let source_left = dirty_rect.x.max(0).max(-dest_x);
+    let source_top = dirty_rect.y.max(0).max(-dest_y);
+    let source_right = (dirty_rect.x + i64::from(dirty_rect.width))
+        .min(i64::from(source_width))
+        .min(i64::from(dest_width) - dest_x);
+    let source_bottom = (dirty_rect.y + i64::from(dirty_rect.height))
+        .min(i64::from(source_height))
+        .min(i64::from(dest_height) - dest_y);
     if source_left >= source_right || source_top >= source_bottom {
         return None;
     }
@@ -170,7 +135,11 @@ fn clipped_blit_rect(
         (source_right - source_left) as u32,
         (source_bottom - source_top) as u32,
     )?;
-    Some((source_rect, target_x as u32, target_y as u32))
+    Some((
+        source_rect,
+        (dest_x + source_left) as u32,
+        (dest_y + source_top) as u32,
+    ))
 }
 
 pub fn blit_draw_image(

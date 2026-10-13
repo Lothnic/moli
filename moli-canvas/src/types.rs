@@ -4,6 +4,35 @@ pub const MAX_RGBA8_BYTE_LENGTH: usize = 2_147_483_647;
 
 pub type CanvasRect = (i32, i32, i32, i32);
 
+/// A pixel rectangle normalized from WebIDL long coordinates and signed spans.
+/// Keep its origin wide: normalizing a negative span can leave the i32 range.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ImageDataRect {
+    pub(crate) x: i64,
+    pub(crate) y: i64,
+    pub(crate) width: u32,
+    pub(crate) height: u32,
+}
+
+impl ImageDataRect {
+    pub fn new(x: i32, y: i32, width: i32, height: i32) -> Self {
+        Self {
+            x: i64::from(x) + i64::from(width.min(0)),
+            y: i64::from(y) + i64::from(height.min(0)),
+            width: width.unsigned_abs(),
+            height: height.unsigned_abs(),
+        }
+    }
+
+    pub fn width(self) -> u32 {
+        self.width
+    }
+
+    pub fn height(self) -> u32 {
+        self.height
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Rgba8Rect {
     pub x: u32,

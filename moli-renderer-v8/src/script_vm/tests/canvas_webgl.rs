@@ -1781,7 +1781,7 @@ fn html_canvas_put_image_data_honors_dirty_rect() {
         )
         .expect("canvas putImageData dirty rect should evaluate");
 
-    assert_eq!(result, "[0,255,0,255,0,0,0,0,255,255,0,255,0,0,0,0]");
+    assert_eq!(result, "[0,0,0,0,0,255,0,255,0,0,0,0,255,255,0,255]");
 }
 
 #[test]
@@ -1813,7 +1813,10 @@ fn html_canvas_image_data_methods_parse_webidl_enforce_range_long() {
   });
   const createZero = probe(() => ctx.createImageData(0, 1));
   const createSymbol = probe(() => ctx.createImageData(Symbol('width'), 1));
-  const getNegative = probe(() => ctx.getImageData(2, 2, -2, -2));
+  const getNegative = probe(() => {
+    const data = ctx.getImageData(2, 2, -2, -2);
+    return [data.width, data.height, Array.from(data.data).join(',')].join('|');
+  });
   const getMissing = probe(() => ctx.getImageData(0, 0, 1));
   const getNan = probe(() => ctx.getImageData(NaN, 0, 1, 1));
   const getZero = probe(() => ctx.getImageData(0, 0, 0, 1));
@@ -1869,7 +1872,7 @@ fn html_canvas_image_data_methods_parse_webidl_enforce_range_long() {
 
     assert_eq!(
         result,
-        r#"{"created":"2:3","createZero":"IndexSizeError","createSymbol":"TypeError","getNegative":"IndexSizeError","getMissing":"TypeError","getNan":"TypeError","getZero":"IndexSizeError","constructorOversized":"IndexSizeError","getOversized":"IndexSizeError","putCoerced":"0,0,0,0,255,0,0,255,0,255,0,255","putSymbol":"TypeError","afterBadPut":true,"dirtyNegative":"255,0,0,255,0,0,0,0","putPlainObject":"TypeError"}"#
+        r#"{"created":"2:3","createZero":"IndexSizeError","createSymbol":"TypeError","getNegative":"2|2|255,0,0,255,255,0,0,255,255,0,0,255,255,0,0,255","getMissing":"TypeError","getNan":"TypeError","getZero":"IndexSizeError","constructorOversized":"IndexSizeError","getOversized":"IndexSizeError","putCoerced":"0,0,0,0,255,0,0,255,0,255,0,255","putSymbol":"TypeError","afterBadPut":true,"dirtyNegative":"255,0,0,255,0,0,0,0","putPlainObject":"TypeError"}"#
     );
 }
 
