@@ -18,6 +18,7 @@ use crate::{
         JsContextHost, RuntimeObservableContextToken, WindowExecutionContextIdentity,
         WindowExecutionContextOwner,
     },
+    webidl_callback_execution::PreparedWebIdlCallbackExecution,
     window_webidl_callback::{
         PreparedWindowWebIdlCallbackFunction, WindowWebIdlCallbackFunction,
         WindowWebIdlCallbackFunctionOutcome, invoke_window_webidl_callback_function,
@@ -324,6 +325,27 @@ pub(crate) struct PreparedObserverCallback {
 }
 
 impl PreparedObserverCallback {
+    /// Retain both registration-time identities while using the common
+    /// Window/Worker invocation and exception-reporting adapter.
+    pub(crate) fn into_execution(
+        self,
+        host_ptr: *mut JsContextHost,
+    ) -> Option<PreparedWebIdlCallbackExecution> {
+        let PreparedWindowWebIdlCallbackFunction::Live {
+            callback,
+            relevant_identity,
+        } = self.callback
+        else {
+            return None;
+        };
+        Some(PreparedWebIdlCallbackExecution::window(
+            callback,
+            host_ptr,
+            Some(self.observer_identity?),
+            relevant_identity,
+        ))
+    }
+
     pub(crate) fn relevant_context<'s>(
         &self,
         scope: &mut v8::PinScope<'s, '_>,

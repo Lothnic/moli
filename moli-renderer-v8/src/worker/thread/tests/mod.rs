@@ -1,4 +1,5 @@
 mod abort_signal_events;
+mod callback_execution;
 mod error_reporting_guard;
 use std::pin::pin;
 use std::sync::Arc;

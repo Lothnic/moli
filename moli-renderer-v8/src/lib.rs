@@ -115,6 +115,7 @@ mod v8_traced_webidl_callback;
 mod wasm_module_support;
 mod web_storage_handles;
 pub(crate) mod webidl;
+mod webidl_callback_execution;
 #[cfg(test)]
 mod webidl_callback_source_boundary_tests;
 mod webidl_iterator;

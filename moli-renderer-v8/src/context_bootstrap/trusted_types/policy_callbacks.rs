@@ -7,16 +7,12 @@
 //! naming, CSP, Trusted Type construction, sink selection, and default-policy
 //! result handling to `trusted_types`.
 
-use moli_webidl_callback::invoke_webidl_callback_function;
-
 use super::TrustedTypeKind;
 use crate::{
-    util::{context_host_ptr_from_global_bridge, get_private_value, v8str},
+    util::{get_private_value, v8str},
     v8_traced_webidl_callback::V8TracedWebIdlCallbackFunction,
     webidl,
-    window_webidl_callback::{
-        PreparedWindowWebIdlCallbackFunctionOutcome, V8TracedWindowWebIdlCallbackFunction,
-    },
+    webidl_callback_execution::{PreparedWebIdlCallbackExecution, WebIdlCallbackExecutionOutcome},
 };
 
 #[derive(Default, webidl::WebIdlDictionary)]
@@ -92,9 +88,9 @@ pub(super) enum TrustedTypePolicyCallbackOutcome {
 /// Invokes one policy-owned callback and performs its nullable string return
 /// conversion before leaving the callback's relevant Realm.
 ///
-/// Window callbacks additionally require their exact callback Realm to remain
-/// current. Worker callbacks share one isolate/run lifetime with the policy and
-/// therefore need no generation or current-worker lookup.
+/// The renderer callback boundary authorizes the exact Window callback Realm
+/// or Worker run. The policy keeps synchronous exception and string-conversion
+/// semantics, including conversion in the callback's relevant Realm.
 pub(super) fn invoke_policy_callback<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     policy: v8::Local<'s, v8::Object>,
@@ -108,48 +104,26 @@ pub(super) fn invoke_policy_callback<'s>(
     };
     let receiver = v8::undefined(scope).into();
 
-    if let Some(host_ptr) = context_host_ptr_from_global_bridge(scope) {
-        let host = unsafe { &*host_ptr };
-        let callback =
-            V8TracedWindowWebIdlCallbackFunction::from_object(carrier).prepare(scope, host);
-        return match callback.invoke(
-            scope,
-            host,
-            receiver,
-            arguments,
-            |scope, callback, receiver, arguments| {
-                invoke_and_convert_policy_callback(scope, callback, receiver, arguments, kind)
-            },
-        ) {
-            PreparedWindowWebIdlCallbackFunctionOutcome::Returned(value) => {
-                TrustedTypePolicyCallbackOutcome::Returned(value)
-            }
-            PreparedWindowWebIdlCallbackFunctionOutcome::Failed(()) => {
-                TrustedTypePolicyCallbackOutcome::Abrupt
-            }
-            PreparedWindowWebIdlCallbackFunctionOutcome::Retired => {
-                throw_callback_no_longer_runnable(scope);
-                TrustedTypePolicyCallbackOutcome::Abrupt
-            }
-        };
-    }
-
-    if crate::worker::get_worker_state(scope).is_none() {
+    let Some(callback) = PreparedWebIdlCallbackExecution::from_traced(scope, carrier) else {
         throw_callback_no_longer_runnable(scope);
         return TrustedTypePolicyCallbackOutcome::Abrupt;
-    }
-    let callback = V8TracedWebIdlCallbackFunction::from_object(carrier).prepare(scope);
-    match invoke_webidl_callback_function(
+    };
+    match callback.invoke_with(
         scope,
-        &callback,
         receiver,
         arguments,
         |scope, callback, receiver, arguments| {
             invoke_and_convert_policy_callback(scope, callback, receiver, arguments, kind)
         },
     ) {
-        Ok(value) => TrustedTypePolicyCallbackOutcome::Returned(value),
-        Err(()) => TrustedTypePolicyCallbackOutcome::Abrupt,
+        WebIdlCallbackExecutionOutcome::Returned(value) => {
+            TrustedTypePolicyCallbackOutcome::Returned(value)
+        }
+        WebIdlCallbackExecutionOutcome::Failed(()) => TrustedTypePolicyCallbackOutcome::Abrupt,
+        WebIdlCallbackExecutionOutcome::Unavailable => {
+            throw_callback_no_longer_runnable(scope);
+            TrustedTypePolicyCallbackOutcome::Abrupt
+        }
     }
 }
 

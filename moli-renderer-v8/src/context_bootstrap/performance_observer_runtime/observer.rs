@@ -1,6 +1,8 @@
 use super::delivery::{enqueue_buffered_performance_entries, queue_performance_observer_delivery};
+use super::registration::{
+    PerformanceObserverRegistration, register_performance_observer_callback,
+};
 use super::*;
-use crate::observer_runtime::ObserverCallbackId;
 use crate::util::{
     define_v8_array_data_property, get_private_value, serialize_v8_iter_array, set_private_value,
 };
@@ -87,38 +89,15 @@ pub(in crate::context_bootstrap) fn performance_observer_constructor_callback<'s
     else {
         return;
     };
-    let (callback_id, callback, relevant_global, incumbent_global) =
-        if let Some(host_ptr) = context_host_ptr_from_global_bridge(scope) {
-            let registered_callback = crate::observer_runtime::register_callback(
-                scope,
-                host_ptr,
-                args.this(),
-                parsed.callback,
-            );
-            let (callback_id, callback, relevant_global, incumbent_global) =
-                registered_callback.into_parts();
-            (
-                callback_id.as_u32(),
-                callback,
-                relevant_global,
-                incumbent_global,
-            )
-        } else {
-            if crate::worker::get_worker_state(scope).is_none() {
-                throw_type_error(
-                    scope,
-                    "PerformanceObserver is unavailable outside a Window or Worker realm.",
-                );
-                return;
-            }
-            let callback = v8::Local::<v8::Object>::try_from(parsed.callback.value(scope))
-                .expect("a Web IDL callback function must be an object");
-            let relevant_global = parsed.callback.relevant_context(scope).global(scope);
-            let incumbent_global = parsed.callback.incumbent_context(scope).global(scope);
-            // Worker observers do not need a Window execution-context binding.
-            // Zero is deliberately outside ObserverCallbackId's valid range.
-            (0, callback, relevant_global, incumbent_global)
-        };
+    let Some((callback_id, callback, relevant_global, incumbent_global)) =
+        register_performance_observer_callback(scope, args.this(), parsed.callback)
+    else {
+        throw_type_error(
+            scope,
+            "PerformanceObserver is unavailable outside a Window or Worker realm.",
+        );
+        return;
+    };
     PerformanceObserverObjectDeclaration::new(
         callback_id,
         callback,
@@ -243,33 +222,12 @@ pub(in crate::context_bootstrap) fn performance_observer_observe_callback<'s>(
             .unwrap_or_else(|| v8::null(scope).into()),
     );
     set_performance_observer_entry_types(scope, args.this(), observed_entry_types);
-    if let Some(host_ptr) = context_host_ptr_from_global_bridge(scope) {
-        let Some(callback_id) = performance_observer_callback_id(scope, args.this()) else {
-            rv.set_undefined();
-            return;
-        };
-        // Blink keeps a PerformanceObserver alive only while it is registered
-        // (`HasPendingActivity() == is_registered_`). The exact callback binding
-        // owns the same active root so disconnect and Realm retirement can release
-        // it without a parallel global JS registry.
-        if !crate::observer_runtime::activate_performance_observer_callback(
-            scope,
-            host_ptr,
-            callback_id,
-            args.this(),
-        ) {
-            set_performance_observer_active(scope, args.this(), false);
-            let pending = v8::Array::new(scope, 0);
-            set_performance_observer_pending(scope, args.this(), pending);
-            rv.set_undefined();
-            return;
-        }
-    } else if crate::worker::get_worker_state(scope).is_some() {
-        // A worker has one Realm for the lifetime of its isolate run, so its
-        // active observer set can live on that Realm without Window generation
-        // authorization.
-        push_object_to_global_registry(scope, PERFORMANCE_OBSERVER_REGISTRY_SLOT, args.this());
-    } else {
+    let activated = PerformanceObserverRegistration::from_observer(scope, args.this())
+        .is_some_and(|registration| registration.activate(scope));
+    if !activated {
+        set_performance_observer_active(scope, args.this(), false);
+        let pending = v8::Array::new(scope, 0);
+        set_performance_observer_pending(scope, args.this(), pending);
         rv.set_undefined();
         return;
     }
@@ -287,12 +245,8 @@ pub(in crate::context_bootstrap) fn performance_observer_disconnect_callback<'s>
     mut rv: v8::ReturnValue<'_, v8::Value>,
 ) {
     set_performance_observer_active(scope, args.this(), false);
-    if let Some(callback_id) = performance_observer_callback_id(scope, args.this())
-        && let Some(host_ptr) = context_host_ptr_from_global_bridge(scope)
-    {
-        crate::observer_runtime::deactivate_performance_observer_callback(host_ptr, callback_id);
-    } else if crate::worker::get_worker_state(scope).is_some() {
-        remove_worker_observer_root(scope, args.this());
+    if let Some(registration) = PerformanceObserverRegistration::from_observer(scope, args.this()) {
+        registration.deactivate(scope);
     }
     let pending = v8::Array::new(scope, 0);
     set_performance_observer_pending(scope, args.this(), pending);
@@ -367,74 +321,6 @@ pub(super) fn array_contains_string(
             .and_then(|value| value.to_string(scope))
             .is_some_and(|value| value.to_rust_string_lossy(scope) == expected)
     })
-}
-
-pub(super) fn performance_observer_callback_id<'s>(
-    scope: &mut v8::PinScope<'s, '_>,
-    observer: v8::Local<'s, v8::Object>,
-) -> Option<ObserverCallbackId> {
-    let value =
-        performance_observer_slot_value(scope, observer, PERFORMANCE_OBSERVER_CALLBACK_ID_SLOT)?;
-    ObserverCallbackId::from_number(value.number_value(scope)?)
-}
-
-pub(super) fn performance_observer_callback_residence<'s>(
-    scope: &mut v8::PinScope<'s, '_>,
-    observer: v8::Local<'s, v8::Object>,
-) -> Option<crate::observer_runtime::ObserverCallbackResidence<'s>> {
-    let callback_id = performance_observer_callback_id(scope, observer)?;
-    let callback =
-        performance_observer_slot_value(scope, observer, PERFORMANCE_OBSERVER_CALLBACK_VALUE_SLOT)
-            .and_then(|value| v8::Local::<v8::Object>::try_from(value).ok())?;
-    let relevant_global = performance_observer_slot_value(
-        scope,
-        observer,
-        PERFORMANCE_OBSERVER_CALLBACK_RELEVANT_GLOBAL_SLOT,
-    )
-    .and_then(|value| v8::Local::<v8::Object>::try_from(value).ok())?;
-    let incumbent_global = performance_observer_slot_value(
-        scope,
-        observer,
-        PERFORMANCE_OBSERVER_CALLBACK_INCUMBENT_GLOBAL_SLOT,
-    )
-    .and_then(|value| v8::Local::<v8::Object>::try_from(value).ok())?;
-    Some(
-        crate::observer_runtime::ObserverCallbackResidence::from_parts(
-            callback_id,
-            callback,
-            relevant_global,
-            incumbent_global,
-        ),
-    )
-}
-
-pub(super) fn prepare_worker_performance_observer_callback<'s>(
-    scope: &mut v8::PinScope<'s, '_>,
-    observer: v8::Local<'s, v8::Object>,
-) -> Option<moli_webidl_callback::PreparedWebIdlCallbackFunction> {
-    let callback =
-        performance_observer_slot_value(scope, observer, PERFORMANCE_OBSERVER_CALLBACK_VALUE_SLOT)
-            .and_then(|value| v8::Local::<v8::Object>::try_from(value).ok())?;
-    let relevant_global = performance_observer_slot_value(
-        scope,
-        observer,
-        PERFORMANCE_OBSERVER_CALLBACK_RELEVANT_GLOBAL_SLOT,
-    )
-    .and_then(|value| v8::Local::<v8::Object>::try_from(value).ok())?;
-    let incumbent_global = performance_observer_slot_value(
-        scope,
-        observer,
-        PERFORMANCE_OBSERVER_CALLBACK_INCUMBENT_GLOBAL_SLOT,
-    )
-    .and_then(|value| v8::Local::<v8::Object>::try_from(value).ok())?;
-    let relevant_context = relevant_global.get_creation_context(scope)?;
-    let incumbent_context = incumbent_global.get_creation_context(scope)?;
-    moli_webidl_callback::PreparedWebIdlCallbackFunction::try_new(
-        scope,
-        callback,
-        relevant_context,
-        incumbent_context,
-    )
 }
 
 pub(super) fn performance_observer_pending<'s>(
@@ -571,25 +457,4 @@ fn set_performance_observer_bool_slot(
 ) {
     let value = v8::Boolean::new(scope, value);
     set_performance_observer_slot_value(scope, observer, slot, value.into());
-}
-
-fn remove_worker_observer_root<'s>(
-    scope: &mut v8::PinScope<'s, '_>,
-    observer: v8::Local<'s, v8::Object>,
-) {
-    let Some(registry) = global_queue_array(scope, PERFORMANCE_OBSERVER_REGISTRY_SLOT) else {
-        return;
-    };
-    let retained: Vec<_> = (0..registry.length())
-        .filter_map(|index| registry.get_index(scope, index))
-        .filter(|value| !value.strict_equals(observer.into()))
-        .collect();
-    let registry = v8::Array::new_with_elements(scope, &retained);
-    let global = scope.get_current_context().global(scope);
-    set_private_value(
-        scope,
-        global,
-        PERFORMANCE_OBSERVER_REGISTRY_SLOT,
-        registry.into(),
-    );
 }

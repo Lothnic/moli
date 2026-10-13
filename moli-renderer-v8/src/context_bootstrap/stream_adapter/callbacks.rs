@@ -10,16 +10,11 @@
 //! these types. They remain ordinary V8 functions in the existing controller
 //! state and are selected by `invoke_stored_stream_algorithm`.
 
-use moli_webidl_callback::invoke_webidl_callback_function;
-
 use super::{call_function_result, *};
 use crate::{
-    util::context_host_ptr_from_global_bridge,
     v8_traced_webidl_callback::V8TracedWebIdlCallbackFunction,
     webidl,
-    window_webidl_callback::{
-        PreparedWindowWebIdlCallbackFunctionOutcome, V8TracedWindowWebIdlCallbackFunction,
-    },
+    webidl_callback_execution::{PreparedWebIdlCallbackExecution, WebIdlCallbackExecutionOutcome},
 };
 
 #[derive(Clone, Copy, webidl::WebIdlEnum)]
@@ -274,24 +269,17 @@ fn invoke_stream_webidl_callback_with<'s, R>(
         &[v8::Local<'s, v8::Value>],
     ) -> Result<R, v8::Local<'s, v8::Value>>,
 ) -> Result<R, v8::Local<'s, v8::Value>> {
-    if let Some(host_ptr) = context_host_ptr_from_global_bridge(scope) {
-        let host = unsafe { &*host_ptr };
-        let callback =
-            V8TracedWindowWebIdlCallbackFunction::from_object(callback.object).prepare(scope, host);
-        return match callback.invoke(scope, host, receiver, arguments, invoke_function) {
-            PreparedWindowWebIdlCallbackFunctionOutcome::Returned(result) => Ok(result),
-            PreparedWindowWebIdlCallbackFunctionOutcome::Failed(error) => Err(error),
-            PreparedWindowWebIdlCallbackFunctionOutcome::Retired => {
-                Err(stream_callback_no_longer_runnable(scope))
-            }
-        };
-    }
-
-    if crate::worker::get_worker_state(scope).is_none() {
+    let Some(callback) = PreparedWebIdlCallbackExecution::from_traced(scope, callback.object)
+    else {
         return Err(stream_callback_no_longer_runnable(scope));
+    };
+    match callback.invoke_with(scope, receiver, arguments, invoke_function) {
+        WebIdlCallbackExecutionOutcome::Returned(result) => Ok(result),
+        WebIdlCallbackExecutionOutcome::Failed(error) => Err(error),
+        WebIdlCallbackExecutionOutcome::Unavailable => {
+            Err(stream_callback_no_longer_runnable(scope))
+        }
     }
-    let callback = V8TracedWebIdlCallbackFunction::from_object(callback.object).prepare(scope);
-    invoke_webidl_callback_function(scope, &callback, receiver, arguments, invoke_function)
 }
 
 /// Dispatches either a page-supplied typed callback carrier or a

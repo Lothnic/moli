@@ -3,6 +3,7 @@ use super::*;
 mod delivery;
 mod entry_list;
 mod observer;
+mod registration;
 
 use super::performance_runtime::{
     PERFORMANCE_ENTRY_NAME_SLOT, PERFORMANCE_ENTRY_START_TIME_SLOT, PERFORMANCE_ENTRY_TYPE_SLOT,

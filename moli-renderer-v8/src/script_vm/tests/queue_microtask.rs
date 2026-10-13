@@ -1,6 +1,22 @@
 use super::*;
 
 #[test]
+fn webidl_callback_execution_preserves_api_exception_policies() {
+    let mut vm = new_storage_test_vm("https://webidl-callback-execution.test/");
+    let source = format!(
+        "({}).then(result => globalThis.__callbackExecutionResult = result, error => globalThis.__callbackExecutionResult = {{ error: String(error) }});",
+        include_str!("../../../tests/fixtures/webidl-callback-execution.js"),
+    );
+    vm.eval(&source)
+        .expect("queue shared callback policy probe");
+    assert_eq!(
+        vm.eval("JSON.stringify(__callbackExecutionResult)")
+            .unwrap(),
+        r#"{"policyThrow":true,"policyConversionThrow":true,"streamThrow":true,"streamConversionThrow":true,"notifications":["microtask"]}"#,
+    );
+}
+
+#[test]
 fn window_queue_microtask_uses_typed_callback_and_v8_fifo() {
     let mut vm = new_storage_test_vm("https://queue-microtask.test/");
 
