@@ -9,16 +9,6 @@ on:
       - moli-curl/**
       - .github/workflows/macos-tls.yml
   workflow_dispatch:
-    inputs:
-      head_ref:
-        description: Exact revision to package
-        required: false
-        default: ""
-      build_release_binary:
-        description: Build an unpublished macOS arm64 release artifact
-        required: true
-        default: false
-        type: boolean
 
 permissions:
   contents: read
@@ -30,7 +20,6 @@ concurrency:
 jobs:
   sectrust:
     name: SecTrust
-    if: github.event_name != 'workflow_dispatch' || !inputs.build_release_binary
     runs-on: macos-latest
     timeout-minutes: 25
     env:
@@ -50,43 +39,3 @@ jobs:
         run: cargo test --locked -p moli-curl
       - name: Test native trust and explicit CA overrides
         run: cargo test --locked -p moli-curl --test apple_sectrust -- --ignored --nocapture
-
-  build-release-binary:
-    name: Build unpublished macOS arm64 release binary
-    if: github.event_name == 'workflow_dispatch' && inputs.build_release_binary
-    runs-on: macos-15
-    timeout-minutes: 120
-    env:
-      MACOSX_DEPLOYMENT_TARGET: "13.0"
-      CARGO_INCREMENTAL: "0"
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          persist-credentials: false
-          ref: ${{ inputs.head_ref || github.sha }}
-      - name: Install pinned Rust toolchain
-        shell: bash
-        run: |
-          set -euo pipefail
-          toolchain=$(tr -d '[:space:]' < rust-toolchain)
-          rustup toolchain install "$toolchain" --profile minimal --no-self-update
-      - name: Build release binary
-        run: cargo build --release --locked -p moli
-      - name: Package binary and provenance
-        shell: bash
-        env:
-          REQUESTED_HEAD_REF: ${{ inputs.head_ref }}
-        run: |
-          set -euo pipefail
-          package=target/moli-macos-aarch64
-          mkdir -p "$package"
-          install -m 0755 target/release/moli "$package/moli"
-          git rev-parse HEAD > "$package/revision.txt"
-          shasum -a 256 "$package/moli" > "$package/SHA256SUMS"
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: moli-macos-aarch64-unpublished
-          path: target/moli-macos-aarch64/
-          if-no-files-found: error
-          compression-level: 0
-          retention-days: 3
