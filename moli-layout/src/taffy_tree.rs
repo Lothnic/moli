@@ -2199,6 +2199,14 @@ where
             context,
             resolve_stylo_calc_value,
             |known_dimensions, available_space| {
+                // Taffy's known dimensions describe the border box, while
+                // this callback measures Parley's content box. For fixed axes,
+                // use the content space already resolved by the leaf adapter
+                // so padding, borders and scrollbars do not widen line breaks.
+                let known_dimensions = known_dimensions
+                    .zip_map(available_space, |known, available| {
+                        known.and_then(|_| available.into_option())
+                    });
                 let text_layout = text_layout
                     .get_or_insert_with(|| inline_context.laid_out.clone().unwrap_or_default());
                 let result = self.measure_inline_context(

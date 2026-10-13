@@ -253,6 +253,118 @@ fn grid_intrinsic_minimum_and_percentage_maximum_contribute_constrained_height()
     assert_grid_intrinsic_item_contributes_constrained_height(Dimension::min_content());
 }
 
+#[test]
+fn padded_intrinsic_items_measure_wrapping_in_content_box_space() {
+    for display in [LayoutDisplay::Grid, LayoutDisplay::Flex] {
+        let source = Source(vec![
+            Node::element(
+                "root",
+                "div",
+                LayoutElementCategory::Generic,
+                None,
+                vec![1, 8],
+            ),
+            Node::element(
+                "parent",
+                "div",
+                LayoutElementCategory::Generic,
+                None,
+                vec![2],
+            ),
+            Node::element(
+                "item",
+                "span",
+                LayoutElementCategory::Generic,
+                None,
+                vec![3, 4, 5, 6, 7],
+            ),
+            Node::element(
+                "first",
+                "span",
+                LayoutElementCategory::Generic,
+                None,
+                Vec::new(),
+            ),
+            Node::text("break", "\u{200b}"),
+            Node::element(
+                "second",
+                "span",
+                LayoutElementCategory::Generic,
+                None,
+                Vec::new(),
+            ),
+            Node::text("break", "\u{200b}"),
+            Node::element(
+                "third",
+                "span",
+                LayoutElementCategory::Generic,
+                None,
+                Vec::new(),
+            ),
+            Node::element(
+                "following",
+                "div",
+                LayoutElementCategory::Generic,
+                None,
+                Vec::new(),
+            ),
+        ]);
+        let mut styles = Styles::default();
+        styles
+            .primary
+            .insert(0, style(LayoutDisplay::Block, PaintColor::TRANSPARENT));
+        styles.primary.insert(
+            1,
+            style(display, GREEN).tap_taffy(|taffy| {
+                taffy.display = if display == LayoutDisplay::Grid {
+                    taffy::Display::Grid
+                } else {
+                    taffy::Display::Flex
+                };
+                taffy.size.width = Dimension::length(150.0);
+                taffy.grid_template_columns = vec![taffy::style_helpers::minmax(
+                    taffy::style_helpers::length(0.0),
+                    taffy::style_helpers::fr(1.0),
+                )];
+            }),
+        );
+        let item_style = |padding| {
+            style(LayoutDisplay::Block, YELLOW)
+                .tap_taffy(|taffy| {
+                    taffy.size.width = Dimension::max_content();
+                    taffy.min_size.width = Dimension::min_content();
+                    taffy.max_size.width = Dimension::percent(1.0);
+                    taffy.box_sizing = BoxSizing::ContentBox;
+                    taffy.justify_self = Some(taffy::AlignSelf::START);
+                    taffy.flex_shrink = 0.0;
+                    taffy.padding = Rect::length(padding);
+                })
+                .with_text_metrics(10.0, 10.0)
+        };
+        styles.primary.insert(2, item_style(0.0));
+        for node in [3, 5, 7] {
+            styles
+                .primary
+                .insert(node, sized(LayoutDisplay::InlineBlock, 80.0, 10.0, RED));
+        }
+        styles
+            .primary
+            .insert(8, sized(LayoutDisplay::Block, 150.0, 4.0, BLUE));
+        let control = render(&source, &mut styles, 400, 300);
+        let control_item = rect(&control, YELLOW);
+        styles.primary.insert(2, item_style(10.0));
+        let padded = render(&source, &mut styles, 400, 300);
+        let padded_item = rect(&padded, YELLOW);
+        let parent = rect(&padded, GREEN);
+        let following = rect(&padded, BLUE);
+        assert_close(control_item.width, 150.0);
+        assert_close(padded_item.width, 170.0);
+        assert_close(padded_item.height, control_item.height + 20.0);
+        assert_close(parent.height, padded_item.height);
+        assert_close(following.y, padded_item.bottom());
+    }
+}
+
 fn assert_grid_intrinsic_item_contributes_constrained_height(min_width: Dimension) {
     // Blink's GridLayoutAlgorithm::ContributionSizeForGridItem measures the
     // block contribution against the resolved inline grid area, including
