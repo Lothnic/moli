@@ -40,6 +40,7 @@ pub(crate) struct Writer<'a> {
     heading: bool,
     single_line_attributes: bool,
     pub(crate) last_link: usize,
+    pub(crate) last_link_content: usize,
     // Block events in this output buffer, used when finalizing a list item.
     pub(crate) has_blocks: bool,
 }
@@ -89,7 +90,9 @@ impl<'a> Writer<'a> {
     pub(crate) fn end_link(&mut self, serial: usize, fallback_label: Option<&str>) {
         self.flush_code();
         if self.last_link < serial {
-            if let Some(label) = fallback_label.filter(|label| !label.trim().is_empty()) {
+            if let Some(label) = fallback_label
+                .filter(|label| self.last_link_content < serial && !label.trim().is_empty())
+            {
                 // An empty anchor can still have an author-provided accessible
                 // name. Preserve that name inside the link instead of emitting
                 // an unusable empty label. Visible descendants remain primary.
@@ -257,6 +260,11 @@ impl<'a> Writer<'a> {
             self.boundary(before.max(after));
             return;
         }
+        for style in &self.desired {
+            if let Style::Link { serial, .. } = style {
+                self.last_link_content = self.last_link_content.max(*serial);
+            }
+        }
         // Closing styles before detaching the tail keeps all inline edit
         // offsets local to the current String, never inside a finished block.
         self.boundary(before);
@@ -327,6 +335,7 @@ impl<'a> Writer<'a> {
                 Style::Strike => self.output.push_str(if html { "<del>" } else { "~~" }),
                 Style::Link { serial, .. } => {
                     self.last_link = self.last_link.max(serial);
+                    self.last_link_content = self.last_link_content.max(serial);
                     if self.output.ends_with('!') {
                         self.output.insert(self.output.len() - 1, '\\');
                     }
