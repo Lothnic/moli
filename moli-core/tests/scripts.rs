@@ -6727,3 +6727,6 @@ mod document_write_errors;
 
 #[path = "scripts/child_markup_insertion.rs"]
 mod child_markup_insertion;
+
+#[path = "scripts/document_close.rs"]
+mod document_close;
