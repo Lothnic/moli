@@ -785,6 +785,12 @@ enum RenderRuntimeTurn {
         deadline: Instant,
         capture_policy: super::RendererPageStateCapturePolicy,
     },
+    CompletePostLoadReadyTasks {
+        token: RendererPageToken,
+        deadline: Instant,
+        remaining_turns: usize,
+        capture_policy: super::RendererPageStateCapturePolicy,
+    },
     ClaimLivePageTopLevelNavigationHandoff {
         token: RendererPageToken,
         handoff: RendererTopLevelNavigationHandoff,
@@ -836,7 +842,8 @@ impl RenderRuntimeTurn {
             | Self::WaitLivePageScriptTruthy { token, .. }
             | Self::WaitLivePageRuntimeExpressionAwait { token, .. }
             | Self::WaitLivePageSubresourceResponse { token, .. }
-            | Self::WaitLivePageChildFrameLifecycle { token, .. } => Some(*token),
+            | Self::WaitLivePageChildFrameLifecycle { token, .. }
+            | Self::CompletePostLoadReadyTasks { token, .. } => Some(*token),
             _ => None,
         }
     }
@@ -849,7 +856,8 @@ impl RenderRuntimeTurn {
             | Self::WaitLivePageScriptTruthy { deadline, .. }
             | Self::WaitLivePageRuntimeExpressionAwait { deadline, .. }
             | Self::WaitLivePageSubresourceResponse { deadline, .. }
-            | Self::WaitLivePageChildFrameLifecycle { deadline, .. } => Some(*deadline),
+            | Self::WaitLivePageChildFrameLifecycle { deadline, .. }
+            | Self::CompletePostLoadReadyTasks { deadline, .. } => Some(*deadline),
             _ => None,
         }
     }

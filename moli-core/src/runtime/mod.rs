@@ -819,6 +819,12 @@ impl Browser {
         wait_until: RenderedDomWaitUntil,
         deadline: FetchDeadline,
     ) -> Result<()> {
+        if matches!(wait_until, RenderedDomWaitUntil::Done) {
+            page.complete_post_load_ready_tasks(deadline.remaining())
+                .await
+                .context("failed while completing post-load ready tasks")?;
+            return Ok(());
+        }
         if !wait_until.has_best_effort_page_wait() {
             return Ok(());
         }

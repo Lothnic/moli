@@ -498,6 +498,81 @@ async fn fetch_done_does_not_wait_for_future_interval_timers() -> Result<()> {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn fetch_done_consumes_load_queued_zero_delay_task_without_waiting_for_background_timers()
+-> Result<()> {
+    let server = FixtureServer::spawn().await?;
+    let browser = Browser::new(AppConfig::default())?;
+
+    let page = tokio::time::timeout(
+        Duration::from_secs(1),
+        browser.fetch_with_wait_until(
+            &server.url("/runtime/post-load-ready-task"),
+            RenderedDomWaitUntil::Done,
+            Duration::from_millis(750),
+        ),
+    )
+    .await
+    .context("done should consume work queued directly by load without waiting")??;
+
+    let html = page.serialize_html_async().await?;
+    assert!(
+        html.contains("<table id=\"live-demo\"><tbody><tr><td>ready</td></tr></tbody></table>"),
+        "the zero-delay task and its microtask should reach the snapshot: {html}"
+    );
+    assert!(
+        html.contains("data-order=\"interval,throw,content"),
+        "ready timers must retain their ordinary FIFO prefix: {html}"
+    );
+    assert!(!html.contains("data-fallback=\"ran\""), "html={html}");
+    server.shutdown().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn post_load_ready_task_completion_honors_zero_deadline() -> Result<()> {
+    let server = FixtureServer::spawn().await?;
+    let browser = Browser::new(AppConfig::default())?;
+    let mut page = browser
+        .fetch_with_wait_until(
+            &server.url("/runtime/post-load-ready-task"),
+            RenderedDomWaitUntil::Load,
+            Duration::from_millis(750),
+        )
+        .await?;
+
+    let started = std::time::Instant::now();
+    page.complete_post_load_ready_tasks(Duration::ZERO).await?;
+
+    assert!(
+        started.elapsed() < Duration::from_millis(250),
+        "an expired completion budget must not start a bounded drain"
+    );
+    server.shutdown().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn fetch_load_stops_before_load_queued_zero_delay_task() -> Result<()> {
+    let server = FixtureServer::spawn().await?;
+    let browser = Browser::new(AppConfig::default())?;
+    let page = browser
+        .fetch_with_wait_until(
+            &server.url("/runtime/post-load-ready-task"),
+            RenderedDomWaitUntil::Load,
+            Duration::from_millis(750),
+        )
+        .await?;
+    assert!(
+        page.script_execution()
+            .global("__postLoadContentTaskRan")
+            .is_none(),
+        "Load must return its lifecycle-bound snapshot without the Done-only drain"
+    );
+    server.shutdown().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn fetch_allow_http_error_materializes_error_status_pages() -> Result<()> {
     let server = FixtureServer::spawn().await?;
     let browser = Browser::new(AppConfig::default())?;
