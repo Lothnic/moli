@@ -2079,11 +2079,7 @@ impl InlineBuildInput {
                 .filter(|selection| selection.is_caret())
                 .map(|_| InlineSelection::Caret {
                     offset: 0,
-                    color: world.boxes[self.root_style.index()]
-                        .selection_caret_color
-                        .unwrap_or_else(|| {
-                            world.boxes[self.root_style.index()].style.caret_color()
-                        }),
+                    color: world.boxes[self.root_style.index()].style.caret_color(),
                 })
         });
         let mut root_text_style = world.boxes[self.root_style.index()]
@@ -2281,11 +2277,7 @@ where
                     caret_output_offset(source_map, entry.box_id, selection.start).map(|offset| {
                         (
                             offset,
-                            world.boxes[entry.box_id.index()]
-                                .selection_caret_color
-                                .unwrap_or_else(|| {
-                                    world.boxes[entry.box_id.index()].style.caret_color()
-                                }),
+                            world.boxes[entry.box_id.index()].style.caret_color(),
                         )
                     });
             }

@@ -43,28 +43,39 @@ where
         }
         let owner_label = world.boxes[control.index()].source_label.clone();
         let placeholder_style = if placeholder {
-            styles.placeholder_style(owner)?
+            styles.placeholder_style(owner)?.map(|style| {
+                let mut style = style.into_style();
+                style.force_layout_display(LayoutDisplay::Block);
+                style
+            })
         } else {
             None
         };
-        let wrapper_style = if let Some(style) = placeholder_style {
-            let mut style = style.into_style();
-            style.force_layout_display(LayoutDisplay::Block);
-            style
-        } else {
-            styles.anonymous_style(
-                owner,
-                &world.boxes[control.index()].style,
-                LayoutDisplay::Block,
-            )?
-        };
-        let text_style = ResolvedLayoutStyle::text_leaf_from(&wrapper_style);
+        let editor_style = styles.anonymous_style(
+            owner,
+            &world.boxes[control.index()].style,
+            LayoutDisplay::Block,
+        )?;
         let selection = world.boxes[control.index()].text_selection;
-        let caret_color = world.boxes[control.index()].style.caret_color();
         if texts.is_empty() && selection.is_some() {
             texts.push(Arc::from(""));
         }
-        for (row, text) in texts.into_iter().enumerate() {
+        // Blink keeps the placeholder and inner editor as siblings. The
+        // placeholder precedes the empty editor, which retains its own
+        // font metrics and selection outside the placeholder's effect layers.
+        // Both remain descendants of the control's effects and clipping.
+        let contents = texts
+            .into_iter()
+            .map(|text| (text, placeholder))
+            .chain(placeholder.then(|| (Arc::from(""), false)));
+        for (row, (text, is_placeholder)) in contents.enumerate() {
+            let wrapper_style = if is_placeholder {
+                placeholder_style.as_ref().unwrap_or(&editor_style)
+            } else {
+                &editor_style
+            };
+            let text_style = ResolvedLayoutStyle::text_leaf_from(wrapper_style);
+            let selection = if is_placeholder { None } else { selection };
             let mut wrapper = LayoutWorld::new_box(
                 None,
                 Some(owner),
@@ -79,7 +90,6 @@ where
             );
             wrapper.inline_formatting_context = true;
             wrapper.text_selection = selection;
-            wrapper.selection_caret_color = Some(caret_color);
             let wrapper_id = world.allocate(wrapper);
             let text_id = world.allocate(LayoutWorld::new_box(
                 None,
@@ -94,7 +104,6 @@ where
                 Some(text),
             ));
             world.boxes[text_id.index()].text_selection = selection;
-            world.boxes[text_id.index()].selection_caret_color = Some(caret_color);
             world.append_synthesized_child(wrapper_id, text_id)?;
             world.append_synthesized_child(control, wrapper_id)?;
         }
