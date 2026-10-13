@@ -825,6 +825,12 @@ impl ScriptVm {
             .pending_subresource_request_count()
     }
 
+    pub(crate) fn has_pending_credentialed_main_window_request(&self) -> bool {
+        self._context_host
+            .borrow()
+            .has_pending_credentialed_main_window_request()
+    }
+
     pub(crate) fn has_pending_native_module_job(&self) -> bool {
         self.has_pending_dynamic_module_job()
     }

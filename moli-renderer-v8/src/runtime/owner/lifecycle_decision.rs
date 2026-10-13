@@ -73,6 +73,10 @@ fn capture_lifecycle_snapshot(
         requested_url,
         final_url: entry.page_vm().vm().document_runtime.document_url().clone(),
         status,
+        has_pending_credentialed_window_request: entry
+            .page_vm()
+            .vm()
+            .has_pending_credentialed_main_window_request(),
     })
 }
 

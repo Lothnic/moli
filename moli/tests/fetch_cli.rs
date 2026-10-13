@@ -3178,6 +3178,83 @@ fn cli_default_redirect_wait_follows_client_navigation_from_terminal_302() -> Re
 }
 
 #[test]
+fn cli_load_follows_current_document_credential_callback_navigation() -> Result<()> {
+    let runtime = tokio::runtime::Runtime::new()?;
+    let server = runtime.block_on(FixtureServer::spawn())?;
+    let url = server.url("/wait-until-credential-callback-navigation");
+    let output = run_fetch_cli_with_dump_and_args(&url, "html", &[])?;
+    let markdown = run_fetch_cli_with_dump_and_args(&url, "markdown", &[])?;
+    assert!(
+        markdown.status.success(),
+        "{}",
+        clean_output(&markdown.stderr)
+    );
+    assert!(
+        clean_output(&markdown.stdout).contains("credential-callback=navigation-done"),
+        "{}",
+        clean_output(&markdown.stdout)
+    );
+    runtime.block_on(server.shutdown());
+
+    assert!(
+        output.status.success(),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = clean_output(&output.stdout);
+    assert!(
+        stdout.contains("id=\"credential-callback-target\""),
+        "stdout={stdout}"
+    );
+    assert!(
+        !stdout.contains("id=\"credential-callback-source\""),
+        "the credential callback's same-origin navigation must replace the bootstrap Document: stdout={stdout}"
+    );
+    Ok(())
+}
+
+#[test]
+fn cli_load_does_not_wait_for_unrelated_long_timer_or_poll() -> Result<()> {
+    let runtime = tokio::runtime::Runtime::new()?;
+    let server = runtime.block_on(FixtureServer::spawn())?;
+    let url = server.url("/wait-until-unrelated-long-work");
+    let started = std::time::Instant::now();
+    let output = run_fetch_cli_with_dump_and_args(
+        &url,
+        "html",
+        &["--redirect-wait-ms", "3000", "--timeout", "5000"],
+    )?;
+    let elapsed = started.elapsed();
+    runtime.block_on(server.shutdown());
+
+    assert!(
+        output.status.success(),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = clean_output(&output.stdout);
+    assert!(
+        stdout.contains("id=\"unrelated-long-work-source\""),
+        "stdout={stdout}"
+    );
+    assert!(
+        !stdout.contains("data-long-poll-finished=\"true\""),
+        "the ordinary poll must remain outside Load completion: stdout={stdout}"
+    );
+    assert!(
+        !stdout.contains("data-long-timer-fired=\"true\""),
+        "the long timer must remain outside Load completion: stdout={stdout}"
+    );
+    assert!(
+        elapsed < std::time::Duration::from_millis(1500),
+        "unrelated timer or ordinary poll delayed Load completion: {elapsed:?}"
+    );
+    Ok(())
+}
+
+#[test]
 fn cli_terminal_302_without_navigation_waits_then_returns_its_body() -> Result<()> {
     let runtime = tokio::runtime::Runtime::new()?;
     let server = runtime.block_on(FixtureServer::spawn())?;
@@ -4630,6 +4707,52 @@ fn cli_obey_robots_applies_the_group_naming_the_configured_user_agent() -> Resul
     );
     assert_eq!(server.page_hits(), 1);
 
+    runtime.block_on(server.shutdown());
+    Ok(())
+}
+
+#[test]
+fn cli_credential_request_without_navigation_returns_current_body_after_bounded_grace() -> Result<()>
+{
+    let runtime = tokio::runtime::Runtime::new()?;
+    let server = runtime.block_on(FixtureServer::spawn())?;
+    let started = std::time::Instant::now();
+    let output = run_fetch_cli_with_dump_and_args(
+        &server.url("/wait-until-credential-no-navigation"),
+        "html",
+        &["--redirect-wait-ms", "350", "--timeout", "2500"],
+    )?;
+    runtime.block_on(server.shutdown());
+    assert!(output.status.success(), "{}", clean_output(&output.stderr));
+    let stdout = clean_output(&output.stdout);
+    assert!(
+        stdout.contains("Current body") && stdout.contains("data-ready=\"yes\""),
+        "{stdout}"
+    );
+    assert!(started.elapsed() < std::time::Duration::from_secs(2));
+    Ok(())
+}
+
+#[test]
+fn cli_markdown_virtual_resize_list_requires_explicit_layout() -> Result<()> {
+    let runtime = tokio::runtime::Runtime::new()?;
+    let server = runtime.block_on(FixtureServer::spawn())?;
+    let url = server.url("/virtual-resize-list");
+    let plain = run_fetch_cli_with_dump_and_args(&url, "markdown", &[])?;
+    assert!(plain.status.success(), "{}", clean_output(&plain.stderr));
+    assert!(clean_output(&plain.stdout).contains("List shell"));
+    assert!(!clean_output(&plain.stdout).contains("Virtual list child"));
+    let laid_out = run_fetch_cli_with_dump_and_args(&url, "markdown", &["--layout"])?;
+    assert!(
+        laid_out.status.success(),
+        "{}",
+        clean_output(&laid_out.stderr)
+    );
+    assert!(
+        clean_output(&laid_out.stdout).contains("Virtual list child"),
+        "{}",
+        clean_output(&laid_out.stdout)
+    );
     runtime.block_on(server.shutdown());
     Ok(())
 }

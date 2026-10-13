@@ -947,6 +947,7 @@ impl RendererOwnerHandle {
             RenderRuntimeTurn::ContinueLivePagePendingLocationNavigationPhaseOne {
                 token,
                 vm_creation_id,
+                target_stage,
                 follow_count,
                 completion,
             } => {
@@ -956,8 +957,17 @@ impl RendererOwnerHandle {
                     Err(error) => return Err(error).into(),
                 };
                 if entry.page_vm().creation_id != vm_creation_id {
+                    let document = entry.page_vm().document_lifecycle.identity();
                     self.restore_live_page_entry(token, entry);
-                    return RenderRuntimeDispatchOutcome::BackgroundComplete(Ok(()));
+                    return self
+                        .continue_live_page_navigation_post_parse_lifecycle_turn(
+                            token,
+                            document,
+                            target_stage,
+                            follow_count,
+                            completion,
+                        )
+                        .await;
                 }
                 let advance = advance_pending_phase_one_navigation_on_entry_via_local_task(
                     self.state.local_executor.clone(),
@@ -986,6 +996,7 @@ impl RendererOwnerHandle {
                             RenderRuntimeTurn::ContinueLivePagePendingLocationNavigationPhaseOne {
                                 token,
                                 vm_creation_id,
+                                target_stage,
                                 follow_count,
                                 completion,
                             },

@@ -188,6 +188,17 @@ impl ScriptVm {
             &mut moli_layout::LayoutPassResult<DomHandle>,
         ) -> Result<T, moli_layout::LayoutError>,
     ) -> Result<Option<T>, moli_layout::LayoutError> {
+        self.with_fresh_layout_pass_notifying_resize(request, consume, true)
+    }
+
+    pub(super) fn with_fresh_layout_pass_notifying_resize<T>(
+        &mut self,
+        request: moli_layout::LayoutPassRequest,
+        consume: impl FnOnce(
+            &mut moli_layout::LayoutPassResult<DomHandle>,
+        ) -> Result<T, moli_layout::LayoutError>,
+        notify_resize: bool,
+    ) -> Result<Option<T>, moli_layout::LayoutError> {
         // Font-source reconciliation is a pre-pass lifecycle step. CSS image
         // URLs come back from the actual box-construction traversal below.
         // Once the guard is entered, layout performs no JS, event-loop,
@@ -230,6 +241,9 @@ impl ScriptVm {
             && matches!(&result, Ok(Some(_)))
             && let Err(error) = self.with_default_context_scope(|scope, runtime_ptr| {
                 crate::observer_runtime::queue_intersection_checks(scope, runtime_ptr);
+                if notify_resize {
+                    crate::context_bootstrap::queue_resize_observer_checks(scope);
+                }
                 crate::native_bridge::element::queue_revealed_lazy_image_loads(
                     scope,
                     runtime_ptr,
