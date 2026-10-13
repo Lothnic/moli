@@ -86,12 +86,19 @@ impl<'a> Writer<'a> {
         self.desired.pop();
     }
 
-    pub(crate) fn end_link(&mut self, serial: usize) {
+    pub(crate) fn end_link(&mut self, serial: usize, fallback_label: Option<&str>) {
         self.flush_code();
         if self.last_link < serial {
-            // Empty anchors still carry a destination. Materialize the link
-            // after its leading whitespace, even without a text event.
-            self.prepare_inline('[');
+            if let Some(label) = fallback_label.filter(|label| !label.trim().is_empty()) {
+                // An empty anchor can still have an author-provided accessible
+                // name. Preserve that name inside the link instead of emitting
+                // an unusable empty label. Visible descendants remain primary.
+                self.text(label);
+            } else {
+                // Empty anchors still carry a destination. Materialize the link
+                // after its leading whitespace, even without a text event.
+                self.prepare_inline('[');
+            }
         }
         self.pop_style();
     }

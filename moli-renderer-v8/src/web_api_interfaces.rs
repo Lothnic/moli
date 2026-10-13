@@ -379,7 +379,7 @@ interfaces! {
     PerformanceTiming;
     PeriodicSyncEvent: ExtendableEvent;
     PeriodicSyncManager;
-    PermissionStatus;
+    PermissionStatus: EventTarget;
     Permissions;
     Plugin;
     PluginArray;

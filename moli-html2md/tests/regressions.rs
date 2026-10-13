@@ -58,6 +58,40 @@ fn empty_links_keep_destinations_across_adjacent_and_nested_elements() {
 }
 
 #[test]
+fn empty_links_use_their_own_accessible_label_without_replacing_visible_text() {
+    for (html, expected) in [
+        (
+            "<a href='/report' aria-label='Open report'></a>",
+            "[Open report](/report)",
+        ),
+        (
+            "<a href='/report' aria-label='Open report'>Visible report</a>",
+            "[Visible report](/report)",
+        ),
+        (
+            "<a href='/report' aria-label='  Open   report  '> </a>",
+            "[Open report](/report)",
+        ),
+        ("<a href='/report' aria-label='   '></a>", "[](/report)"),
+        (
+            "<a href='/report' aria-label='[Open] *report*'></a>",
+            r"[\[Open\] \*report\*](/report)",
+        ),
+        (
+            "<a href='/one' aria-label='One'><span></span></a><a href='/two' aria-label='Two'></a>",
+            "[One](/one)[Two](/two)",
+        ),
+        (
+            "<a href='/report' aria-label='Fallback'><img src='/cover.png' alt='Cover'></a>",
+            "[![Cover](/cover.png)](/report)",
+        ),
+        ("<a aria-label='No destination'></a>", ""),
+    ] {
+        assert_eq!(markdown(html, false), expected, "{html}");
+    }
+}
+
+#[test]
 fn href_without_a_destination_does_not_create_an_empty_markdown_link() {
     for html in [
         "<a>label</a>",
