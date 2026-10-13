@@ -10,13 +10,12 @@ use crate::native_bridge::element::{
     TextEditInputType, contenteditable_editing_host, dispatch_text_control_event,
     form_control_is_effectively_disabled, is_text_control,
     queue_text_control_document_selection_change_event, replace_contenteditable_selection,
-    replace_text_control_selection, text_control_value,
+    replace_text_control_selection, replace_text_control_selection_for_insert_html,
+    text_control_value,
 };
 use crate::{
     custom_elements,
     document_runtime::DomHandle,
-    dom::native::{NativeDom, NodeData},
-    parser::HtmlParser,
     util::{
         call_object_method, node_wrapper_from_handle, utf16_next_scalar_boundary,
         utf16_previous_scalar_boundary, utf16_replace_units_range_lossy,
@@ -681,14 +680,8 @@ fn exec_command_insert_html(
     let Some(target) = exec_command_insert_html_target(runtime) else {
         return false;
     };
-    let insertion_text = input_text_from_html_fragment(runtime, target, value);
-    replace_text_control_selection(
-        scope,
-        runtime_ptr,
-        target,
-        &insertion_text,
-        TextEditInputType::InsertText,
-    )
+    let insertion_text = super::insert_html::text_control_text_from_html(runtime, target, value);
+    replace_text_control_selection_for_insert_html(scope, runtime_ptr, target, &insertion_text)
 }
 
 fn exec_command_insert_html_target(runtime: &JsContextHost) -> Option<DomHandle> {
@@ -703,49 +696,6 @@ fn exec_command_insert_html_target(runtime: &JsContextHost) -> Option<DomHandle>
         return None;
     }
     Some(handle)
-}
-
-fn input_text_from_html_fragment(
-    runtime: &JsContextHost,
-    target: DomHandle,
-    value: &str,
-) -> String {
-    let parsed =
-        HtmlParser::with_scripting_enabled(runtime.node_document_scripting_enabled(target))
-            .parse_fragment_without_declarative_shadow_roots(
-                runtime.host_document().url().clone(),
-                "http://www.w3.org/1999/xhtml",
-                "body",
-                value.to_owned(),
-            );
-    let root = parsed
-        .body_node_id()
-        .unwrap_or_else(|| parsed.document_node_id());
-    let mut text = String::new();
-    for child in parsed.child_ids(root) {
-        append_input_fragment_text(&parsed, child, &mut text);
-    }
-    text
-}
-
-fn append_input_fragment_text(dom: &NativeDom, handle: DomHandle, text: &mut String) {
-    let Some(node) = dom.node(handle) else {
-        return;
-    };
-    if node.is_html_element_named("br") {
-        text.push('\n');
-        return;
-    }
-    match node.data() {
-        NodeData::Text(value) => text.push_str(value.data()),
-        NodeData::CDataSection(value) => text.push_str(value.data()),
-        NodeData::Document(_) | NodeData::Element(_) | NodeData::DocumentFragment(_) => {
-            for child in dom.child_ids(handle) {
-                append_input_fragment_text(dom, child, text);
-            }
-        }
-        NodeData::DocumentType(_) | NodeData::Comment(_) | NodeData::ProcessingInstruction(_) => {}
-    }
 }
 
 fn exec_command_delete_selection<'s>(

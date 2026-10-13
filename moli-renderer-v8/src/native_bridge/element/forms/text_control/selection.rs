@@ -122,17 +122,72 @@ pub(crate) fn replace_text_control_selection(
     replacement_text: &str,
     input_type: TextEditInputType,
 ) -> bool {
+    replace_text_control_selection_with_events(
+        scope,
+        runtime_ptr,
+        handle,
+        replacement_text,
+        input_type,
+        TextControlEditEvents::BeforeInputAndInput,
+    )
+}
+
+pub(crate) fn replace_text_control_selection_for_insert_html(
+    scope: &mut v8::PinScope<'_, '_>,
+    runtime_ptr: *mut JsContextHost,
+    handle: DomHandle,
+    replacement_text: &str,
+) -> bool {
+    let multiline = unsafe { &*runtime_ptr }
+        .dom_host()
+        .node(handle)
+        .and_then(Node::as_element)
+        .is_some_and(|element| element.is_html_textarea());
+    // DOM InsertHTML skips beforeinput. Textareas use the fragment editing
+    // command's unspecified inputType and null data, including for empty edits.
+    replace_text_control_selection_with_events(
+        scope,
+        runtime_ptr,
+        handle,
+        replacement_text,
+        if multiline {
+            TextEditInputType::None
+        } else {
+            TextEditInputType::InsertText
+        },
+        TextControlEditEvents::InputOnly {
+            include_noop: multiline,
+        },
+    )
+}
+
+#[derive(Clone, Copy)]
+enum TextControlEditEvents {
+    BeforeInputAndInput,
+    InputOnly { include_noop: bool },
+}
+
+fn replace_text_control_selection_with_events(
+    scope: &mut v8::PinScope<'_, '_>,
+    runtime_ptr: *mut JsContextHost,
+    handle: DomHandle,
+    replacement_text: &str,
+    input_type: TextEditInputType,
+    events: TextControlEditEvents,
+) -> bool {
     if !is_text_control(unsafe { &*runtime_ptr }, handle) {
         return false;
     }
 
-    if !dispatch_beforeinput(
-        scope,
-        runtime_ptr,
-        handle,
-        input_type,
-        input_type.data(replacement_text),
-    ) {
+    if matches!(events, TextControlEditEvents::BeforeInputAndInput)
+        && !dispatch_beforeinput(
+            scope,
+            runtime_ptr,
+            handle,
+            input_type,
+            input_type.data(replacement_text),
+        )
+    {
         return false;
     }
 
@@ -200,6 +255,18 @@ pub(crate) fn replace_text_control_selection(
         end,
         replacement_text,
     );
+    if matches!(
+        events,
+        TextControlEditEvents::InputOnly {
+            include_noop: false
+        }
+    ) && start == end
+        && replacement_units.is_empty()
+    {
+        // The value setter also reports dirty/user-edited state changes. An
+        // empty scripted input insertion must not turn those into an input event.
+        return true;
+    }
     let next_value = utf16_replace_units_range_lossy(
         &value_units,
         start,
@@ -215,7 +282,13 @@ pub(crate) fn replace_text_control_selection(
     let caret = u32::try_from(start.saturating_add(replacement_units.len())).unwrap_or(u32::MAX);
     let selection_changed =
         text_control_set_selection_range_internal(scope, runtime_ptr, handle, caret, caret);
-    if changed || selection_changed {
+    if changed
+        || selection_changed
+        || matches!(
+            events,
+            TextControlEditEvents::InputOnly { include_noop: true }
+        )
+    {
         // beforeinput describes the request; input describes the text actually
         // inserted after single-line normalization and maxlength truncation.
         let inserted_text = String::from_utf16_lossy(&replacement_units);
@@ -225,7 +298,7 @@ pub(crate) fn replace_text_control_selection(
             let _ = dispatch_public_event(scope, runtime_ptr, handle, event);
         }
     }
-    changed || selection_changed
+    changed || selection_changed || matches!(events, TextControlEditEvents::InputOnly { .. })
 }
 
 fn text_control_user_edit_replacement_units(

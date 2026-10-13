@@ -1322,7 +1322,21 @@ fn exec_command_insert_html_enforces_maxlength_in_utf16_units() {
 
     assert_eq!(
         result,
-        r#"{"supported":true,"enabledBeforeFocus":false,"enabled":true,"returned":true,"value":"👨‍👩‍👧‍","valueLength":9,"selectionStart":9,"selectionEnd":9,"events":["beforeinput","input"],"markupReturned":true,"markupValue":"A BC&","rangeValue":"AxB","rangeSelection":[2,2],"enabledReadonly":false,"readonlyReturned":false}"#
+        r#"{"supported":true,"enabledBeforeFocus":false,"enabled":true,"returned":true,"value":"👨‍👩‍👧‍","valueLength":9,"selectionStart":9,"selectionEnd":9,"events":["input"],"markupReturned":true,"markupValue":"A BC&","rangeValue":"AxB","rangeSelection":[2,2],"enabledReadonly":false,"readonlyReturned":false}"#
+    );
+}
+
+#[test]
+fn exec_command_insert_html_matches_chromium_text_control_matrix() {
+    let mut vm = new_storage_test_vm("https://exec-command-insert-html-matrix.test/");
+    let failures = vm
+        .eval(include_str!(
+            "../../../../tests/fixtures/exec-command-insert-html.js"
+        ))
+        .expect("InsertHTML text control matrix should evaluate");
+    assert_eq!(
+        failures, "[]",
+        "InsertHTML compatibility failures: {failures}"
     );
 }
 

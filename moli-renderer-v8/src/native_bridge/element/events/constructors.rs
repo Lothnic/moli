@@ -136,6 +136,7 @@ struct InputEventInitDeclaration<'scope> {
 
 #[derive(Clone, Copy)]
 pub(crate) enum TextEditInputType {
+    None,
     InsertText,
     InsertLineBreak,
     InsertFromDrop,
@@ -146,6 +147,7 @@ pub(crate) enum TextEditInputType {
 impl TextEditInputType {
     fn as_str(self) -> &'static str {
         match self {
+            Self::None => "",
             Self::InsertText => "insertText",
             Self::InsertLineBreak => "insertLineBreak",
             Self::InsertFromDrop => "insertFromDrop",
@@ -157,9 +159,10 @@ impl TextEditInputType {
     pub(crate) fn data(self, text: &str) -> Option<&str> {
         match self {
             Self::InsertText | Self::InsertFromDrop => Some(text),
-            Self::InsertLineBreak | Self::DeleteContentBackward | Self::DeleteContentForward => {
-                None
-            }
+            Self::None
+            | Self::InsertLineBreak
+            | Self::DeleteContentBackward
+            | Self::DeleteContentForward => None,
         }
     }
 }

@@ -34,6 +34,7 @@ mod detached_install;
 mod detached_objects;
 mod detached_surface;
 mod hit_test;
+mod insert_html;
 mod lifecycle;
 mod live_collections;
 mod queries;
