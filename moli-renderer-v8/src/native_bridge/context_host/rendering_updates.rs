@@ -191,6 +191,31 @@ impl JsContextHost {
         result
     }
 
+    pub(crate) fn report_resize_observer_loop_error_for_target(
+        &mut self,
+        scope: &mut v8::PinScope<'_, '_>,
+        host_ptr: *mut JsContextHost,
+        target: WindowDocumentTaskTarget,
+    ) -> Result<(), String> {
+        let Some(resolved) = self.resolve_authorized_window_document_task_context(scope, target)
+        else {
+            return Ok(());
+        };
+        let scope = &mut v8::ContextScope::new(scope, resolved.context);
+        let previous = target.dispatch_scope().enter(scope);
+        let result = crate::context_bootstrap::dispatch_window_error_event_with_details(
+            scope,
+            host_ptr,
+            "ResizeObserver loop completed with undelivered notifications.",
+            "",
+            0,
+            0,
+            None,
+        );
+        target.dispatch_scope().restore(scope, previous);
+        result
+    }
+
     pub(crate) fn queue_resize_observer_rendering_update(
         &mut self,
         scope: &mut v8::PinScope<'_, '_>,
