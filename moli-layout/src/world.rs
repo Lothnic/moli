@@ -918,6 +918,15 @@ where
             stack.extend(self.boxes[id.index()].children.iter().copied());
         }
 
+        // Most trees do not discard any construction boxes. Their IDs already
+        // form the final dense mapping; keep the pass-local allocation instead
+        // of moving every box and rebuilding every child vector unchanged.
+        if reachable.iter().all(|is_reachable| *is_reachable) {
+            self.display_contents_mapping
+                .retain(|_, ids| !ids.is_empty());
+            return;
+        }
+
         let mut remap = vec![None; self.boxes.len()];
         let mut next_index = 0;
         for (index, is_reachable) in reachable.iter().copied().enumerate() {

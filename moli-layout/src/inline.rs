@@ -2075,7 +2075,23 @@ impl InlineBuildInput {
         let mut style_parents = Vec::new();
         let mut style_samples = Vec::new();
         let mut resolved_runs = Vec::<(Range<usize>, usize)>::new();
-        for unit in &self.units {
+        // Source mapping, whitespace and selection still use individual units.
+        // Style conversion only needs a contiguous run with the same style,
+        // direct structural parent and paint state. Avoid repeating it for
+        // every character; unicode-range font selection remains per character.
+        for units in self.units.chunk_by(|left, right| {
+            left.style_box == right.style_box
+                && left.ancestors.last() == right.ancestors.last()
+                && left.control == right.control
+                && left.output_range.end == right.output_range.start
+        }) {
+            let unit = &units[0];
+            let output_range = unit.output_range.start
+                ..units
+                    .last()
+                    .expect("style chunks are nonempty")
+                    .output_range
+                    .end;
             let mut base_style = world.boxes[unit.style_box.index()]
                 .style
                 .parley_text_style();
@@ -2086,7 +2102,7 @@ impl InlineBuildInput {
             let structural_parent = unit.ancestors.last().copied().unwrap_or(self.root_style);
             if !parley.requires_character_font_resolution(&base_style) {
                 let sample = (!unit.control)
-                    .then(|| self.text[unit.output_range.clone()].chars().next())
+                    .then(|| self.text[output_range.clone()].chars().next())
                     .flatten();
                 parley.resolve_font_families(&mut base_style, None);
                 let style_slot = intern_resolved_inline_style(
@@ -2097,15 +2113,11 @@ impl InlineBuildInput {
                     structural_parent,
                     sample,
                 );
-                append_resolved_inline_run(
-                    &mut resolved_runs,
-                    unit.output_range.clone(),
-                    style_slot,
-                );
+                append_resolved_inline_run(&mut resolved_runs, output_range, style_slot);
                 continue;
             }
-            for (relative_start, character) in self.text[unit.output_range.clone()].char_indices() {
-                let start = unit.output_range.start + relative_start;
+            for (relative_start, character) in self.text[output_range.clone()].char_indices() {
+                let start = output_range.start + relative_start;
                 let end = start + character.len_utf8();
                 let mut style = base_style.clone();
                 parley.resolve_font_families(&mut style, Some(character));
