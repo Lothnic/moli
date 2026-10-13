@@ -657,7 +657,7 @@ async fn fresh_layout_resize_observer_updates_virtual_children_and_deduplicates_
 #[tokio::test]
 async fn resize_observer_same_depth_feedback_is_bounded() -> Result<()> {
     let config = BrowserConfig::default().with_layout_policy(LayoutPolicy::OnDemand);
-    let (_browser, mut page, server) = load_page_with_config(r#"<div id="box" style="width:120px;height:20px"></div><script>window.calls=0;window.feedback=false;const box=document.getElementById('box');new ResizeObserver(es=>{calls++;if(feedback)box.style.width=(es[0].contentRect.width+1)+'px'}).observe(box)</script>"#, config).await?;
+    let (_browser, mut page, server) = load_page_with_config(r#"<div id="box" style="width:120px;height:20px"></div><script>window.calls=0;window.feedback=false;window.errors=[];window.onerrorCalls=0;const box=document.getElementById('box');window.observer=new ResizeObserver(es=>{calls++;if(feedback)box.style.width=(es[0].contentRect.width+1)+'px'});addEventListener('error',e=>{errors.push({message:e.message,instance:e instanceof ErrorEvent,target:e.target===window,currentTarget:e.currentTarget===window,trusted:e.isTrusted,bubbles:e.bubbles,cancelable:e.cancelable,error:e.error,filename:e.filename,lineno:e.lineno,colno:e.colno});observer.disconnect();e.preventDefault()});window.onerror=()=>{onerrorCalls++;return true};observer.observe(box)</script>"#, config).await?;
     render_page_output_async(
         &mut page,
         &FetchCommandConfig {
@@ -679,6 +679,224 @@ async fn resize_observer_same_depth_feedback_is_bounded() -> Result<()> {
         page.evaluate_runtime_expression_async("String(calls)")
             .await?["value"],
         "1"
+    );
+    let result = page
+        .evaluate_runtime_expression_async("JSON.stringify({errors,onerrorCalls})")
+        .await?;
+    let result: Value = serde_json::from_str(result["value"].as_str().unwrap())?;
+    assert_eq!(
+        result,
+        json!({"errors":[{"message":"ResizeObserver loop completed with undelivered notifications.","instance":true,"target":true,"currentTarget":true,"trusted":true,"bubbles":false,"cancelable":true,"error":null,"filename":"","lineno":0,"colno":0}],"onerrorCalls":1})
+    );
+    server.abort();
+    Ok(())
+}
+
+#[tokio::test]
+async fn frame_dump_strip_applies_to_every_document_without_changing_live_content() -> Result<()> {
+    let escape = |html: &str| {
+        html.replace('&', "&amp;")
+            .replace('"', "&quot;")
+            .replace('<', "&lt;")
+    };
+    let nested = "<nav>Nested UI</nav><main>Nested body</main><style>nested_css_marker{color:red}</style><script>window.nestedScriptMarker=true</script>";
+    let child = format!(
+        "<nav>Child UI</nav><form>Child form<button>Child button</button></form><main>Child body</main><style>child_css_marker{{color:red}}</style><script>window.childScriptMarker=true</script><iframe srcdoc=\"{}\"></iframe>",
+        escape(nested)
+    );
+    let html = format!(
+        "<nav>Parent UI</nav><main>Parent body</main><iframe srcdoc=\"{}\"></iframe>",
+        escape(&child)
+    );
+    let (_browser, mut page, server) = load_page(&html).await?;
+    for format in [DumpFormat::Markdown, DumpFormat::Html] {
+        let original = render_page_dump_with_options_async(
+            &mut page,
+            format,
+            StripOptions::default(),
+            false,
+            true,
+            false,
+            None,
+        )
+        .await?;
+        for text in [
+            "Parent UI",
+            "Child UI",
+            "Child form",
+            "Child button",
+            "Nested UI",
+        ] {
+            assert!(original.contains(text), "missing {text}: {original}");
+        }
+        let ui_only = render_page_dump_with_options_async(
+            &mut page,
+            format,
+            StripOptions {
+                ui: true,
+                ..Default::default()
+            },
+            false,
+            true,
+            false,
+            None,
+        )
+        .await?;
+        for text in ["Parent body", "Child body", "Nested body"] {
+            assert!(ui_only.contains(text), "missing {text}: {ui_only}");
+        }
+        for text in [
+            "Parent UI",
+            "Child UI",
+            "Child form",
+            "Child button",
+            "Nested UI",
+        ] {
+            assert!(!ui_only.contains(text), "leaked {text}: {ui_only}");
+        }
+        if format == DumpFormat::Html {
+            for text in [
+                "child_css_marker",
+                "nested_css_marker",
+                "childScriptMarker",
+                "nestedScriptMarker",
+            ] {
+                assert!(
+                    ui_only.contains(text),
+                    "UI stripping removed non-UI content {text}: {ui_only}"
+                );
+            }
+        }
+        let stripped = render_page_dump_with_options_async(
+            &mut page,
+            format,
+            StripOptions {
+                ui: true,
+                js: true,
+                css: true,
+            },
+            false,
+            true,
+            false,
+            None,
+        )
+        .await?;
+        for text in ["Parent body", "Child body", "Nested body"] {
+            assert!(stripped.contains(text), "missing {text}: {stripped}");
+        }
+        for text in [
+            "Parent UI",
+            "Child UI",
+            "Child form",
+            "Child button",
+            "Nested UI",
+            "child_css_marker",
+            "nested_css_marker",
+            "childScriptMarker",
+            "nestedScriptMarker",
+        ] {
+            assert!(!stripped.contains(text), "leaked {text}: {stripped}");
+        }
+        let after = render_page_dump_with_options_async(
+            &mut page,
+            format,
+            StripOptions::default(),
+            false,
+            true,
+            false,
+            None,
+        )
+        .await?;
+        assert_eq!(
+            after, original,
+            "dump stripping must not mutate live documents"
+        );
+    }
+    server.abort();
+    Ok(())
+}
+
+#[tokio::test]
+async fn resize_loop_error_is_reported_once_to_its_child_window() -> Result<()> {
+    let child = r#"<div id="box" style="width:120px;height:20px"></div><script>
+        window.errors=[];window.calls=0;window.feedback=false;
+        const box=document.getElementById('box');
+        window.observer=new ResizeObserver(es=>{calls++;if(feedback)box.style.width=(es[0].contentRect.width+1)+'px'});
+        addEventListener('error',e=>{errors.push({message:e.message,instance:e instanceof ErrorEvent,target:e.target===window,currentTarget:e.currentTarget===window,trusted:e.isTrusted});observer.disconnect();e.preventDefault()});
+        window.startFeedback=()=>{calls=0;feedback=true;box.style.width='140px'};
+        observer.observe(box);
+    </script>"#;
+    let escaped = child
+        .replace('&', "&amp;")
+        .replace('"', "&quot;")
+        .replace('<', "&lt;");
+    let html = format!(
+        "<script>window.parentErrors=0;addEventListener('error',()=>parentErrors++)</script><iframe id=\"first\" srcdoc=\"{escaped}\"></iframe><iframe id=\"second\" srcdoc=\"{escaped}\"></iframe>"
+    );
+    let config = BrowserConfig::default().with_layout_policy(LayoutPolicy::OnDemand);
+    let (_browser, mut page, server) = load_page_with_config(&html, config).await?;
+    render_page_output_async(
+        &mut page,
+        &FetchCommandConfig {
+            dump_mode: Some(DumpFormat::Screenshot),
+            ..Default::default()
+        },
+    )
+    .await?;
+    page.evaluate_runtime_expression_async(
+        "document.getElementById('first').contentWindow.startFeedback()",
+    )
+    .await?;
+    page.evaluate_runtime_expression_with_await_async("new Promise((resolve,reject)=>{const end=Date.now()+2000;const poll=()=>document.getElementById('first').contentWindow.errors.length?resolve():Date.now()>end?reject(new Error('child resize error missing')):setTimeout(poll,1);poll()})", true).await?;
+    let result = page.evaluate_runtime_expression_async("JSON.stringify({parent:parentErrors,first:document.getElementById('first').contentWindow.errors,second:document.getElementById('second').contentWindow.errors,calls:document.getElementById('first').contentWindow.calls})").await?;
+    let result: Value = serde_json::from_str(result["value"].as_str().unwrap())?;
+    assert_eq!(
+        result,
+        json!({"parent":0,"first":[{"message":"ResizeObserver loop completed with undelivered notifications.","instance":true,"target":true,"currentTarget":true,"trusted":true}],"second":[],"calls":1})
+    );
+    render_page_output_async(
+        &mut page,
+        &FetchCommandConfig {
+            dump_mode: Some(DumpFormat::Screenshot),
+            ..Default::default()
+        },
+    )
+    .await?;
+    let counts = page.evaluate_runtime_expression_async("JSON.stringify([parentErrors,document.getElementById('first').contentWindow.errors.length,document.getElementById('second').contentWindow.errors.length])").await?;
+    assert_eq!(counts["value"], "[0,1,0]");
+    server.abort();
+    Ok(())
+}
+
+#[tokio::test]
+async fn resize_loop_error_is_reported_once_at_iteration_limit() -> Result<()> {
+    let config = BrowserConfig::default().with_layout_policy(LayoutPolicy::OnDemand);
+    let (_browser, mut page, server) = load_page_with_config(r#"<body><script>
+        window.nodes=[];window.calls=0;window.feedback=false;window.errors=[];
+        let parent=document.body;
+        for(let i=0;i<40;i++){const node=document.createElement('div');node.style.cssText='width:120px;height:20px';parent.appendChild(node);nodes.push(node);parent=node}
+        window.observer=new ResizeObserver(entries=>{calls++;if(feedback){const next=nodes.indexOf(entries[0].target)+1;if(nodes[next])nodes[next].style.width=(140+next)+'px'}});
+        addEventListener('error',e=>{errors.push({message:e.message,target:e.target===window,instance:e instanceof ErrorEvent});observer.disconnect();e.preventDefault()});
+        nodes.forEach(node=>observer.observe(node));
+    </script>"#, config).await?;
+    render_page_output_async(
+        &mut page,
+        &FetchCommandConfig {
+            dump_mode: Some(DumpFormat::Screenshot),
+            ..Default::default()
+        },
+    )
+    .await?;
+    page.evaluate_runtime_expression_async("calls=0;feedback=true;nodes[0].style.width='140px'")
+        .await?;
+    page.evaluate_runtime_expression_with_await_async("new Promise((resolve,reject)=>{const end=Date.now()+5000;const poll=()=>calls>=32?resolve():Date.now()>end?reject(new Error('resize feedback did not reach the bound')):setTimeout(poll,1);poll()})", true).await?;
+    let result = page
+        .evaluate_runtime_expression_async("JSON.stringify({calls,errors})")
+        .await?;
+    let result: Value = serde_json::from_str(result["value"].as_str().unwrap())?;
+    assert_eq!(
+        result,
+        json!({"calls":32,"errors":[{"message":"ResizeObserver loop completed with undelivered notifications.","target":true,"instance":true}]})
     );
     server.abort();
     Ok(())
