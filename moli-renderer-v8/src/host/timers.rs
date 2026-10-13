@@ -199,6 +199,8 @@ struct ScheduledTimerTask {
     callback: ScheduledTimerCallback,
     owner: ScheduledTimerOwner,
     is_interval: bool,
+    delay_ms: u64,
+    queued_at: Instant,
     extra_args: Vec<v8::Global<v8::Value>>,
 }
 
@@ -216,6 +218,27 @@ impl ScheduledTimerTask {
             RendererPageTimerSelection::ExcludeUnexpiredIdleCallbacks => {
                 !self.is_unexpired_idle_callback_at(now_ms)
             }
+            RendererPageTimerSelection::PostLoadReady {
+                animation_frame_queued_at_or_before,
+            } => self.is_post_load_ready(animation_frame_queued_at_or_before),
+        }
+    }
+
+    fn is_post_load_ready(&self, animation_frame_queued_at_or_before: Instant) -> bool {
+        if self.is_interval {
+            return false;
+        }
+        match &self.callback {
+            ScheduledTimerCallback::Function(_) | ScheduledTimerCallback::Source(_) => {
+                self.delay_ms == 0
+            }
+            ScheduledTimerCallback::WindowWebIdl(callback) => {
+                (callback.is_animation_frame()
+                    && self.queued_at <= animation_frame_queued_at_or_before)
+                    || (callback.is_timer() && self.delay_ms == 0)
+            }
+            ScheduledTimerCallback::InternalFunction(_)
+            | ScheduledTimerCallback::ResourceTimingBufferFull { .. } => false,
         }
     }
 }
@@ -290,15 +313,18 @@ impl HostTimeoutScheduler {
         ) else {
             return;
         };
+        let queued_at = Instant::now();
         self.scheduler.schedule_after(
             ScheduledTimerTask {
                 callback: ScheduledTimerCallback::InternalFunction(callback),
                 owner,
                 is_interval: false,
+                delay_ms: 0,
+                queued_at,
                 extra_args: Vec::new(),
             },
             0,
-            Instant::now(),
+            queued_at,
         );
     }
 
@@ -334,16 +360,19 @@ impl HostTimeoutScheduler {
         ) else {
             return 0;
         };
+        let queued_at = Instant::now();
         self.scheduler
             .schedule_after(
                 ScheduledTimerTask {
                     callback: ScheduledTimerCallback::Function(callback),
                     owner,
                     is_interval: false,
+                    delay_ms,
+                    queued_at,
                     extra_args,
                 },
                 delay_ms,
-                Instant::now(),
+                queued_at,
             )
             .get()
     }
@@ -487,16 +516,18 @@ impl HostTimeoutScheduler {
         ) else {
             return 0;
         };
+        let queued_at = Instant::now();
         let task = ScheduledTimerTask {
             callback: ScheduledTimerCallback::WindowWebIdl(callback),
             owner,
             is_interval,
+            delay_ms: u64::from(delay_ms),
+            queued_at,
             extra_args,
         };
-        let now = Instant::now();
         let id = self
             .scheduler
-            .schedule_after(task, u64::from(delay_ms), now);
+            .schedule_after(task, u64::from(delay_ms), queued_at);
         id.get()
     }
 
@@ -531,6 +562,7 @@ impl HostTimeoutScheduler {
         } else {
             timer_context_realm_token(scope, context)
         };
+        let queued_at = Instant::now();
         self.scheduler
             .schedule_after(
                 ScheduledTimerTask {
@@ -544,10 +576,12 @@ impl HostTimeoutScheduler {
                     }),
                     owner,
                     is_interval: false,
+                    delay_ms: u64::from(delay_ms),
+                    queued_at,
                     extra_args,
                 },
                 u64::from(delay_ms),
-                Instant::now(),
+                queued_at,
             )
             .get()
     }
@@ -583,6 +617,7 @@ impl HostTimeoutScheduler {
         } else {
             timer_context_realm_token(scope, context)
         };
+        let queued_at = Instant::now();
         self.scheduler
             .schedule_after(
                 ScheduledTimerTask {
@@ -596,10 +631,12 @@ impl HostTimeoutScheduler {
                     }),
                     owner,
                     is_interval: true,
+                    delay_ms: u64::from(delay_ms),
+                    queued_at,
                     extra_args,
                 },
                 u64::from(delay_ms),
-                Instant::now(),
+                queued_at,
             )
             .get()
     }
@@ -620,6 +657,7 @@ impl HostTimeoutScheduler {
         ) else {
             return 0;
         };
+        let queued_at = Instant::now();
         self.scheduler
             .schedule_after(
                 ScheduledTimerTask {
@@ -630,10 +668,12 @@ impl HostTimeoutScheduler {
                     },
                     owner,
                     is_interval: false,
+                    delay_ms: 0,
+                    queued_at,
                     extra_args: Vec::new(),
                 },
                 0,
-                Instant::now(),
+                queued_at,
             )
             .get()
     }
@@ -779,6 +819,16 @@ impl HostTimeoutScheduler {
             .next_ready_deadline_matching(Instant::now(), |task| {
                 task.matches_selection(selection, now_ms)
             })
+    }
+
+    pub(crate) fn next_post_load_ready_deadline_at_or_before(
+        &self,
+        cutoff: Instant,
+        animation_frame_queued_at_or_before: Instant,
+    ) -> Option<Instant> {
+        self.scheduler.next_ready_deadline_matching(cutoff, |task| {
+            task.is_post_load_ready(animation_frame_queued_at_or_before)
+        })
     }
 
     fn run_timer(

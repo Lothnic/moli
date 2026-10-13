@@ -11,6 +11,14 @@ use crate::{
 };
 
 impl Page {
+    pub(crate) async fn complete_post_load_ready_tasks(&mut self) -> Result<()> {
+        self.dispatch_unit_page_command_async(
+            RendererPageCommand::CompletePostLoadReadyTasks,
+            "complete post-load ready tasks",
+        )
+        .await
+    }
+
     pub async fn ms_to_next_timeout(&mut self) -> Result<Option<u64>> {
         let reply = self
             .dispatch_page_command_async(RendererPageCommand::MsToNextTimeout)

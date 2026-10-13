@@ -498,6 +498,58 @@ async fn fetch_done_does_not_wait_for_future_interval_timers() -> Result<()> {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn fetch_done_consumes_one_queued_render_turn_without_waiting_for_background_timers()
+-> Result<()> {
+    let server = FixtureServer::spawn().await?;
+    let browser = Browser::new(AppConfig::default())?;
+
+    let page = tokio::time::timeout(
+        Duration::from_secs(1),
+        browser.fetch_with_wait_until(
+            &server.url("/runtime/post-load-ready-turn"),
+            RenderedDomWaitUntil::Done,
+            Duration::from_millis(750),
+        ),
+    )
+    .await
+    .context("done should settle the queued render turn without waiting for background timers")??;
+
+    let html = page.serialize_html_async().await?;
+    assert!(
+        html.contains("<table id=\"live-demo\"><tbody><tr><td>ready</td></tr></tbody></table>"),
+        "the post-load rAF, zero-delay task, and microtask chain should reach the snapshot: {html}"
+    );
+    assert!(
+        !html.contains("data-fallback=\"ran\""),
+        "the five-second fallback must stay pending: {html}"
+    );
+    server.shutdown().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn fetch_load_stops_at_the_exact_lifecycle_boundary() -> Result<()> {
+    let server = FixtureServer::spawn().await?;
+    let browser = Browser::new(AppConfig::default())?;
+
+    let page = browser
+        .fetch_with_wait_until(
+            &server.url("/runtime/post-load-ready-turn"),
+            RenderedDomWaitUntil::Load,
+            Duration::from_millis(750),
+        )
+        .await?;
+
+    let html = page.serialize_html_async().await?;
+    assert!(
+        !html.contains("id=\"live-demo\""),
+        "load must not settle work queued after its exact lifecycle boundary: {html}"
+    );
+    server.shutdown().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn fetch_allow_http_error_materializes_error_status_pages() -> Result<()> {
     let server = FixtureServer::spawn().await?;
     let browser = Browser::new(AppConfig::default())?;
@@ -2147,6 +2199,11 @@ async fn best_effort_page_readiness_consumes_only_the_remaining_fetch_deadline()
             "/wait-until-slow-interval-dom-mutation",
             "id=\"mutation-count\"",
         ),
+        (
+            RenderedDomWaitUntil::Done,
+            "/wait-until-slow-interval-dom-mutation",
+            "id=\"mutation-count\"",
+        ),
     ] {
         // The main response costs 500 ms. Readiness must receive only the
         // roughly 500 ms left in this one-second plan, not a fresh second.
@@ -2216,6 +2273,10 @@ async fn page_fetch_wait_until_apis_do_not_restart_best_effort_timeout() -> Resu
             RenderedDomWaitUntil::DomStable,
             "/wait-until-slow-interval-dom-mutation",
         ),
+        (
+            RenderedDomWaitUntil::Done,
+            "/wait-until-slow-interval-dom-mutation",
+        ),
     ] {
         let started = std::time::Instant::now();
         let page = browser
@@ -2241,6 +2302,7 @@ async fn best_effort_readiness_does_not_soften_a_base_lifecycle_timeout() -> Res
     for wait_until in [
         RenderedDomWaitUntil::NetworkIdle,
         RenderedDomWaitUntil::DomStable,
+        RenderedDomWaitUntil::Done,
     ] {
         // No Page exists at 200 ms because the main response itself takes
         // 500 ms. Best effort applies only after the Load/DCL base boundary.

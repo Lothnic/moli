@@ -19,6 +19,23 @@ const WAIT_UNTIL_DOMCONTENTLOADED_RUNTIME_SCRIPT_VERY_SLOW_HTML: &str = "<!docty
 // negative assertion breaks. 300ms leaves a comfortable margin for both
 // snapshot timing and the 5s test deadline (timer + fetch RTT << 5s).
 const WAIT_UNTIL_DELAYED_FETCH_HTML: &str = "<!doctype html><html><body data-state=\"init\"><script>window.addEventListener('load', () => { setTimeout(() => { fetch('/wait-until-data').then(r => r.text()).then(text => { document.body.setAttribute('data-state', text); const main = document.createElement('main'); main.id = 'late'; main.textContent = text; document.body.appendChild(main); }); }, 300); });</script></body></html>";
+const WAIT_UNTIL_POST_LOAD_EXTERNAL_SCRIPT_HTML: &str = r#"<!doctype html>
+<html><head><title>post-load external script</title></head><body>
+<main id="initial">initial</main>
+<script>
+window.addEventListener('load', () => {
+  const script = document.createElement('script');
+  script.src = '/assets/runtime_owned_in_order_load_slow.js';
+  script.onload = () => {
+    const table = document.createElement('table');
+    table.id = 'post-load-results';
+    table.innerHTML = '<tbody><tr><td>rendered result</td></tr></tbody>';
+    document.body.appendChild(table);
+  };
+  document.head.appendChild(script);
+});
+</script>
+</body></html>"#;
 const WAIT_UNTIL_COMPLETE_DELAYED_DOM_MUTATION_HTML: &str = "<!doctype html><html><body data-state=\"init\"><script>window.addEventListener('load', () => { setTimeout(() => { document.body.setAttribute('data-late-complete', 'yes'); const main = document.createElement('main'); main.id = 'late-complete'; main.textContent = 'late-complete'; document.body.appendChild(main); }, 800); });</script></body></html>";
 const WAIT_UNTIL_COMPLETE_SLOW_FETCH_HTML: &str = "<!doctype html><html><body data-state=\"init\"><script>window.addEventListener('load', () => { fetch('/wait-until-very-slow-data').then(r => r.text()).then(text => { document.body.setAttribute('data-state', text); const main = document.createElement('main'); main.id = 'late-slow-fetch'; main.textContent = text; document.body.appendChild(main); }); });</script></body></html>";
 const WAIT_UNTIL_COMPLETE_SLOW_XHR_HTML: &str = "<!doctype html><html><body data-state=\"init\"><script>window.addEventListener('load', () => { const xhr = new XMLHttpRequest(); xhr.open('GET', '/wait-until-very-slow-data'); xhr.onload = () => { document.body.setAttribute('data-state', xhr.responseText); const main = document.createElement('main'); main.id = 'late-slow-xhr'; main.textContent = xhr.responseText; document.body.appendChild(main); }; xhr.send(); });</script></body></html>";
@@ -275,6 +292,10 @@ pub(super) fn add_wait_routes(router: Router) -> Router {
         .route(
             "/wait-until-delayed-fetch",
             get(wait_until_delayed_fetch_page),
+        )
+        .route(
+            "/wait-until-post-load-external-script",
+            get(wait_until_post_load_external_script_page),
         )
         .route(
             "/wait-until-complete-delayed-dom-mutation",
@@ -662,6 +683,10 @@ async fn wait_until_domcontentloaded_runtime_script_very_slow_page() -> Html<&'s
 
 async fn wait_until_delayed_fetch_page() -> Html<&'static str> {
     Html(WAIT_UNTIL_DELAYED_FETCH_HTML)
+}
+
+async fn wait_until_post_load_external_script_page() -> Html<&'static str> {
+    Html(WAIT_UNTIL_POST_LOAD_EXTERNAL_SCRIPT_HTML)
 }
 
 async fn wait_until_complete_delayed_dom_mutation_page() -> Html<&'static str> {

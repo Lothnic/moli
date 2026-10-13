@@ -163,12 +163,74 @@ impl RendererOwnerHandle {
                     },
                 ))
             }
+            RendererPageCommand::CompletePostLoadReadyTasks => {
+                self.complete_post_load_ready_tasks(token, capture_policy)
+                    .await
+            }
             command => {
                 return self
                     .run_live_page_command_turn_inline(token, command, capture_policy)
                     .await;
             }
         }
+    }
+
+    async fn complete_post_load_ready_tasks(
+        &self,
+        token: RendererPageToken,
+        capture_policy: super::RendererPageStateCapturePolicy,
+    ) -> RenderRuntimeDispatchOutcome {
+        // One browser frame is currently 16 ms. The extra margin absorbs
+        // scheduling jitter without admitting later application timers.
+        const POST_LOAD_READY_WINDOW: Duration = Duration::from_millis(20);
+        const MAX_READY_TASKS: usize = 16;
+
+        let mut entry = match take_entry_for_command_on_bound_owner_local_store(token) {
+            Ok(entry) => entry,
+            Err(error) => return Err(error).into(),
+        };
+        let animation_frame_cutoff = Instant::now();
+        let quiet_deadline = animation_frame_cutoff
+            .checked_add(POST_LOAD_READY_WINDOW)
+            .unwrap_or(animation_frame_cutoff);
+        let timer_selection = crate::page_task_queue::RendererPageTimerSelection::PostLoadReady {
+            animation_frame_queued_at_or_before: animation_frame_cutoff,
+        };
+        for _ in 0..MAX_READY_TASKS {
+            let Some(deadline) = entry
+                .page_vm()
+                .vm()
+                .next_post_load_ready_deadline_at_or_before(quiet_deadline, animation_frame_cutoff)
+            else {
+                break;
+            };
+            if deadline > Instant::now() {
+                tokio::time::sleep_until(deadline.into()).await;
+            }
+            let task = crate::page_task_queue::RendererPageSchedulerTask::Timer {
+                deadline,
+                selection: timer_selection,
+            };
+            let executor = entry.page_vm().local_executor.clone();
+            let loader = entry.page_vm().request_client.clone();
+            let (next_entry, result) =
+                advance_page_owner_one_turn_via_local_task(executor, entry, task, loader).await;
+            entry = next_entry;
+            if let Err(error) = result {
+                self.restore_live_page_entry(token, entry);
+                return Err(error).into();
+            }
+        }
+        self.complete_live_page_command_turn(
+            token,
+            entry,
+            RendererPageReply::Unit,
+            false,
+            None,
+            None,
+            capture_policy,
+        )
+        .await
     }
 
     pub(super) fn begin_live_page_runtime_expression_await(

@@ -242,6 +242,9 @@ pub(crate) struct RendererPageTaskProducerRoutes {
 pub(crate) enum RendererPageTimerSelection {
     AnyReady,
     ExcludeUnexpiredIdleCallbacks,
+    PostLoadReady {
+        animation_frame_queued_at_or_before: Instant,
+    },
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

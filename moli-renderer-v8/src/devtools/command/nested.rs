@@ -109,6 +109,7 @@ impl RendererPageCommand {
             | Self::WaitForScriptTruthy { .. }
             | Self::WaitForSubresourceResponse { .. }
             | Self::CompleteChildFrameLifecycleWorkBestEffort { .. }
+            | Self::CompletePostLoadReadyTasks
             | Self::SetDocumentContent { .. }
             | Self::NavigateChildFrame { .. }
             | Self::NavigateTopLevelSameDocument { .. }
