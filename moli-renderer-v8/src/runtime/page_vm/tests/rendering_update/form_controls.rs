@@ -1,5 +1,225 @@
 use super::*;
 
+#[tokio::test(flavor = "current_thread")]
+async fn empty_text_control_caret_keeps_control_opacity_transform_and_clip() {
+    run_page_vm_async_test(async move {
+        let loader = crate::network::ResourceRequestClient::new(&FetchConfig::default())?;
+        let mut page = test_page_vm_with_loader_and_document_url(
+            &loader,
+            Vec::new(),
+            Url::parse("https://example.com/control-caret-effects.html")?,
+        );
+        page.vm_mut().eval(
+            r#"
+document.head.innerHTML=`<style>
+html,body{margin:0;background:white}
+input{display:block;box-sizing:border-box;width:220px;height:100px;border:0;
+  padding:8px;outline:none;background:white;caret-color:red;font:20px sans-serif}
+::placeholder{font-size:48px;opacity:0}
+</style>`;
+document.body.innerHTML='<input id=field placeholder=Example>';
+document.getElementById('field').focus();
+'installed'
+"#,
+        )?;
+        page.vm_mut().sync_live_document_style_sources();
+        let mut reference: Option<moli_layout::PaintRect> = None;
+        for (state, styles) in [
+            ("normal", ""),
+            ("translated", "transform:translate(17px,11px)"),
+            ("translucent", "opacity:0.5"),
+            ("transparent", "opacity:0"),
+            ("clipped", "clip-path:inset(0 0 0 50%)"),
+        ] {
+            page.vm_mut().eval(&format!(
+                "document.getElementById('field').style.cssText={};'updated'",
+                serde_json::to_string(styles)?,
+            ))?;
+            let snapshot = page
+                .vm_mut()
+                .screenshot_layout_snapshot(moli_layout::PaintViewport::new(260, 140, 1.0))?
+                .expect("control caret effects layout");
+            if matches!(state, "normal" | "translated") {
+                let caret = snapshot
+                    .fragments
+                    .iter()
+                    .find_map(|fragment| match fragment {
+                        moli_layout::PaintFragment::Fill {
+                            shape: moli_layout::PaintShape::Rect(rect),
+                            brush: moli_layout::PaintBrush::Solid(color),
+                            transform,
+                            ..
+                        } if *color == moli_layout::PaintColor::new(1.0, 0.0, 0.0, 1.0)
+                            && rect.width == 1.5 =>
+                        {
+                            Some(transform.map_rect(*rect).bounding_rect())
+                        }
+                        _ => None,
+                    })
+                    .expect("editor caret paint");
+                if let Some(reference) = reference {
+                    assert_eq!(
+                        caret,
+                        moli_layout::PaintRect::new(
+                            reference.x + 17.0,
+                            reference.y + 11.0,
+                            reference.width,
+                            reference.height
+                        )
+                    );
+                } else {
+                    reference = Some(caret);
+                }
+            }
+            let image = moli_paint::raster_snapshot(&snapshot)?;
+            let pixels = image.rgba.chunks_exact(4);
+            match state {
+                "transparent" | "clipped" => assert!(
+                    !pixels
+                        .clone()
+                        .any(|p| i16::from(p[0]) - i16::from(p[1]) > 25),
+                    "{state}: the control's effects also apply to the caret",
+                ),
+                "translucent" => assert!(
+                    pixels
+                        .clone()
+                        .any(|p| p[0] > 240 && (100..=160).contains(&p[1]) && p[1] == p[2]),
+                    "the caret must be composited with the control's opacity",
+                ),
+                _ => assert!(pixels.clone().any(|p| p[0] > 200 && p[1] < 50 && p[2] < 50)),
+            }
+        }
+        Ok::<_, anyhow::Error>(())
+    })
+    .await
+    .expect("control caret effects fixture");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn placeholder_opacity_does_not_hide_empty_text_control_carets() {
+    assert_placeholder_style_keeps_empty_editor_caret(&["opacity:1", "opacity:0"]).await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn placeholder_font_metrics_do_not_change_empty_text_control_carets() {
+    assert_placeholder_style_keeps_empty_editor_caret(&[
+        "font-size:20px;line-height:normal",
+        "font-size:48px;line-height:96px",
+    ])
+    .await;
+}
+
+async fn assert_placeholder_style_keeps_empty_editor_caret(
+    placeholder_styles: &'static [&'static str],
+) {
+    run_page_vm_async_test(async move {
+        let loader = crate::network::ResourceRequestClient::new(&FetchConfig::default())?;
+        let mut page = test_page_vm_with_loader_and_document_url(
+            &loader,
+            Vec::new(),
+            Url::parse("https://example.com/placeholder-caret.html")?,
+        );
+        page.vm_mut().eval(r#"
+document.head.innerHTML=`<style>
+html,body{margin:0;background:white}
+input,textarea{display:block;box-sizing:border-box;width:220px;height:100px;
+  border:0;padding:8px;outline:none;background:white;color:black;
+  caret-color:red;font:20px sans-serif}
+</style><style id=placeholder-style></style>`;
+'installed'
+"#)?;
+        for tag in ["input", "textarea"] {
+            page.vm_mut().eval(&format!(
+                "document.body.innerHTML='<{tag} id=field></{tag}>';document.getElementById('field').focus();'focused'"
+            ))?;
+            page.vm_mut().sync_live_document_style_sources();
+            let mut reference = None;
+            // Blink keeps the empty inner editor separate from the placeholder
+            // sibling (TextControlInnerEditorElement / UpdatePlaceholderText).
+            for placeholder_style in std::iter::once(None)
+                .chain(placeholder_styles.iter().copied().map(Some))
+            {
+                let script = if let Some(style) = placeholder_style {
+                    format!(
+                        "document.getElementById('field').placeholder='Example';document.getElementById('placeholder-style').textContent={};'updated'",
+                        serde_json::to_string(&format!("::placeholder{{color:black;{style}}}"))?,
+                    )
+                } else {
+                    "document.getElementById('placeholder-style').textContent='';'reference'".to_owned()
+                };
+                page.vm_mut().eval(&script)?;
+                let snapshot = page.vm_mut().screenshot_layout_snapshot(
+                    moli_layout::PaintViewport::new(260, 140, 1.0),
+                )?.expect("placeholder caret layout");
+                let image = moli_paint::raster_snapshot(&snapshot)?;
+                let red_pixels = image.rgba.chunks_exact(4).enumerate().filter_map(|(index, pixel)| {
+                    (pixel[0] > 200 && pixel[1] < 50 && pixel[2] < 50 && pixel[3] > 200)
+                        .then_some((index as u32 % image.width, index as u32 / image.width))
+                }).collect::<Vec<_>>();
+                assert!(!red_pixels.is_empty(), "{tag}/{placeholder_style:?}: the caret must remain visible after compositing");
+                if let Some(reference) = &reference {
+                    assert_eq!(&red_pixels, reference, "{tag}/{placeholder_style:?}: placeholder styling must not change caret position or size");
+                } else {
+                    reference = Some(red_pixels);
+                }
+            }
+        }
+        Ok::<_, anyhow::Error>(())
+    }).await.expect("placeholder caret independence fixture");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn focused_text_controls_paint_utf16_selection_and_empty_carets() {
+    run_page_vm_async_test(async move {
+        let loader = crate::network::ResourceRequestClient::new(&FetchConfig::default())?;
+        let mut page = test_page_vm_with_loader_and_document_url(
+            &loader, Vec::new(), Url::parse("https://example.com/text-control-selection.html")?,
+        );
+        page.vm_mut().eval(r#"
+document.head.innerHTML='<style>html,body{margin:0}input,textarea{display:block;width:220px;height:40px;border:0;padding:8px;color:red;caret-color:lime;font:20px/24px sans-serif}::placeholder{color:gray}</style>';
+document.body.innerHTML='<input id=plain><input id=placeholder placeholder=Example><textarea id=area></textarea>';
+'installed'
+"#)?;
+        page.vm_mut().sync_live_document_style_sources();
+        for id in ["plain", "placeholder", "area"] {
+            let mut caret_start = 0.0;
+            let mut selected_right = 0.0;
+            for (state, script, caret, selected) in [
+                ("empty", "el.focus();el.value='';el.setSelectionRange(0,0)", true, false),
+                ("before emoji", "el.value='A😀B';el.setSelectionRange(1,1)", true, false),
+                ("selected emoji", "el.setSelectionRange(1,3)", false, true),
+                ("after emoji", "el.setSelectionRange(3,3)", true, false),
+                ("blurred", "el.blur()", false, false),
+            ] {
+                page.vm_mut().eval(&format!("{{const el=document.getElementById('{id}');{script};}}'updated'"))?;
+                let snapshot = page.vm_mut().screenshot_layout_snapshot(
+                    moli_layout::PaintViewport::new(260, 180, 1.0),
+                )?.expect("text control layout");
+                let fills = snapshot.fragments.iter().filter_map(|fragment| match fragment {
+                    moli_layout::PaintFragment::Fill { shape:moli_layout::PaintShape::Rect(rect),brush:moli_layout::PaintBrush::Solid(color),transform ,..} => Some((transform.map_rect(*rect).bounding_rect(),*color)),
+                    _ => None,
+                }).collect::<Vec<_>>();
+                let carets = fills.iter().filter(|(rect,color)| rect.width == 1.5 && *color == moli_layout::PaintColor::new(0.0,1.0,0.0,1.0)).collect::<Vec<_>>();
+                let selections = fills.iter().filter(|(_,color)| *color == moli_layout::PaintColor::new(180.0/255.0,213.0/255.0,1.0,1.0)).collect::<Vec<_>>();
+                assert_eq!(carets.len(),usize::from(caret),"{id}/{state}: active caret");
+                assert_eq!(selections.len(),usize::from(selected),"{id}/{state}: active selection");
+                if let Some((rect,_))=carets.first() {
+                    assert!(rect.height>0.0,"{id}/{state}: visible caret");
+                    if state=="empty" {assert_eq!(rect.x,8.0,"caret starts at the CSS padding edge");}
+                    if state=="before emoji" {caret_start=rect.x;}
+                    if state=="after emoji" {assert!((rect.x-selected_right).abs()<0.1,"UTF-16 selection ends at the next caret");}
+                }
+                if let Some((rect,_))=selections.first() {
+                    assert!((rect.x-caret_start).abs()<0.1,"selection starts at the previous caret");
+                    assert!(rect.width>0.0);
+                    selected_right=rect.right();
+                }
+            }
+        }
+        Ok::<_,anyhow::Error>(())
+    }).await.expect("text control selection fixture");
+}
+
 fn dark_pixels(image: &moli_paint::RasterImage, x: u32, y: u32, width: u32, height: u32) -> usize {
     (y..y + height)
         .flat_map(|y| (x..x + width).map(move |x| ((y * image.width + x) * 4) as usize))
