@@ -2224,7 +2224,7 @@ fn child_window_cross_origin_handler_data<'s>(
         && host.browsing_context_is_closed()
     {
         return Some((
-            main_page::access_surface(scope, holder_context),
+            main_page::access_surface(scope, holder_context)?,
             holder_context.global(scope),
         ));
     }
@@ -2236,7 +2236,7 @@ fn child_window_cross_origin_handler_data<'s>(
         }
         if identity.dispatch_scope() == super::super::OwnerDispatchScope::Top {
             let window = holder_context.global(scope);
-            return Some((main_page::access_surface(scope, holder_context), window));
+            return Some((main_page::access_surface(scope, holder_context)?, window));
         }
         let super::super::OwnerDispatchScope::Child(handle) = identity.dispatch_scope() else {
             return None;
