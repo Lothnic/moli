@@ -570,6 +570,7 @@ pub(super) async fn complete_continue_with_auth_command_async(
                 conn,
                 out,
                 PendingFetchNavigation {
+                    auth_retry_budget: pending.auth_retry_budget,
                     fetch_request_id: pending.response_stage_request_id,
                     interception_session_id: pending.interception_session_id.clone(),
                     document_navigation_token: pending.document_navigation_token,

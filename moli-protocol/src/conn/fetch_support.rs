@@ -223,6 +223,8 @@ impl PendingSubresourceFetchOwnerKind {
 
 #[derive(Debug, Clone)]
 pub struct PendingFetchNavigation {
+    /// Authentication restart budget for this logical navigation, independent of pause IDs.
+    pub(crate) auth_retry_budget: moli_fetch::AuthRetryBudget,
     pub fetch_request_id: String,
     pub interception_session_id: Option<String>,
     pub(crate) document_navigation_token: Option<DocumentNavigationToken>,
@@ -235,6 +237,7 @@ pub struct PendingFetchNavigation {
 
 #[derive(Debug, Clone)]
 pub struct PendingFetchAuthNavigation {
+    pub(crate) auth_retry_budget: moli_fetch::AuthRetryBudget,
     pub owner_session_id: Option<String>,
     // Auth can chain across CDP and BiDi sessions. Keep the current auth action
     // identity separate from the original Fetch response-stage identity.

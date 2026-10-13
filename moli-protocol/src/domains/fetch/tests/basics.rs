@@ -1056,6 +1056,7 @@ async fn disable_clears_fetch_state() {
     bc.active_page_target_mut()
         .fetch_owner
         .register_pending_fetch_navigation_request(PendingFetchNavigation {
+            auth_retry_budget: Default::default(),
             fetch_request_id: "INT-1".to_owned(),
             interception_session_id: Some("SID-1".to_owned()),
             document_navigation_token: None,
@@ -1098,6 +1099,7 @@ async fn disable_clears_fetch_state() {
         .register_pending_fetch_auth_navigation(
             "INT-1".to_owned(),
             PendingFetchAuthNavigation {
+                auth_retry_budget: Default::default(),
                 owner_session_id: None,
                 action_session_id: Some("SID-1".to_owned()),
                 interception_session_id: Some("SID-1".to_owned()),
@@ -1330,6 +1332,7 @@ async fn continue_with_auth_rejects_invalid_response_without_consuming_pending_a
         .register_pending_fetch_auth_navigation(
             "INT-8".to_owned(),
             PendingFetchAuthNavigation {
+                auth_retry_budget: Default::default(),
                 owner_session_id: Some("SID-1".to_owned()),
                 action_session_id: Some("SID-1".to_owned()),
                 interception_session_id: Some("SID-1".to_owned()),
@@ -1411,6 +1414,7 @@ async fn continue_with_auth_unsupported_challenge_preserves_pending_auth_navigat
         .register_pending_fetch_auth_navigation(
             "INT-9".to_owned(),
             PendingFetchAuthNavigation {
+                auth_retry_budget: Default::default(),
                 owner_session_id: Some("SID-1".to_owned()),
                 action_session_id: Some("SID-1".to_owned()),
                 interception_session_id: Some("SID-1".to_owned()),
@@ -1593,6 +1597,7 @@ fn extract_auth_challenge_preserves_quoted_commas_in_realm() {
 #[test]
 fn emit_auth_required_preserves_request_headers_and_post_data_shape() {
     let pending = PendingFetchNavigation {
+        auth_retry_budget: Default::default(),
         fetch_request_id: "INT-11".to_owned(),
         interception_session_id: Some("SID-1".to_owned()),
         document_navigation_token: None,

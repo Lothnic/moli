@@ -2407,6 +2407,7 @@ mod tests {
         owner_session_id: Option<&str>,
     ) -> PendingFetchAuthNavigation {
         PendingFetchAuthNavigation {
+            auth_retry_budget: Default::default(),
             owner_session_id: owner_session_id.map(str::to_owned),
             action_session_id: owner_session_id.map(str::to_owned),
             interception_session_id: owner_session_id.map(str::to_owned),

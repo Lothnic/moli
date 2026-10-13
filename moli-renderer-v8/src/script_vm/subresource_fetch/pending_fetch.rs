@@ -519,6 +519,31 @@ impl ScriptVm {
             .borrow_mut()
             .take_pending_subresource_auth(internal_id)
             .ok_or_else(|| anyhow!("unknown pending subresource auth `{internal_id}`"))?;
+        if !pending.pending.load.try_restart_with_auth() {
+            // Reuse the terminal auth path to settle Window and Worker consumers.
+            self._context_host
+                .borrow_mut()
+                .record_pending_subresource_auth(pending);
+            let execution = self.fail_pending_subresource_auth_body(
+                internal_id,
+                moli_fetch::AuthRetryBudget::ERROR_TEXT.to_owned(),
+            )?;
+            let ((), activity, post_checkpoint_event) = execution.into_parts();
+            let mut completion = AsyncSubresourceCommandExecution::after_body(
+                PendingSubresourceContinueOutcome::Started,
+                activity,
+            );
+            if let Some(event) = post_checkpoint_event {
+                completion = completion.with_post_checkpoint_event(event);
+            } else {
+                // Worker auth failure clears its network record, so its IPC
+                // completion does not retire this parent protocol correlation.
+                completion = completion.with_post_checkpoint_event(
+                    PendingSubresourceContinueEvent::Completed { internal_id },
+                );
+            }
+            return Ok(completion);
+        }
         let PendingSubresourceAuthState {
             pending: pending_fetch,
             request_url,

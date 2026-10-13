@@ -210,6 +210,7 @@ impl ResourceLoadRegistry {
             browser_runtime,
             task_runner: self.inner.task_runner.clone(),
             lifecycle: Mutex::new(ResourceLoadLifecycle {
+                auth_retry_budget: moli_fetch::AuthRetryBudget::default(),
                 cancel_handle,
                 consumer_cancel: None,
                 detached_keepalive,
@@ -357,6 +358,7 @@ impl ResourceLoadRegistry {
 }
 
 struct ResourceLoadLifecycle {
+    auth_retry_budget: moli_fetch::AuthRetryBudget,
     cancel_handle: Option<FetchCancelHandle>,
     consumer_cancel: Option<Box<dyn FnOnce() + Send + 'static>>,
     detached_keepalive: bool,
@@ -461,6 +463,15 @@ pub(crate) struct ResourceLoadLease {
 }
 
 impl ResourceLoadLease {
+    /// Lease clones and authentication continuations belong to the same request.
+    pub(crate) fn try_restart_with_auth(&self) -> bool {
+        self.registration
+            .lifecycle
+            .lock()
+            .auth_retry_budget
+            .try_restart()
+    }
+
     pub(crate) fn id_for_diagnostics(&self) -> u64 {
         self.registration.id.as_u64()
     }
@@ -635,6 +646,35 @@ mod tests {
                 Some(cancel_handle),
             )
             .expect("active registry should accept loads")
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn authentication_budget_follows_lease_clones_but_not_other_requests() {
+        let registry = registry();
+        let first = lease(
+            &registry,
+            ResourceLoadDisposition::Ordinary,
+            FetchCancelHandle::new(),
+        );
+        let same_request = first.clone();
+        let other_request = lease(
+            &registry,
+            ResourceLoadDisposition::Ordinary,
+            FetchCancelHandle::new(),
+        );
+        for attempt in 0..31 {
+            let current = if attempt % 2 == 0 {
+                &first
+            } else {
+                &same_request
+            };
+            assert!(current.try_restart_with_auth());
+        }
+        assert!(!same_request.try_restart_with_auth());
+        for _ in 0..256 {
+            assert!(!first.try_restart_with_auth());
+        }
+        assert!(other_request.try_restart_with_auth());
     }
 
     #[tokio::test(flavor = "current_thread")]

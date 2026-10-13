@@ -16,6 +16,7 @@ async fn bidi_fetch_control_resolves_background_request_owner() {
     conn.register_pending_fetch_navigation_request_for_owner(
         &crate::conn::CommandOwnerScope::for_session("SID-background"),
         PendingFetchNavigation {
+            auth_retry_budget: Default::default(),
             fetch_request_id: "FETCH-background".to_owned(),
             interception_session_id: Some("bidi-session-1".to_owned()),
             document_navigation_token: None,

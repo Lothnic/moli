@@ -2824,6 +2824,7 @@ fn start_navigate_to_url_command_with_background_policy_and_request(
                 ));
             };
             pending_fetch_navigation = Some(PendingFetchNavigation {
+                auth_retry_budget: Default::default(),
                 fetch_request_id,
                 interception_session_id: preflight
                     .document_fetch_event_session_id

@@ -4,6 +4,7 @@
 //! execution, streaming HTML responses, and cookie-aware helper utilities used
 //! by higher-level browser code.
 
+mod auth_retry;
 mod blocking;
 mod cancellation;
 mod client;
@@ -27,6 +28,7 @@ mod streaming_response;
 mod tests;
 mod url_pattern;
 
+pub use auth_retry::AuthRetryBudget;
 #[cfg(any(test, feature = "test-support"))]
 pub use blocking::{
     StreamingHtmlResponseStart, StreamingResponseCollector, outgoing_request_headers,

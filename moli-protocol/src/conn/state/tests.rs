@@ -807,6 +807,7 @@ fn target_fetch_owner_reports_matching_auth_required_network_intercepts() {
 fn pending_navigation_rejects_generic_request_action_without_consuming_id() {
     let mut state = TargetFetchState::default();
     state.register_pending_fetch_navigation_request(PendingFetchNavigation {
+        auth_retry_budget: Default::default(),
         fetch_request_id: "FETCH-NAV".to_owned(),
         interception_session_id: Some("SID-fetch".to_owned()),
         document_navigation_token: None,
@@ -848,6 +849,7 @@ fn pending_auth_navigation_rejects_generic_request_action_without_consuming_id()
     state.register_pending_fetch_auth_navigation(
         "FETCH-AUTH".to_owned(),
         PendingFetchAuthNavigation {
+            auth_retry_budget: Default::default(),
             owner_session_id: None,
             action_session_id: None,
             interception_session_id: None,
@@ -898,6 +900,7 @@ fn unscoped_fetch_owned_auth_navigation_allows_routed_action_session() {
     state.register_pending_fetch_auth_navigation(
         "FETCH-AUTH".to_owned(),
         PendingFetchAuthNavigation {
+            auth_retry_budget: Default::default(),
             owner_session_id: None,
             action_session_id: None,
             interception_session_id: None,
@@ -932,6 +935,7 @@ fn unscoped_fetch_owned_auth_navigation_allows_routed_action_session() {
     state.register_pending_fetch_auth_navigation(
         "NETWORK-AUTH".to_owned(),
         PendingFetchAuthNavigation {
+            auth_retry_budget: Default::default(),
             owner_session_id: None,
             action_session_id: None,
             interception_session_id: None,

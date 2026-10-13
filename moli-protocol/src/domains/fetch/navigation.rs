@@ -62,6 +62,18 @@ pub(crate) async fn load_or_pause_navigation_for_auth_into_buffer_async(
     auth: Option<SubresourceAuthCredentials>,
     prior_network_observation_journal: Option<NetworkObservationJournal>,
 ) {
+    if auth.is_some() && !pending.auth_retry_budget.try_restart() {
+        complete_pending_fetch_navigation_result_into_buffer_async(
+            conn,
+            out,
+            pending,
+            Ok(NavigationLoadOutcome::network_failure(
+                moli_fetch::AuthRetryBudget::ERROR_TEXT.to_owned(),
+            )),
+        )
+        .await;
+        return;
+    }
     let navigate_owner = pending.navigation.owner.clone();
     network::record_main_document_request_body(conn, &pending.navigation);
     let should_handle_auth = conn.target_fetch_matches_auth_required_for_owner(
@@ -268,6 +280,7 @@ pub(super) async fn cancel_navigation_auth_as_background_events_async(
         Err(response) => response.as_ref().clone(),
     };
     let mut pending = PendingFetchNavigation {
+        auth_retry_budget: pending_auth.auth_retry_budget,
         fetch_request_id: pending_auth.response_stage_request_id,
         interception_session_id: pending_auth.interception_session_id.clone(),
         document_navigation_token: pending_auth.document_navigation_token,
@@ -829,6 +842,7 @@ fn register_navigation_auth_required_event(
     navigation.redirect_chain = head.redirect_chain.clone();
     let blocked_intercepts = navigation_auth_required_blocked_intercepts(conn, pending);
     let mut pending_auth = crate::conn::PendingFetchAuthNavigation {
+        auth_retry_budget: pending.auth_retry_budget.clone(),
         owner_session_id: pending.navigation.owner.session_id().map(str::to_owned),
         action_session_id: pending.interception_session_id.clone(),
         interception_session_id: pending.interception_session_id.clone(),
