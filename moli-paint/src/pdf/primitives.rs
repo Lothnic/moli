@@ -216,6 +216,11 @@ impl<'a, 's> PdfPainter<'a, 's> {
                     self.clips.pop();
                     self.clip_shapes.pop();
                 }
+                PaintFragment::Image(image) if image.repeat_bounds.is_some() => {
+                    // PDF's native image command draws one tile. Reuse the bounded
+                    // raster fallback for a repeated brush without expanding tiles.
+                    self.rasterize(std::slice::from_ref(fragment))?;
+                }
                 PaintFragment::Image(image) => {
                     let resource = self.snapshot.image(image.image).expect("validated image");
                     let interpolate = image.sampling == moli_layout::PaintImageSampling::Linear;
@@ -492,7 +497,10 @@ fn fragment_bounds(fragment: &PaintFragment) -> Option<Rect> {
             clip, transform, ..
         } => (super::rect(clip.bounds()), *transform),
         PaintFragment::SvgImage(image) => (super::rect(image.destination), image.transform),
-        PaintFragment::Image(image) => (super::rect(image.destination), image.transform),
+        PaintFragment::Image(image) => (
+            super::rect(image.repeat_bounds.unwrap_or(image.destination)),
+            image.transform,
+        ),
         PaintFragment::Border {
             rect, transform, ..
         } => (super::rect(*rect), *transform),
