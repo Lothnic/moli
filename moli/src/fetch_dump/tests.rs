@@ -657,7 +657,7 @@ async fn fresh_layout_resize_observer_updates_virtual_children_and_deduplicates_
 #[tokio::test]
 async fn resize_observer_same_depth_feedback_is_bounded() -> Result<()> {
     let config = BrowserConfig::default().with_layout_policy(LayoutPolicy::OnDemand);
-    let (_browser, mut page, server) = load_page_with_config(r#"<div id="box" style="width:120px;height:20px"></div><script>window.calls=0;window.feedback=false;window.errors=[];window.onerrorCalls=0;const box=document.getElementById('box');window.observer=new ResizeObserver(es=>{calls++;if(feedback)box.style.width=(es[0].contentRect.width+1)+'px'});addEventListener('error',e=>{errors.push({message:e.message,instance:e instanceof ErrorEvent,target:e.target===window,currentTarget:e.currentTarget===window,trusted:e.isTrusted,bubbles:e.bubbles,cancelable:e.cancelable,error:e.error,filename:e.filename,lineno:e.lineno,colno:e.colno});observer.disconnect();e.preventDefault()});window.onerror=()=>{onerrorCalls++;return true};observer.observe(box)</script>"#, config).await?;
+    let (_browser, mut page, server) = load_page_with_config(r#"<div id="box" style="width:120px;height:20px"></div><script>window.calls=0;window.recoveryCalls=0;window.feedback=false;window.errors=[];window.onerrorCalls=0;const box=document.getElementById('box');window.observer=new ResizeObserver(es=>{calls++;if(feedback)box.style.width=(es[0].contentRect.width+1)+'px'});addEventListener('error',e=>{errors.push({message:e.message,instance:e instanceof ErrorEvent,target:e.target===window,currentTarget:e.currentTarget===window,trusted:e.isTrusted,bubbles:e.bubbles,cancelable:e.cancelable,error:e.error,filename:e.filename,lineno:e.lineno,colno:e.colno});observer.disconnect();window.recoveryObserver=new ResizeObserver(()=>recoveryCalls++);recoveryObserver.observe(box);e.preventDefault()});window.onerror=()=>{onerrorCalls++;return true};observer.observe(box)</script>"#, config).await?;
     render_page_output_async(
         &mut page,
         &FetchCommandConfig {
@@ -671,7 +671,22 @@ async fn resize_observer_same_depth_feedback_is_bounded() -> Result<()> {
     )
     .await?;
     page.evaluate_runtime_expression_with_await_async(
-        "new Promise((resolve,reject)=>{const end=Date.now()+2000;const poll=()=>calls?resolve():Date.now()>end?reject(new Error('resize callback missing')):setTimeout(poll,1);poll()})",
+        "new Promise((resolve,reject)=>{const end=Date.now()+2000;const poll=()=>calls&&recoveryCalls?resolve():Date.now()>end?reject(new Error('resize recovery callback missing')):setTimeout(poll,1);poll()})",
+        true,
+    )
+    .await?;
+    page.evaluate_runtime_expression_async("document.getElementById('box').style.width='200px'")
+        .await?;
+    render_page_output_async(
+        &mut page,
+        &FetchCommandConfig {
+            dump_mode: Some(DumpFormat::Screenshot),
+            ..Default::default()
+        },
+    )
+    .await?;
+    page.evaluate_runtime_expression_with_await_async(
+        "new Promise((resolve,reject)=>{const end=Date.now()+2000;const poll=()=>recoveryCalls>=2?resolve():Date.now()>end?reject(new Error('second resize recovery callback missing')):setTimeout(poll,1);poll()})",
         true,
     )
     .await?;
@@ -681,12 +696,12 @@ async fn resize_observer_same_depth_feedback_is_bounded() -> Result<()> {
         "1"
     );
     let result = page
-        .evaluate_runtime_expression_async("JSON.stringify({errors,onerrorCalls})")
+        .evaluate_runtime_expression_async("JSON.stringify({errors,onerrorCalls,recoveryCalls})")
         .await?;
     let result: Value = serde_json::from_str(result["value"].as_str().unwrap())?;
     assert_eq!(
         result,
-        json!({"errors":[{"message":"ResizeObserver loop completed with undelivered notifications.","instance":true,"target":true,"currentTarget":true,"trusted":true,"bubbles":false,"cancelable":true,"error":null,"filename":"","lineno":0,"colno":0}],"onerrorCalls":1})
+        json!({"errors":[{"message":"ResizeObserver loop completed with undelivered notifications.","instance":true,"target":true,"currentTarget":true,"trusted":true,"bubbles":false,"cancelable":true,"error":null,"filename":"","lineno":0,"colno":0}],"onerrorCalls":1,"recoveryCalls":2})
     );
     server.abort();
     Ok(())
