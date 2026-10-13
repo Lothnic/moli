@@ -2146,6 +2146,50 @@ impl JsContextHost {
             .retained_current_element_state(unsafe { &*dom_host }, element)
     }
 
+    pub(crate) fn set_select_value(&mut self, handle: DomHandle, value: &str) -> bool {
+        // Capture selected peers before the native multi-option commit. The
+        // same wrapper serves the Web setter and native autofill.
+        let old_states = self
+            .dom_host()
+            .select_option_elements(handle)
+            .into_iter()
+            .filter_map(|option| {
+                let selected = self
+                    .dom_host()
+                    .node(option)
+                    .and_then(Node::as_element)?
+                    .selected();
+                Some((
+                    option,
+                    selected,
+                    self.retained_current_element_state(option),
+                ))
+            })
+            .collect::<Vec<_>>();
+        let changed =
+            unsafe { DocumentRuntime::set_select_value(&mut *self.runtime, handle, value) };
+        if changed {
+            for (option, was_selected, old_state) in old_states {
+                let selected = self
+                    .dom_host()
+                    .node(option)
+                    .and_then(Node::as_element)
+                    .is_some_and(|element| element.selected());
+                if selected != was_selected {
+                    self.note_element_state_style_activity_with_old_state(
+                        option,
+                        StyloElementState::CHECKED | StyloElementState::VALIDITY_STATES,
+                        old_state,
+                    );
+                }
+            }
+            // The native commit already advances dom_version. Its selected
+            // content must also request observer work without a geometry read.
+            self.request_realtime_rendering_opportunity();
+        }
+        changed
+    }
+
     pub(crate) fn set_input_value(&mut self, handle: DomHandle, value: &str) -> bool {
         self.clear_text_control_change_pending(handle);
         let old_state = self.retained_current_element_state(handle);
