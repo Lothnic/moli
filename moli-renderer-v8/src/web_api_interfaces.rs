@@ -398,6 +398,8 @@ interfaces! {
     RTCError: DOMException;
     RTCErrorEvent: Event;
     RTCIceCandidate;
+    RTCEncodedAudioFrame;
+    RTCEncodedVideoFrame;
     RTCPeerConnection: EventTarget;
     RTCPeerConnectionIceEvent: Event;
     RTCDataChannelEvent: Event;
