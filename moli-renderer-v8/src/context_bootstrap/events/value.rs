@@ -21,6 +21,9 @@ const TOOL_NAME_SLOT: &str = "__moliToolEventName";
 const GAMEPAD_SLOT: &str = "__moliValueEventGamepad";
 const PICTURE_IN_PICTURE_WINDOW_SLOT: &str = "__moliPictureInPictureEventWindow";
 
+const PAYMENT_METHOD_NAME_SLOT: &str = "__moliPaymentMethodChangeEventMethodName";
+const PAYMENT_METHOD_DETAILS_SLOT: &str = "__moliPaymentMethodChangeEventMethodDetails";
+
 #[derive(Clone, Copy)]
 pub(in crate::context_bootstrap) enum ValueEventKind {
     Animation,
@@ -31,6 +34,8 @@ pub(in crate::context_bootstrap) enum ValueEventKind {
     ToolCancel,
     Gamepad,
     PictureInPicture,
+    PaymentRequestUpdate,
+    PaymentMethodChange,
 }
 
 impl ValueEventKind {
@@ -44,6 +49,8 @@ impl ValueEventKind {
             Self::ToolCancel => "ToolCancelEvent",
             Self::Gamepad => "GamepadEvent",
             Self::PictureInPicture => "PictureInPictureEvent",
+            Self::PaymentRequestUpdate => "PaymentRequestUpdateEvent",
+            Self::PaymentMethodChange => "PaymentMethodChangeEvent",
         }
     }
 
@@ -219,6 +226,59 @@ struct PictureInPictureEventInit<'s> {
     picture_in_picture_window: v8::Local<'s, v8::Object>,
 }
 
+#[derive(WebApiFunctionTemplate)]
+#[webapi(interface = web_api_interfaces::PaymentMethodChangeEvent, enumerable, receiver)]
+struct PaymentMethodChangeEventPrototypeDeclaration {
+    #[webapi(accessor_property = "methodName", getter = payload_getter, data = v8str(scope, PAYMENT_METHOD_NAME_SLOT))]
+    method_name: (),
+    #[webapi(accessor_property = "methodDetails", getter = payload_getter, data = v8str(scope, PAYMENT_METHOD_DETAILS_SLOT))]
+    method_details: (),
+}
+
+#[derive(webidl::WebIdlDictionary)]
+#[webidl(prefix = "PaymentMethodChangeEventInit")]
+struct PaymentMethodChangeEventInit<'s> {
+    #[webidl(inherit)]
+    base: EventInit,
+    #[webidl(nullable)]
+    method_details: Option<v8::Local<'s, v8::Object>>,
+    #[webidl(with = string_member)]
+    method_name: v8::Local<'s, v8::String>,
+}
+
+#[derive(WebApiFunctionTemplate)]
+#[webapi(interface = web_api_interfaces::PaymentRequestUpdateEvent, enumerable, receiver)]
+struct PaymentRequestUpdateEventPrototypeDeclaration {
+    #[webapi(method, length = 1, callback = payment_update_with_callback)]
+    update_with: (),
+}
+
+#[derive(webidl::WebIdlArgs)]
+#[webidl(prefix = "PaymentRequestUpdateEvent.updateWith")]
+struct PaymentUpdateWithArgs<'s> {
+    #[webidl(required)]
+    _details_promise: v8::Local<'s, v8::Promise>,
+}
+
+fn payment_update_with_callback<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    args: v8::FunctionCallbackArguments<'s>,
+    _rv: v8::ReturnValue<'_, v8::Value>,
+) {
+    if webidl::parse_args::<PaymentUpdateWithArgs>(scope, &args).is_none() {
+        return;
+    }
+    // Only author-created payment events are currently produced. They must
+    // reject updates even during dispatch, after Web IDL Promise conversion.
+    // Trusted payment events require an interactive PaymentRequest backend.
+    crate::native_bridge::throw_dom_exception(
+        scope,
+        "InvalidStateError",
+        11,
+        "updateWith requires a trusted event associated with an interactive payment request",
+    );
+}
+
 fn string_member<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     object: v8::Local<'s, v8::Object>,
@@ -265,6 +325,16 @@ pub(in crate::context_bootstrap) fn install_value_event_template_bindings<'s>(
         "GamepadEvent" => {
             GamepadEventPrototypeDeclaration::initialize_prototype_template(scope, prototype)
         }
+        "PaymentRequestUpdateEvent" => {
+            PaymentRequestUpdateEventPrototypeDeclaration::initialize_prototype_template(
+                scope, prototype,
+            )
+        }
+        "PaymentMethodChangeEvent" => {
+            PaymentMethodChangeEventPrototypeDeclaration::initialize_prototype_template(
+                scope, prototype,
+            )
+        }
         _ => {}
     }
 }
@@ -306,6 +376,8 @@ fn value_event_constructor<'s>(
         Some(5) => ValueEventKind::ToolCancel,
         Some(6) => ValueEventKind::Gamepad,
         Some(7) => ValueEventKind::PictureInPicture,
+        Some(8) => ValueEventKind::PaymentRequestUpdate,
+        Some(9) => ValueEventKind::PaymentMethodChange,
         _ => return,
     };
     if !args.is_construct_call() {
@@ -420,6 +492,32 @@ fn value_event_constructor<'s>(
                     state,
                     PICTURE_IN_PICTURE_WINDOW_SLOT,
                     parsed.picture_in_picture_window.into(),
+                );
+                (
+                    parsed.base.bubbles,
+                    parsed.base.cancelable,
+                    parsed.base.composed,
+                )
+            }
+            ValueEventKind::PaymentRequestUpdate => {
+                // PaymentRequestUpdateEventInit adds no members to EventInit.
+                let parsed = webidl::parse_dictionary_object::<EventInit>(scope, dictionary)?;
+                (parsed.bubbles, parsed.cancelable, parsed.composed)
+            }
+            ValueEventKind::PaymentMethodChange => {
+                let parsed = webidl::parse_dictionary_object::<PaymentMethodChangeEventInit>(
+                    scope, dictionary,
+                )?;
+                let details = parsed
+                    .method_details
+                    .map(Into::into)
+                    .unwrap_or_else(|| v8::null(scope).into());
+                set_event_private_value(scope, state, PAYMENT_METHOD_DETAILS_SLOT, details);
+                set_event_private_value(
+                    scope,
+                    state,
+                    PAYMENT_METHOD_NAME_SLOT,
+                    parsed.method_name.into(),
                 );
                 (
                     parsed.base.bubbles,

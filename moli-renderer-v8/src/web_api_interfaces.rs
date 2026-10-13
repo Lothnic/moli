@@ -193,6 +193,8 @@ interfaces! {
     GamepadButton;
     GamepadEvent: Event;
     PictureInPictureEvent: Event;
+    PaymentRequestUpdateEvent: Event;
+    PaymentMethodChangeEvent: PaymentRequestUpdateEvent;
     PictureInPictureWindow: EventTarget;
     GamepadHapticActuator;
     HTMLAllCollection;

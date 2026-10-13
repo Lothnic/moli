@@ -127,6 +127,12 @@ pub(in crate::context_bootstrap) fn build_constructor_template<'s>(
         ConstructorKind::ToolCancelEvent => {
             build_value_event_template(scope, ValueEventKind::ToolCancel)
         }
+        ConstructorKind::PaymentRequestUpdateEvent => {
+            build_value_event_template(scope, ValueEventKind::PaymentRequestUpdate)
+        }
+        ConstructorKind::PaymentMethodChangeEvent => {
+            build_value_event_template(scope, ValueEventKind::PaymentMethodChange)
+        }
         ConstructorKind::UiEvent => {
             build_event_subclass_template(scope, EventSubclassKind::UiEvent)
         }
