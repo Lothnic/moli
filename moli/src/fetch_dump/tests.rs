@@ -306,6 +306,91 @@ async fn markdown_dump_includes_content_created_from_observed_layout() -> Result
 }
 
 #[tokio::test]
+async fn fresh_layout_resize_observer_updates_virtual_children_and_deduplicates_sizes() -> Result<()>
+{
+    let config = BrowserConfig::default().with_layout_policy(LayoutPolicy::OnDemand);
+    let (_browser, mut page, server) = load_page_with_config(r#"<div id="box" style="width:120px;height:40px"></div><script>
+        window.widths=[];const box=document.getElementById('box');
+        new ResizeObserver(es=>{const width=es[0].contentRect.width;widths.push(width);if(width>300&&!box.querySelector('span')){const item=document.createElement('span');item.id='virtual-item';item.textContent='Virtual child';box.appendChild(item)}}).observe(box);
+    </script>"#, config).await?;
+    let screenshot = FetchCommandConfig {
+        dump_mode: Some(DumpFormat::Screenshot),
+        ..Default::default()
+    };
+    render_page_output_async(&mut page, &screenshot).await?;
+    page.evaluate_runtime_expression_with_await_async("new Promise((resolve,reject)=>{const end=Date.now()+2000;const poll=()=>widths.includes(120)?resolve():Date.now()>end?reject(new Error('initial resize notification missing')):setTimeout(poll,1);poll()})", true).await?;
+    page.evaluate_runtime_expression_async("document.getElementById('box').style.width='420px'")
+        .await?;
+    render_page_output_async(&mut page, &screenshot).await?;
+    page.evaluate_runtime_expression_with_await_async("new Promise((resolve,reject)=>{const end=Date.now()+2000;const poll=()=>document.getElementById('virtual-item')?resolve():Date.now()>end?reject(new Error('updated resize notification missing')):setTimeout(poll,1);poll()})", true).await?;
+    let widths = page
+        .evaluate_runtime_expression_async("JSON.stringify(widths)")
+        .await?;
+    assert_eq!(widths["value"], "[120,420]");
+    render_page_output_async(&mut page, &screenshot).await?;
+    assert_eq!(
+        page.evaluate_runtime_expression_async("JSON.stringify(widths)")
+            .await?["value"],
+        "[120,420]"
+    );
+    server.abort();
+    Ok(())
+}
+
+#[tokio::test]
+async fn resize_observer_same_depth_feedback_is_bounded() -> Result<()> {
+    let config = BrowserConfig::default().with_layout_policy(LayoutPolicy::OnDemand);
+    let (_browser, mut page, server) = load_page_with_config(r#"<div id="box" style="width:120px;height:20px"></div><script>window.calls=0;window.recoveryCalls=0;window.feedback=false;window.errors=[];window.onerrorCalls=0;const box=document.getElementById('box');window.observer=new ResizeObserver(es=>{calls++;if(feedback)box.style.width=(es[0].contentRect.width+1)+'px'});addEventListener('error',e=>{errors.push({message:e.message,instance:e instanceof ErrorEvent,target:e.target===window,currentTarget:e.currentTarget===window,trusted:e.isTrusted,bubbles:e.bubbles,cancelable:e.cancelable,error:e.error,filename:e.filename,lineno:e.lineno,colno:e.colno});observer.disconnect();window.recoveryObserver=new ResizeObserver(()=>recoveryCalls++);recoveryObserver.observe(box);e.preventDefault()});window.onerror=()=>{onerrorCalls++;return true};observer.observe(box)</script>"#, config).await?;
+    render_page_output_async(
+        &mut page,
+        &FetchCommandConfig {
+            dump_mode: Some(DumpFormat::Screenshot),
+            ..Default::default()
+        },
+    )
+    .await?;
+    page.evaluate_runtime_expression_async(
+        "calls=0;feedback=true;document.getElementById('box').style.width='140px'",
+    )
+    .await?;
+    page.evaluate_runtime_expression_with_await_async(
+        "new Promise((resolve,reject)=>{const end=Date.now()+2000;const poll=()=>calls&&recoveryCalls?resolve():Date.now()>end?reject(new Error('resize recovery callback missing')):setTimeout(poll,1);poll()})",
+        true,
+    )
+    .await?;
+    page.evaluate_runtime_expression_async("document.getElementById('box').style.width='200px'")
+        .await?;
+    render_page_output_async(
+        &mut page,
+        &FetchCommandConfig {
+            dump_mode: Some(DumpFormat::Screenshot),
+            ..Default::default()
+        },
+    )
+    .await?;
+    page.evaluate_runtime_expression_with_await_async(
+        "new Promise((resolve,reject)=>{const end=Date.now()+2000;const poll=()=>recoveryCalls>=2?resolve():Date.now()>end?reject(new Error('second resize recovery callback missing')):setTimeout(poll,1);poll()})",
+        true,
+    )
+    .await?;
+    assert_eq!(
+        page.evaluate_runtime_expression_async("String(calls)")
+            .await?["value"],
+        "1"
+    );
+    let result = page
+        .evaluate_runtime_expression_async("JSON.stringify({errors,onerrorCalls,recoveryCalls})")
+        .await?;
+    let result: Value = serde_json::from_str(result["value"].as_str().unwrap())?;
+    assert_eq!(
+        result,
+        json!({"errors":[{"message":"ResizeObserver loop completed with undelivered notifications.","instance":true,"target":true,"currentTarget":true,"trusted":true,"bubbles":false,"cancelable":true,"error":null,"filename":"","lineno":0,"colno":0}],"onerrorCalls":1,"recoveryCalls":2})
+    );
+    server.abort();
+    Ok(())
+}
+
+#[tokio::test]
 async fn render_semantic_tree_dump_uses_renderer_live_accessibility_tree() -> Result<()> {
     let (_browser, mut page, http_server) =
         load_page(r#"<!doctype html><html><body><button id="target">old</button></body></html>"#)

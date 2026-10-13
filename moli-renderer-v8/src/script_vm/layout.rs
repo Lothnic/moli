@@ -226,11 +226,17 @@ impl ScriptVm {
             Err(error) => (Err(error), Vec::new()),
         };
         self.start_css_images_discovered_by_layout(css_images);
+        let notify_resize = !self
+            ._context_host
+            .borrow()
+            .resize_observer_rendering_update_active;
         if publishes_layout
             && matches!(&result, Ok(Some(_)))
             && let Err(error) = self.with_default_context_scope(|scope, runtime_ptr| {
                 crate::observer_runtime::queue_intersection_checks(scope, runtime_ptr);
-                crate::context_bootstrap::queue_resize_observer_checks(scope);
+                if notify_resize {
+                    crate::context_bootstrap::queue_resize_observer_checks(scope);
+                }
                 crate::native_bridge::element::queue_revealed_lazy_image_loads(
                     scope,
                     runtime_ptr,
