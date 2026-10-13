@@ -1622,7 +1622,7 @@ async fn worker_main(
         .as_ref()
         .map(|client| client.client_id);
     let state = Rc::new(RefCell::new(WorkerGlobalState {
-        v8_finalizers: crate::v8_finalizer::V8FinalizerRegistry::default(),
+        common: Rc::new(crate::common_runtime::CommonRuntimeState::default()),
         parent_tx: parent_tx.clone(),
         worker_wake_tx,
         termination_requested: Arc::clone(&termination_requested),
@@ -3352,10 +3352,8 @@ async fn worker_main(
         let ctx = v8::Local::new(scope, &context);
         runtime_inspector.context_destroyed(ctx);
     }
-    state
-        .borrow_mut()
-        .v8_finalizers
-        .clear_for_context_teardown();
+    let common = Rc::clone(&state.borrow().common);
+    common.clear_for_context_teardown();
     close_worker_owned_broadcast_channels(&state);
     close_worker_owned_message_ports(&state);
     resource_loader.finish_detach();

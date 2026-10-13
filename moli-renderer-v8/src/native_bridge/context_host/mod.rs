@@ -831,7 +831,7 @@ pub(crate) struct JsContextHost {
     context_host_lifecycle: Rc<Cell<crate::util::ContextHostLifecycle>>,
     deferred_context_host_release_queue: crate::script_vm::RendererDeferredContextHostReleaseQueue,
     page_default_context: Option<v8::Weak<v8::Context>>,
-    pub(crate) v8_finalizers: crate::v8_finalizer::V8FinalizerRegistry,
+    pub(crate) common: Rc<crate::common_runtime::CommonRuntimeState>,
     pub(super) bridge: NativeDomBridge,
     backend_node_registry: SharedRendererBackendNodeRegistry,
     dom_agent_state: crate::runtime::RendererDomAgentState,
@@ -1352,6 +1352,6 @@ impl Drop for JsContextHost {
         self.close_page_context_resources_for_teardown();
         self.context_host_lifecycle
             .set(crate::util::ContextHostLifecycle::Destroyed);
-        self.v8_finalizers.clear_for_context_teardown();
+        self.common.clear_for_context_teardown();
     }
 }

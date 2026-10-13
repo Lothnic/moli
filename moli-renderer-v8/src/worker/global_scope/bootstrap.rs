@@ -117,6 +117,10 @@ pub(in crate::worker) fn install_worker_global_scope<'s>(
     state: Rc<RefCell<WorkerGlobalState>>,
     worker_templates: Option<&PreparedWorkerGlobalScopeTemplates>,
 ) -> Result<()> {
+    crate::common_runtime::CommonRuntimeBinding::install_worker(
+        scope.get_current_context(),
+        &state,
+    );
     // Store state pointer as an external on the global so callbacks can find it.
     let state_ptr = Rc::into_raw(state.clone()) as *mut c_void;
     let external = v8::External::new(scope, state_ptr);

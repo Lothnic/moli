@@ -559,6 +559,13 @@ pub(super) fn install_context_host_pointer_slot(
         host_lifecycle.get() == ContextHostLifecycle::Active,
         "a retired JsContextHost must not be installed into a V8 context"
     );
+    let common = Rc::clone(&unsafe { &*host_ptr.as_ptr() }.common);
+    crate::common_runtime::CommonRuntimeBinding::install_window(
+        context,
+        &common,
+        host_ptr.as_ptr(),
+        &host_lifecycle,
+    );
     if let Some(existing) = context.get_slot::<ContextHostPointerSlot>() {
         assert!(
             existing.host_ptr == host_ptr && Rc::ptr_eq(&existing.host_lifecycle, &host_lifecycle),

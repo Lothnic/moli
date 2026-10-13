@@ -33,6 +33,7 @@ mod broadcast_channel_runtime;
 mod callback_invocation;
 #[cfg(test)]
 mod chromium_property_surface;
+mod common_runtime;
 mod content_security_policy;
 mod context_bootstrap;
 mod cross_origin_isolation;

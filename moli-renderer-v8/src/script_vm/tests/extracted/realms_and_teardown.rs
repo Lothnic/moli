@@ -2109,7 +2109,7 @@ fn page_context_teardown_preserves_finalizers_for_retained_native_objects() {
         .expect("context-owned finalizer objects should evaluate");
     assert_eq!(created, "96");
     assert!(
-        vm._context_host.borrow().v8_finalizers.len() >= 128,
+        vm._context_host.borrow().common.finalizer_count() >= 128,
         "CSS declaration/rule-tree and Blob objects should be tracked by the page context owner"
     );
     assert!(
@@ -2122,7 +2122,7 @@ fn page_context_teardown_preserves_finalizers_for_retained_native_objects() {
 
     vm.close_page_context_resources_for_context_teardown();
     assert!(
-        vm._context_host.borrow().v8_finalizers.len() >= 128,
+        vm._context_host.borrow().common.finalizer_count() >= 128,
         "retiring active execution must preserve native objects retained by author code"
     );
     assert_eq!(

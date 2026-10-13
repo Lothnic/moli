@@ -355,7 +355,7 @@ impl JsContextHost {
             retained_document_runtime: None,
             published_document_host: false,
             page_default_context: None,
-            v8_finalizers: crate::v8_finalizer::V8FinalizerRegistry::default(),
+            common: Rc::new(crate::common_runtime::CommonRuntimeState::default()),
             bridge: NativeDomBridge::new(bindings),
             dom_agent_state: crate::runtime::RendererDomAgentState::new(
                 backend_node_registry.clone(),

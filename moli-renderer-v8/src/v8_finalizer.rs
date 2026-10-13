@@ -52,13 +52,17 @@ impl Drop for ContextOwnedV8Finalizer {
 }
 
 impl V8FinalizerRegistry {
-    fn push(&mut self, entry: ContextOwnedV8Finalizer) {
+    fn push(&mut self, entry: ContextOwnedV8Finalizer) -> Vec<ContextOwnedV8Finalizer> {
         self.entries.push(entry);
         self.insertions_since_compaction = self.insertions_since_compaction.saturating_add(1);
         if self.insertions_since_compaction >= FINALIZER_COMPACTION_INTERVAL {
-            self.entries.retain(|entry| !entry.weak.is_empty());
             self.insertions_since_compaction = 0;
+            return self
+                .entries
+                .extract_if(.., |entry| entry.weak.is_empty())
+                .collect();
         }
+        Vec::new()
     }
 
     pub(crate) fn clear_for_context_teardown(&mut self) {
@@ -90,21 +94,57 @@ pub(crate) fn track_context_owned_v8_finalizer(
 ) {
     let cleanup: FinalizerCleanup = Box::new(cleanup);
 
-    if let Some(worker_state) = crate::worker::get_worker_state(scope) {
-        let entry = ContextOwnedV8Finalizer::new(scope, object, cleanup);
-        worker_state.borrow_mut().v8_finalizers.push(entry);
-        return;
-    }
-
-    let host_ptr = crate::util::context_host_ptr_from_global_bridge(scope)
+    let common = crate::common_runtime::CommonRuntimeBinding::from_scope(scope)
+        .and_then(|binding| binding.runtime())
         .expect("V8 finalizer object must belong to a page or worker context");
     let entry = ContextOwnedV8Finalizer::new(scope, object, cleanup);
-    unsafe { &mut *host_ptr }.v8_finalizers.push(entry);
+    let retired = common.finalizers.borrow_mut().push(entry);
+    // Compaction can release a pending native cleanup as well. Keep those
+    // drops outside the component borrow, matching explicit teardown.
+    drop(retired);
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn common_runtime_teardown_releases_borrow_before_running_cleanup() {
+        use crate::common_runtime::{CommonRuntimeBinding, CommonRuntimeState};
+        crate::ensure_v8_for_test();
+        let common = Rc::new(CommonRuntimeState::default());
+        let lifecycle = Rc::new(Cell::new(crate::util::ContextHostLifecycle::Active));
+        let cleanup_count = Rc::new(Cell::new(0));
+        let mut isolate = v8::Isolate::new(Default::default());
+        {
+            let scope = std::pin::pin!(v8::HandleScope::new(&mut isolate));
+            let scope = &mut scope.init();
+            let context = v8::Context::new(scope, Default::default());
+            // Finalizer registration uses only the shared component, so this
+            // owner identity does not need to dereference a Document host.
+            CommonRuntimeBinding::install_window(
+                context,
+                &common,
+                std::ptr::NonNull::<crate::native_bridge::JsContextHost>::dangling().as_ptr(),
+                &lifecycle,
+            );
+            let scope = &mut v8::ContextScope::new(scope, context);
+            let object = v8::Object::new(scope);
+            let owner = Rc::downgrade(&common);
+            let count = Rc::clone(&cleanup_count);
+            track_context_owned_v8_finalizer(scope, object, move || {
+                assert_eq!(owner.upgrade().unwrap().finalizer_count(), 0);
+                count.set(count.get() + 1);
+            });
+            assert_eq!(common.finalizer_count(), 1);
+        }
+        common.clear_for_context_teardown();
+        common.clear_for_context_teardown();
+        assert_eq!(common.finalizer_count(), 0);
+        assert_eq!(cleanup_count.get(), 1);
+        drop(common);
+        drop(isolate);
+    }
 
     #[test]
     fn context_teardown_runs_cleanup_exactly_once_before_isolate_drop() {
@@ -119,14 +159,14 @@ mod tests {
             let scope = &mut v8::ContextScope::new(scope, context);
             let object = v8::Object::new(scope);
             let cleanup_count_for_callback = Rc::clone(&cleanup_count);
-            registry.push(ContextOwnedV8Finalizer::new(
+            drop(registry.push(ContextOwnedV8Finalizer::new(
                 scope,
                 object,
                 Box::new(move || {
                     cleanup_count_for_callback
                         .set(cleanup_count_for_callback.get().saturating_add(1));
                 }),
-            ));
+            )));
             assert_eq!(registry.len(), 1);
         }
 

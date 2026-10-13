@@ -5,9 +5,8 @@ use super::*;
 pub(crate) const WORKER_STATE_SLOT: &str = "__workerState";
 
 pub(crate) struct WorkerGlobalState {
-    /// Weak handles and native cleanups owned by this worker isolate. Worker
-    /// teardown clears this registry before `OwnedIsolate` is destroyed.
-    pub(crate) v8_finalizers: crate::v8_finalizer::V8FinalizerRegistry,
+    /// Components shared with Window runtimes, owned by this Worker run.
+    pub(crate) common: Rc<crate::common_runtime::CommonRuntimeState>,
     /// Channel to send messages back to the parent.
     pub(in crate::worker) parent_tx: mpsc::UnboundedSender<WorkerToParentMessage>,
     /// Internal wake channel used by worker-owned async runtime surfaces.
