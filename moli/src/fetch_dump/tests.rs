@@ -621,4 +621,3 @@ async fn markdown_with_frames_uses_latest_frame_document_and_links_for_failures(
     server.abort();
     Ok(())
 }
-
