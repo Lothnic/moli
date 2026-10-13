@@ -522,3 +522,45 @@ fn fallback_block_elements_separate_neighboring_words() {
         );
     }
 }
+
+#[test]
+fn accessible_link_fallback_never_duplicates_visible_inline_or_block_descendants() {
+    for content in [
+        "Visible",
+        "<img src='/cover' alt='Cover'>",
+        "<code>code</code>",
+        "<pre>preformatted</pre>",
+        "<pre><code>nested code</code></pre>",
+        "<p>Paragraph</p>",
+        "<h2>Heading</h2>",
+        "<ul><li>Item</li></ul>",
+        "<blockquote>Quotation</blockquote>",
+        "<table><tr><td>Cell</td></tr></table>",
+    ] {
+        let plain = format!("<a href='/target'>{content}</a>");
+        let labeled = format!("<a href='/target' aria-label='Fallback'>{content}</a>");
+        assert_eq!(
+            markdown(&labeled, false),
+            markdown(&plain, false),
+            "{content}"
+        );
+    }
+}
+
+#[test]
+fn empty_link_fallback_belongs_only_to_that_anchor() {
+    assert_eq!(
+        markdown(
+            "<div aria-label='Ancestor'><a href='/one'></a><span aria-label='Adjacent'></span><a href='/two' aria-label='Own'></a></div>",
+            false
+        ),
+        "[](/one)[Own](/two)"
+    );
+    assert_eq!(
+        markdown(
+            "<a href='/target' aria-label='Own'><span></span><code></code></a>",
+            false
+        ),
+        "[Own](/target)"
+    );
+}

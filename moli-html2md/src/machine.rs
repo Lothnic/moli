@@ -168,6 +168,7 @@ impl<'a, D: Dom + ?Sized> Machine<'a, D> {
         let writer = self.writers.pop().expect("capture has an output");
         if let Some(parent) = self.writers.last_mut() {
             parent.last_link = parent.last_link.max(writer.last_link);
+            parent.last_link_content = parent.last_link_content.max(writer.last_link_content);
         }
         writer.finish()
     }
