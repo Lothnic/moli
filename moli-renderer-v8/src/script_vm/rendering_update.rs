@@ -74,7 +74,7 @@ impl ScriptVm {
             self._context_host
                 .borrow_mut()
                 .resize_observer_rendering_update_active = true;
-            let broadcast: Result<()> = (|| {
+            let broadcast: Result<bool> = (|| {
                 let mut minimum_depth = 0;
                 let mut undelivered = false;
                 for iteration in 0..32 {
@@ -104,26 +104,25 @@ impl ScriptVm {
                     };
                     minimum_depth = depth;
                 }
-                if undelivered {
-                    self.record_runtime_warning(format_args!(
-                        "ResizeObserver loop completed with undelivered notifications."
-                    ));
-                    self.with_default_context_scope(|scope, host_ptr| {
-                        unsafe { &mut *host_ptr }
-                            .report_resize_observer_loop_error_for_target(
-                                scope,
-                                host_ptr,
-                                owner.target(),
-                            )
-                            .map_err(anyhow::Error::msg)
-                    })?;
-                }
-                Ok(())
+                Ok(undelivered)
             })();
             self._context_host
                 .borrow_mut()
                 .resize_observer_rendering_update_active = false;
-            broadcast?;
+            if broadcast? {
+                self.record_runtime_warning(format_args!(
+                    "ResizeObserver loop completed with undelivered notifications."
+                ));
+                self.with_default_context_scope(|scope, host_ptr| {
+                    unsafe { &mut *host_ptr }
+                        .report_resize_observer_loop_error_for_target(
+                            scope,
+                            host_ptr,
+                            owner.target(),
+                        )
+                        .map_err(anyhow::Error::msg)
+                })?;
+            }
         }
         Ok(applied)
     }
