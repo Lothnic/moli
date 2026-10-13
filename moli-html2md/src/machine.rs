@@ -9,7 +9,7 @@ enum Task<'a, Id> {
     Children(Option<Id>, usize),
     Boundary,
     PopStyle,
-    EndLink(usize),
+    EndLink(usize, Option<&'a str>),
     EndQuote,
     EndHeading(usize),
     EndList(usize),
@@ -70,7 +70,9 @@ impl<'a, D: Dom + ?Sized> Machine<'a, D> {
                 Task::Children(None, _) | Task::RawChildren(None, _, _) => {}
                 Task::Boundary => self.writer().boundary(2),
                 Task::PopStyle => self.writer().pop_style(),
-                Task::EndLink(serial) => self.writer().end_link(serial),
+                Task::EndLink(serial, fallback_label) => {
+                    self.writer().end_link(serial, fallback_label)
+                }
                 Task::EndQuote => {
                     let content = self.take_writer().into_string();
                     let mut quote = String::new();
@@ -166,6 +168,7 @@ impl<'a, D: Dom + ?Sized> Machine<'a, D> {
         let writer = self.writers.pop().expect("capture has an output");
         if let Some(parent) = self.writers.last_mut() {
             parent.last_link = parent.last_link.max(writer.last_link);
+            parent.last_link_content = parent.last_link_content.max(writer.last_link_content);
         }
         writer.finish()
     }
@@ -232,7 +235,10 @@ impl<'a, D: Dom + ?Sized> Machine<'a, D> {
                         title: self.dom.attribute(node, "title"),
                     };
                     if self.writer().push_style(style) {
-                        self.tasks.push(Task::EndLink(serial));
+                        self.tasks.push(Task::EndLink(
+                            serial,
+                            self.dom.attribute(node, "aria-label"),
+                        ));
                     }
                 }
             }

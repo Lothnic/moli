@@ -58,6 +58,40 @@ fn empty_links_keep_destinations_across_adjacent_and_nested_elements() {
 }
 
 #[test]
+fn empty_links_use_their_own_accessible_label_without_replacing_visible_text() {
+    for (html, expected) in [
+        (
+            "<a href='/report' aria-label='Open report'></a>",
+            "[Open report](/report)",
+        ),
+        (
+            "<a href='/report' aria-label='Open report'>Visible report</a>",
+            "[Visible report](/report)",
+        ),
+        (
+            "<a href='/report' aria-label='  Open   report  '> </a>",
+            "[Open report](/report)",
+        ),
+        ("<a href='/report' aria-label='   '></a>", "[](/report)"),
+        (
+            "<a href='/report' aria-label='[Open] *report*'></a>",
+            r"[\[Open\] \*report\*](/report)",
+        ),
+        (
+            "<a href='/one' aria-label='One'><span></span></a><a href='/two' aria-label='Two'></a>",
+            "[One](/one)[Two](/two)",
+        ),
+        (
+            "<a href='/report' aria-label='Fallback'><img src='/cover.png' alt='Cover'></a>",
+            "[![Cover](/cover.png)](/report)",
+        ),
+        ("<a aria-label='No destination'></a>", ""),
+    ] {
+        assert_eq!(markdown(html, false), expected, "{html}");
+    }
+}
+
+#[test]
 fn href_without_a_destination_does_not_create_an_empty_markdown_link() {
     for html in [
         "<a>label</a>",
@@ -487,4 +521,46 @@ fn fallback_block_elements_separate_neighboring_words() {
             "before\n\ncontent\n\nafter"
         );
     }
+}
+
+#[test]
+fn accessible_link_fallback_never_duplicates_visible_inline_or_block_descendants() {
+    for content in [
+        "Visible",
+        "<img src='/cover' alt='Cover'>",
+        "<code>code</code>",
+        "<pre>preformatted</pre>",
+        "<pre><code>nested code</code></pre>",
+        "<p>Paragraph</p>",
+        "<h2>Heading</h2>",
+        "<ul><li>Item</li></ul>",
+        "<blockquote>Quotation</blockquote>",
+        "<table><tr><td>Cell</td></tr></table>",
+    ] {
+        let plain = format!("<a href='/target'>{content}</a>");
+        let labeled = format!("<a href='/target' aria-label='Fallback'>{content}</a>");
+        assert_eq!(
+            markdown(&labeled, false),
+            markdown(&plain, false),
+            "{content}"
+        );
+    }
+}
+
+#[test]
+fn empty_link_fallback_belongs_only_to_that_anchor() {
+    assert_eq!(
+        markdown(
+            "<div aria-label='Ancestor'><a href='/one'></a><span aria-label='Adjacent'></span><a href='/two' aria-label='Own'></a></div>",
+            false
+        ),
+        "[](/one)[Own](/two)"
+    );
+    assert_eq!(
+        markdown(
+            "<a href='/target' aria-label='Own'><span></span><code></code></a>",
+            false
+        ),
+        "[Own](/target)"
+    );
 }
