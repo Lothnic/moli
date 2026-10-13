@@ -326,12 +326,15 @@ async fn fresh_layout_resize_observer_updates_virtual_children_and_deduplicates_
     let widths = page
         .evaluate_runtime_expression_async("JSON.stringify(widths)")
         .await?;
-    assert_eq!(widths["value"], "[120,420]");
+    // Registration keeps the existing checkpoint delivery, which observes
+    // the pre-layout zero-size snapshot before the first rendered geometry.
+    // The layout path must then report each real size exactly once.
+    assert_eq!(widths["value"], "[0,120,420]");
     render_page_output_async(&mut page, &screenshot).await?;
     assert_eq!(
         page.evaluate_runtime_expression_async("JSON.stringify(widths)")
             .await?["value"],
-        "[120,420]"
+        "[0,120,420]"
     );
     server.abort();
     Ok(())
