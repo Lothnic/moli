@@ -48,6 +48,7 @@ document.getElementById('field').focus();
                             shape: moli_layout::PaintShape::Rect(rect),
                             brush: moli_layout::PaintBrush::Solid(color),
                             transform,
+                            ..
                         } if *color == moli_layout::PaintColor::new(1.0, 0.0, 0.0, 1.0)
                             && rect.width == 1.5 =>
                         {
@@ -195,7 +196,7 @@ document.body.innerHTML='<input id=plain><input id=placeholder placeholder=Examp
                     moli_layout::PaintViewport::new(260, 180, 1.0),
                 )?.expect("text control layout");
                 let fills = snapshot.fragments.iter().filter_map(|fragment| match fragment {
-                    moli_layout::PaintFragment::Fill { shape:moli_layout::PaintShape::Rect(rect),brush:moli_layout::PaintBrush::Solid(color),transform } => Some((transform.map_rect(*rect).bounding_rect(),*color)),
+                    moli_layout::PaintFragment::Fill { shape:moli_layout::PaintShape::Rect(rect),brush:moli_layout::PaintBrush::Solid(color),transform, .. } => Some((transform.map_rect(*rect).bounding_rect(),*color)),
                     _ => None,
                 }).collect::<Vec<_>>();
                 let carets = fills.iter().filter(|(rect,color)| rect.width == 1.5 && *color == moli_layout::PaintColor::new(0.0,1.0,0.0,1.0)).collect::<Vec<_>>();
