@@ -4,6 +4,16 @@ use super::*;
 
 pub(crate) const WORKER_STATE_SLOT: &str = "__workerState";
 
+impl WorkerGlobalState {
+    pub(crate) fn callback_invocation_allowed(&self) -> bool {
+        !self.termination_requested.load(Ordering::Acquire)
+    }
+
+    pub(crate) fn callback_task_delivery_allowed(&self) -> bool {
+        !self.closed && self.callback_invocation_allowed()
+    }
+}
+
 pub(crate) struct WorkerGlobalState {
     /// Components shared with Window runtimes, owned by this Worker run.
     pub(crate) common: Rc<crate::common_runtime::CommonRuntimeState>,

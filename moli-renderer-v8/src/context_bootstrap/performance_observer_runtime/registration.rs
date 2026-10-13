@@ -7,10 +7,10 @@
 use moli_webidl_callback::{PreparedWebIdlCallbackFunction, WebIdlCallbackFunction};
 
 use super::*;
+use crate::common_runtime::{CommonRuntimeBinding, RuntimeExecutionContext};
 use crate::observer_runtime::{ObserverCallbackId, ObserverCallbackResidence};
-use crate::util::{context_host_ptr_from_global_bridge, get_private_value, set_private_value};
+use crate::util::{get_private_value, set_private_value};
 use crate::webidl_callback_execution::PreparedWebIdlCallbackExecution;
-use crate::worker::{get_worker_state, worker_global_is_closed, worker_termination_requested};
 
 enum RegistrationEnvironment {
     Window {
@@ -23,6 +23,7 @@ enum RegistrationEnvironment {
 pub(super) struct PerformanceObserverRegistration<'s> {
     observer: v8::Local<'s, v8::Object>,
     environment: RegistrationEnvironment,
+    binding: std::rc::Rc<CommonRuntimeBinding>,
 }
 
 pub(super) fn register_performance_observer_callback<'s>(
@@ -35,13 +36,13 @@ pub(super) fn register_performance_observer_callback<'s>(
     v8::Local<'s, v8::Object>,
     v8::Local<'s, v8::Object>,
 )> {
-    if let Some(host_ptr) = context_host_ptr_from_global_bridge(scope) {
+    let binding = CommonRuntimeBinding::from_scope(scope)?;
+    if let RuntimeExecutionContext::Window(host_ptr) = binding.execution_context(scope)? {
         let (id, callback, relevant, incumbent) =
             crate::observer_runtime::register_callback(scope, host_ptr, observer, callback)
                 .into_parts();
         return Some((id.as_u32(), callback, relevant, incumbent));
     }
-    get_worker_state(scope)?;
     let value = v8::Local::<v8::Object>::try_from(callback.value(scope)).ok()?;
     let relevant = callback.relevant_context(scope).global(scope);
     let incumbent = callback.incumbent_context(scope).global(scope);
@@ -57,21 +58,24 @@ impl<'s> PerformanceObserverRegistration<'s> {
     ) -> Option<Self> {
         let id = get_private_value(scope, observer, PERFORMANCE_OBSERVER_CALLBACK_ID_SLOT)?
             .number_value(scope)?;
-        let environment = if let Some(host_ptr) = context_host_ptr_from_global_bridge(scope) {
-            RegistrationEnvironment::Window {
+        let binding = CommonRuntimeBinding::from_scope(scope)?;
+        let environment = match binding.execution_context(scope)? {
+            RuntimeExecutionContext::Window(host_ptr) => RegistrationEnvironment::Window {
                 host_ptr,
                 callback_id: ObserverCallbackId::from_number(id)?,
+            },
+            RuntimeExecutionContext::Worker => {
+                if id != 0.0 || observer.get_creation_context(scope)? != scope.get_current_context()
+                {
+                    return None;
+                }
+                RegistrationEnvironment::Worker
             }
-        } else {
-            get_worker_state(scope)?;
-            if id != 0.0 || observer.get_creation_context(scope)? != scope.get_current_context() {
-                return None;
-            }
-            RegistrationEnvironment::Worker
         };
         Some(Self {
             observer,
             environment,
+            binding,
         })
     }
 
@@ -82,10 +86,7 @@ impl<'s> PerformanceObserverRegistration<'s> {
                 callback_id,
             } => crate::observer_runtime::callback_is_current(host_ptr, callback_id),
             RegistrationEnvironment::Worker => {
-                get_worker_state(scope).is_some()
-                    && !worker_global_is_closed(scope)
-                    && !worker_termination_requested(scope)
-                    && !scope.is_execution_terminating()
+                self.binding.worker_can_deliver_task() && !scope.is_execution_terminating()
             }
         }
     }
@@ -179,7 +180,7 @@ impl<'s> PerformanceObserverRegistration<'s> {
                     incumbent,
                 );
                 crate::observer_runtime::prepare_callback(scope, host_ptr, residence)?
-                    .into_execution(host_ptr)
+                    .into_execution(scope, host_ptr)
             }
             RegistrationEnvironment::Worker => {
                 let context = self.observer.get_creation_context(scope)?;
@@ -187,9 +188,7 @@ impl<'s> PerformanceObserverRegistration<'s> {
                 let incumbent = incumbent.get_creation_context(scope)?;
                 let callback =
                     PreparedWebIdlCallbackFunction::try_new(scope, callback, relevant, incumbent)?;
-                Some(PreparedWebIdlCallbackExecution::worker(
-                    scope, callback, context,
-                ))
+                PreparedWebIdlCallbackExecution::worker(scope, callback, context)
             }
         }
     }
@@ -206,11 +205,11 @@ pub(super) fn performance_observer_callback_is_current<'s>(
 pub(super) fn active_performance_observers<'s>(
     scope: &mut v8::PinScope<'s, '_>,
 ) -> Vec<v8::Local<'s, v8::Object>> {
-    if let Some(host_ptr) = context_host_ptr_from_global_bridge(scope) {
-        return crate::observer_runtime::active_performance_observer_callbacks(scope, host_ptr);
-    }
-    if get_worker_state(scope).is_none() {
+    let Some(binding) = CommonRuntimeBinding::from_scope(scope) else {
         return Vec::new();
+    };
+    if let Some(RuntimeExecutionContext::Window(host_ptr)) = binding.execution_context(scope) {
+        return crate::observer_runtime::active_performance_observer_callbacks(scope, host_ptr);
     }
     let Some(registry) = global_queue_array(scope, PERFORMANCE_OBSERVER_REGISTRY_SLOT) else {
         return Vec::new();

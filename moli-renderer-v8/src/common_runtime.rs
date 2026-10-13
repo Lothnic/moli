@@ -7,6 +7,10 @@
 use std::{
     cell::{Cell, RefCell},
     rc::{Rc, Weak},
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
 };
 
 use crate::{
@@ -48,7 +52,14 @@ enum RuntimeOwner {
     },
     Worker {
         state: Weak<RefCell<WorkerGlobalState>>,
+        termination_requested: Arc<AtomicBool>,
     },
+}
+
+#[derive(Clone, Copy)]
+pub(crate) enum RuntimeExecutionContext {
+    Window(*mut JsContextHost),
+    Worker,
 }
 
 impl CommonRuntimeBinding {
@@ -80,11 +91,18 @@ impl CommonRuntimeBinding {
         context: v8::Local<'_, v8::Context>,
         state: &Rc<RefCell<WorkerGlobalState>>,
     ) {
-        let common = Rc::clone(&state.borrow().common);
+        let (common, termination_requested) = {
+            let state = state.borrow();
+            (
+                Rc::clone(&state.common),
+                Arc::clone(&state.termination_requested),
+            )
+        };
         let previous = context.set_slot(Rc::new(Self {
             common: Rc::downgrade(&common),
             owner: RuntimeOwner::Worker {
                 state: Rc::downgrade(state),
+                termination_requested,
             },
         }));
         assert!(
@@ -124,6 +142,17 @@ impl CommonRuntimeBinding {
         Some(())
     }
 
+    pub(crate) fn execution_context(
+        &self,
+        scope: &mut v8::PinScope<'_, '_>,
+    ) -> Option<RuntimeExecutionContext> {
+        self.validate_context(scope)?;
+        Some(match self.owner {
+            RuntimeOwner::Window { host_ptr, .. } => RuntimeExecutionContext::Window(host_ptr),
+            RuntimeOwner::Worker { .. } => RuntimeExecutionContext::Worker,
+        })
+    }
+
     pub(crate) fn window_host_ptr(&self) -> Option<*mut JsContextHost> {
         self.runtime()?;
         let RuntimeOwner::Window {
@@ -134,6 +163,27 @@ impl CommonRuntimeBinding {
             return None;
         };
         (lifecycle.upgrade()?.get() != ContextHostLifecycle::Destroyed).then_some(*host_ptr)
+    }
+
+    pub(crate) fn worker_can_invoke(&self) -> bool {
+        self.runtime().is_some()
+            && match &self.owner {
+                RuntimeOwner::Worker {
+                    state,
+                    termination_requested,
+                } => state.upgrade().is_some() && !termination_requested.load(Ordering::Acquire),
+                RuntimeOwner::Window { .. } => false,
+            }
+    }
+
+    pub(crate) fn worker_can_deliver_task(&self) -> bool {
+        self.runtime().is_some()
+            && match &self.owner {
+                RuntimeOwner::Worker { state, .. } => state
+                    .upgrade()
+                    .is_some_and(|state| state.borrow().callback_task_delivery_allowed()),
+                RuntimeOwner::Window { .. } => false,
+            }
     }
 }
 
@@ -184,5 +234,23 @@ mod tests {
         let scope = &mut v8::ContextScope::new(scope, first);
         assert!(CommonRuntimeBinding::from_scope(scope).is_none());
         assert!(first_binding.runtime().is_none());
+    }
+
+    #[test]
+    fn missing_context_binding_rejects_callback_before_reading_its_carrier() {
+        crate::ensure_v8_for_test();
+        let mut isolate = v8::Isolate::new(Default::default());
+        let scope = std::pin::pin!(v8::HandleScope::new(&mut isolate));
+        let scope = &mut scope.init();
+        let context = v8::Context::new(scope, Default::default());
+        let scope = &mut v8::ContextScope::new(scope, context);
+        let object = v8::Object::new(scope);
+        assert!(CommonRuntimeBinding::from_scope(scope).is_none());
+        assert!(
+            crate::webidl_callback_execution::PreparedWebIdlCallbackExecution::from_traced(
+                scope, object
+            )
+            .is_none()
+        );
     }
 }

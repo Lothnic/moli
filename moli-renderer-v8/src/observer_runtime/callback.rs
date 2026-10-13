@@ -329,6 +329,7 @@ impl PreparedObserverCallback {
     /// Window/Worker invocation and exception-reporting adapter.
     pub(crate) fn into_execution(
         self,
+        scope: &mut v8::PinScope<'_, '_>,
         host_ptr: *mut JsContextHost,
     ) -> Option<PreparedWebIdlCallbackExecution> {
         let PreparedWindowWebIdlCallbackFunction::Live {
@@ -338,12 +339,13 @@ impl PreparedObserverCallback {
         else {
             return None;
         };
-        Some(PreparedWebIdlCallbackExecution::window(
+        PreparedWebIdlCallbackExecution::window(
+            scope,
             callback,
             host_ptr,
             Some(self.observer_identity?),
             relevant_identity,
-        ))
+        )
     }
 
     pub(crate) fn relevant_context<'s>(
