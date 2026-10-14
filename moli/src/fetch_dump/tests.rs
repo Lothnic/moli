@@ -109,7 +109,7 @@ fn text_pdf(text: &str) -> Result<Vec<u8>> {
     Ok(bytes)
 }
 
-fn docx_archive(content_types: &str, document: &str) -> Vec<u8> {
+fn zip_archive(entries: &[(&str, &str)]) -> Vec<u8> {
     fn crc32(bytes: &[u8]) -> u32 {
         let mut crc = 0xffff_ffff_u32;
         for byte in bytes {
@@ -122,13 +122,10 @@ fn docx_archive(content_types: &str, document: &str) -> Vec<u8> {
         !crc
     }
 
-    let entries = [
-        ("[Content_Types].xml", content_types.as_bytes()),
-        ("word/document.xml", document.as_bytes()),
-    ];
     let mut archive = Vec::new();
     let mut central = Vec::new();
-    for (name, body) in entries {
+    for &(name, body) in entries {
+        let body = body.as_bytes();
         let mut encoder =
             flate2::write::DeflateEncoder::new(Vec::new(), flate2::Compression::default());
         encoder.write_all(body).unwrap();
@@ -183,10 +180,13 @@ fn docx_archive(content_types: &str, document: &str) -> Vec<u8> {
 }
 
 fn docx_fixture(document: &str) -> Vec<u8> {
-    docx_archive(
-        r#"<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>"#,
-        document,
-    )
+    zip_archive(&[
+        (
+            "[Content_Types].xml",
+            r#"<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>"#,
+        ),
+        ("word/document.xml", document),
+    ])
 }
 
 #[test]
@@ -210,8 +210,49 @@ fn raw_docx_markdown_preserves_paragraph_heading_break_and_table_rows() -> Resul
 }
 
 #[test]
+fn raw_docx_markdown_includes_referenced_footnotes_and_endnotes() -> Result<()> {
+    let bytes = zip_archive(&[
+        (
+            "[Content_Types].xml",
+            r#"<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>"#,
+        ),
+        (
+            "word/document.xml",
+            r#"<?xml version="1.0"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>Body with note</w:t><w:footnoteReference w:id="2"/><w:endnoteReference w:id="5"/></w:r></w:p></w:body></w:document>"#,
+        ),
+        (
+            "word/footnotes.xml",
+            r#"<?xml version="1.0"?><w:footnotes xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:footnote w:id="-1"><w:p><w:r><w:t>separator</w:t></w:r></w:p></w:footnote><w:footnote w:id="2"><w:p><w:r><w:t>Referenced footnote body</w:t></w:r></w:p></w:footnote><w:footnote w:id="8"><w:p><w:r><w:t>Unreferenced footnote</w:t></w:r></w:p></w:footnote></w:footnotes>"#,
+        ),
+        (
+            "word/endnotes.xml",
+            r#"<?xml version="1.0"?><w:endnotes xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:endnote w:id="5"><w:p><w:r><w:t>Referenced endnote body</w:t></w:r></w:p></w:endnote></w:endnotes>"#,
+        ),
+    ]);
+    let markdown = String::from_utf8(render_raw_document_markdown(&bytes)?)?;
+    assert!(
+        markdown.contains("Body with note[^footnote-2][^endnote-5]"),
+        "{markdown}"
+    );
+    assert!(
+        markdown.contains("[^footnote-2]: Referenced footnote body"),
+        "{markdown}"
+    );
+    assert!(
+        markdown.contains("[^endnote-5]: Referenced endnote body"),
+        "{markdown}"
+    );
+    assert!(!markdown.contains("separator"), "{markdown}");
+    assert!(!markdown.contains("Unreferenced footnote"), "{markdown}");
+    Ok(())
+}
+
+#[test]
 fn raw_docx_markdown_rejects_non_docx_zip_malformed_xml_and_empty_body() {
-    let non_docx = docx_archive("<Types/>", "<document/>");
+    let non_docx = zip_archive(&[
+        ("[Content_Types].xml", "<Types/>"),
+        ("word/document.xml", "<document/>"),
+    ]);
     assert!(render_raw_document_markdown(&non_docx).is_err());
     let malformed = docx_fixture("<w:document>");
     assert!(render_raw_document_markdown(&malformed).is_err());
@@ -266,7 +307,7 @@ async fn framed_markdown_reuses_loaded_pdf_children_without_following_links() ->
     let app = Router::new()
         .route(
             "/",
-            get(|| async { Html(r#"<p>Parent</p><embed src="/doc.pdf" type="application/pdf"><object data="/doc.pdf" type="application/pdf"></object><iframe src="/doc.pdf"></iframe><a href="/linked.pdf">ordinary link</a>"#) }),
+            get(|| async { Html(r#"<p>Parent</p><embed src="/doc.pdf#page=2" type="application/pdf"><object data="/doc.pdf#page=3" type="application/pdf"></object><iframe src="/doc.pdf#page=4"></iframe><a href="/linked.pdf">ordinary link</a>"#) }),
         )
         .route(
             "/doc.pdf",

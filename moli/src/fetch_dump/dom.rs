@@ -160,6 +160,10 @@ pub(super) async fn render_markdown(
     strip: StripOptions,
     with_frames: bool,
 ) -> Result<String> {
+    // Markdown represents the rendered document, including DOM populated by
+    // layout observers. Publish current geometry before taking the live DOM
+    // snapshot so queued ResizeObserver work can settle first.
+    page.publish_layout_async().await?;
     let mut markdown = page
         .render_page_dump_async(RendererPageDumpOptions {
             format: RendererPageDumpFormat::Markdown,
@@ -184,7 +188,14 @@ async fn append_embedded_pdf_markdown(page: &mut Page, markdown: &mut String) ->
     };
     let urls: Vec<String> = serde_json::from_str(value)?;
     let frames = page.child_frame_tree_snapshot_async().await?;
+    let mut appended_urls = Vec::new();
     for url in urls {
+        if appended_urls
+            .iter()
+            .any(|appended| same_resource_url(appended, &url))
+        {
+            continue;
+        }
         let Some(network) = find_loaded_child_document(&frames, &url) else {
             continue;
         };
@@ -206,6 +217,7 @@ async fn append_embedded_pdf_markdown(page: &mut Page, markdown: &mut String) ->
         let text = String::from_utf8(text)?;
         markdown.push_str("\n\n## Embedded document\n\n");
         markdown.push_str(text.trim());
+        appended_urls.push(url);
     }
     Ok(())
 }
@@ -216,7 +228,9 @@ fn find_loaded_child_document<'a>(
 ) -> Option<&'a moli_core::page::ChildFrameDocumentNetworkSnapshot> {
     for frame in frames {
         if let Some(network) = frame.document_network.as_ref()
-            && (frame.url == url || network.request_url == url || network.final_url == url)
+            && (same_resource_url(&frame.url, url)
+                || same_resource_url(&network.request_url, url)
+                || same_resource_url(&network.final_url, url))
         {
             return Some(network);
         }
@@ -225,6 +239,18 @@ fn find_loaded_child_document<'a>(
         }
     }
     None
+}
+
+fn same_resource_url(left: &str, right: &str) -> bool {
+    if left == right {
+        return true;
+    }
+    let (Ok(mut left), Ok(mut right)) = (url::Url::parse(left), url::Url::parse(right)) else {
+        return false;
+    };
+    left.set_fragment(None);
+    right.set_fragment(None);
+    left == right
 }
 
 fn renderer_strip_options(strip: StripOptions) -> RendererPageDumpStripOptions {

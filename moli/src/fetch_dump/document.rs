@@ -1,4 +1,4 @@
-use std::io::Read;
+use std::{collections::HashMap, io::Read};
 
 use anyhow::{Context, Result, anyhow, bail, ensure};
 use flate2::read::DeflateDecoder;
@@ -9,6 +9,43 @@ const DOCX_MAIN_CONTENT_TYPE: &str =
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml";
 const MAX_CONTENT_TYPES_BYTES: usize = 1024 * 1024;
 const MAX_DOCUMENT_XML_BYTES: usize = 32 * 1024 * 1024;
+const MAX_NOTES_XML_BYTES: usize = 8 * 1024 * 1024;
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+enum NoteKind {
+    Footnote,
+    Endnote,
+}
+
+impl NoteKind {
+    fn reference_element(self) -> &'static str {
+        match self {
+            Self::Footnote => "footnoteReference",
+            Self::Endnote => "endnoteReference",
+        }
+    }
+
+    fn note_element(self) -> &'static str {
+        match self {
+            Self::Footnote => "footnote",
+            Self::Endnote => "endnote",
+        }
+    }
+
+    fn part_name(self) -> &'static str {
+        match self {
+            Self::Footnote => "word/footnotes.xml",
+            Self::Endnote => "word/endnotes.xml",
+        }
+    }
+
+    fn label(self, id: &str) -> String {
+        match self {
+            Self::Footnote => format!("footnote-{id}"),
+            Self::Endnote => format!("endnote-{id}"),
+        }
+    }
+}
 
 pub(super) fn render_document_markdown(body: &[u8]) -> Result<Vec<u8>> {
     let text = if body.starts_with(b"%PDF-") {
@@ -44,8 +81,8 @@ fn render_pdf_text(body: &[u8]) -> Result<String> {
     Ok(text)
 }
 
-fn render_docx_text(body: &[u8]) -> Result<String> {
-    let content_types = zip_entry(body, "[Content_Types].xml", MAX_CONTENT_TYPES_BYTES)
+fn render_docx_text(package: &[u8]) -> Result<String> {
+    let content_types = zip_entry(package, "[Content_Types].xml", MAX_CONTENT_TYPES_BYTES)
         .context("invalid DOCX package")?;
     let content_types =
         std::str::from_utf8(&content_types).context("DOCX content-types manifest is not UTF-8")?;
@@ -61,7 +98,7 @@ fn render_docx_text(body: &[u8]) -> Result<String> {
         "ZIP package is not a DOCX document"
     );
 
-    let document = zip_entry(body, "word/document.xml", MAX_DOCUMENT_XML_BYTES)
+    let document = zip_entry(package, "word/document.xml", MAX_DOCUMENT_XML_BYTES)
         .context("invalid DOCX package")?;
     let document = std::str::from_utf8(&document).context("DOCX main document is not UTF-8")?;
     let xml = roxmltree::Document::parse(document).context("failed to parse DOCX main document")?;
@@ -71,6 +108,30 @@ fn render_docx_text(body: &[u8]) -> Result<String> {
         .ok_or_else(|| anyhow!("DOCX main document has no body"))?;
     let mut blocks = Vec::new();
     render_blocks(body, &mut blocks);
+    let references = note_references(body);
+    if !references.is_empty() {
+        let footnotes = render_notes_part(
+            zip_entry_optional(package, NoteKind::Footnote.part_name(), MAX_NOTES_XML_BYTES)?,
+            NoteKind::Footnote,
+        )?;
+        let endnotes = render_notes_part(
+            zip_entry_optional(package, NoteKind::Endnote.part_name(), MAX_NOTES_XML_BYTES)?,
+            NoteKind::Endnote,
+        )?;
+        for (kind, id) in references {
+            let notes = match kind {
+                NoteKind::Footnote => &footnotes,
+                NoteKind::Endnote => &endnotes,
+            };
+            if let Some(note) = notes.get(&id) {
+                blocks.push(format!(
+                    "[^{}]: {}",
+                    kind.label(&id),
+                    note.replace('\n', "\n    ")
+                ));
+            }
+        }
+    }
     let markdown = blocks
         .into_iter()
         .filter(|block| !block.trim().is_empty())
@@ -99,6 +160,52 @@ fn render_blocks(parent: roxmltree::Node<'_, '_>, blocks: &mut Vec<String>) {
     }
 }
 
+fn note_references(body: roxmltree::Node<'_, '_>) -> Vec<(NoteKind, String)> {
+    let mut references = Vec::new();
+    for node in body.descendants().filter(roxmltree::Node::is_element) {
+        for kind in [NoteKind::Footnote, NoteKind::Endnote] {
+            if is_word_node(node, kind.reference_element())
+                && let Some(id) = word_attribute(node, "id")
+                && !references.contains(&(kind, id.clone()))
+            {
+                references.push((kind, id));
+            }
+        }
+    }
+    references
+}
+
+fn render_notes_part(bytes: Option<Vec<u8>>, kind: NoteKind) -> Result<HashMap<String, String>> {
+    let Some(bytes) = bytes else {
+        return Ok(HashMap::new());
+    };
+    let source = std::str::from_utf8(&bytes).context("DOCX notes part is not UTF-8")?;
+    let xml = roxmltree::Document::parse(source).context("failed to parse DOCX notes part")?;
+    let mut notes = HashMap::new();
+    for node in xml
+        .descendants()
+        .filter(|node| is_word_node(*node, kind.note_element()))
+    {
+        let Some(id) = word_attribute(node, "id") else {
+            continue;
+        };
+        if id.parse::<i64>().is_ok_and(|id| id < 0) {
+            continue;
+        }
+        let mut blocks = Vec::new();
+        render_blocks(node, &mut blocks);
+        let text = blocks
+            .into_iter()
+            .filter(|block| !block.trim().is_empty())
+            .collect::<Vec<_>>()
+            .join("\n\n");
+        if !text.trim().is_empty() {
+            notes.insert(id, text);
+        }
+    }
+    Ok(notes)
+}
+
 fn render_paragraph(paragraph: roxmltree::Node<'_, '_>) -> Option<String> {
     let mut text = String::new();
     for node in paragraph.descendants().filter(roxmltree::Node::is_element) {
@@ -108,6 +215,14 @@ fn render_paragraph(paragraph: roxmltree::Node<'_, '_>) -> Option<String> {
             text.push('\t');
         } else if is_word_node(node, "br") || is_word_node(node, "cr") {
             text.push('\n');
+        } else if is_word_node(node, NoteKind::Footnote.reference_element()) {
+            if let Some(id) = word_attribute(node, "id") {
+                text.push_str(&format!("[^{}]", NoteKind::Footnote.label(&id)));
+            }
+        } else if is_word_node(node, NoteKind::Endnote.reference_element())
+            && let Some(id) = word_attribute(node, "id")
+        {
+            text.push_str(&format!("[^{}]", NoteKind::Endnote.label(&id)));
         }
     }
     let text = text.lines().map(str::trim).collect::<Vec<_>>().join("\n");
@@ -196,6 +311,15 @@ fn heading_level(style: &str) -> Option<usize> {
 }
 
 fn zip_entry(archive: &[u8], wanted_name: &str, max_bytes: usize) -> Result<Vec<u8>> {
+    zip_entry_optional(archive, wanted_name, max_bytes)?
+        .ok_or_else(|| anyhow!("DOCX package is missing {wanted_name}"))
+}
+
+fn zip_entry_optional(
+    archive: &[u8],
+    wanted_name: &str,
+    max_bytes: usize,
+) -> Result<Option<Vec<u8>>> {
     let eocd = archive
         .len()
         .checked_sub(22)
@@ -288,9 +412,9 @@ fn zip_entry(archive: &[u8], wanted_name: &str, max_bytes: usize) -> Result<Vec<
             "DOCX part size does not match ZIP metadata"
         );
         ensure!(crc32(&bytes) == expected_crc, "DOCX part CRC mismatch");
-        return Ok(bytes);
+        return Ok(Some(bytes));
     }
-    bail!("DOCX package is missing {wanted_name}")
+    Ok(None)
 }
 
 fn read_u16(bytes: &[u8], offset: usize) -> Result<u16> {
