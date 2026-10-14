@@ -14,7 +14,7 @@ struct FileListObjectDeclaration {
 }
 
 #[derive(WebApiFunctionTemplate)]
-#[webapi(interface = web_api_interfaces::FileList)]
+#[webapi(interface = web_api_interfaces::FileList, receiver)]
 struct FileListPrototypeAccessorsDeclaration {
     #[webapi(accessor_property, getter = file_list_length_getter_callback, enumerable)]
     length: (),
@@ -139,7 +139,9 @@ pub(in crate::context_bootstrap) fn file_list_item_callback<'s>(
     let Some(parsed) = webidl::parse_args::<FileListItemArgs>(scope, &args) else {
         return;
     };
-    let Some(value) = args.this().get_index(scope, parsed.index) else {
+    let receiver = moli_webapi_declare::web_api_object_target(scope, args.this())
+        .expect("FileList receiver validated by WebIDL");
+    let Some(value) = receiver.get_index(scope, parsed.index) else {
         rv.set(v8::null(scope).into());
         return;
     };
@@ -165,6 +167,7 @@ fn file_list_length_from_object<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     object: v8::Local<'s, v8::Object>,
 ) -> Option<f64> {
+    let object = moli_webapi_declare::web_api_object_target(scope, object)?;
     get_private_value(scope, object, FILE_LIST_LENGTH_SLOT)
         .and_then(|value| value.number_value(scope))
 }

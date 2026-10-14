@@ -34,7 +34,7 @@ struct BlobInstanceDeclaration<'scope> {
 }
 
 #[derive(WebApiFunctionTemplate)]
-#[webapi(interface = web_api_interfaces::Blob, enumerable)]
+#[webapi(interface = web_api_interfaces::Blob, enumerable, receiver)]
 struct BlobPrototypeDeclaration {
     #[webapi(accessor_property, getter = blob_size_attribute_getter_callback)]
     size: (),
@@ -271,6 +271,7 @@ fn blob_id_from_object<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     object: v8::Local<'s, v8::Object>,
 ) -> Option<BlobId> {
+    let object = moli_webapi_declare::web_api_object_target(scope, object)?;
     let value = get_private_value(scope, object, BLOB_ID_SLOT)?;
     blob_id_from_value(scope, value)
 }

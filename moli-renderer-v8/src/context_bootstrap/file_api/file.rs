@@ -34,7 +34,7 @@ struct FileMetadataDeclaration {
 }
 
 #[derive(WebApiFunctionTemplate)]
-#[webapi(interface = web_api_interfaces::File)]
+#[webapi(interface = web_api_interfaces::File, receiver)]
 struct FilePrototypeAccessorsDeclaration {
     #[webapi(accessor_property, getter = file_name_attribute_getter_callback, enumerable)]
     name: (),
@@ -106,7 +106,9 @@ fn file_last_modified_attribute_getter_callback<'s>(
     args: v8::FunctionCallbackArguments<'s>,
     mut rv: v8::ReturnValue<'_, v8::Value>,
 ) {
-    let last_modified = get_private_value(scope, args.this(), FILE_LAST_MODIFIED_SLOT)
+    let receiver = moli_webapi_declare::web_api_object_target(scope, args.this())
+        .expect("File receiver validated by WebIDL");
+    let last_modified = get_private_value(scope, receiver, FILE_LAST_MODIFIED_SLOT)
         .and_then(|value| value.number_value(scope))
         .unwrap_or_else(unix_epoch_millis);
     rv.set(v8::Number::new(scope, last_modified).into());
@@ -117,6 +119,7 @@ fn private_string_value<'s>(
     object: v8::Local<'s, v8::Object>,
     slot: &'static str,
 ) -> Option<String> {
+    let object = moli_webapi_declare::web_api_object_target(scope, object)?;
     get_private_value(scope, object, slot)
         .and_then(|value| value.to_string(scope))
         .map(|value| value.to_rust_string_lossy(scope))

@@ -57,15 +57,15 @@ use crate::{blob, util::callback_data_index_value, xml_serializer};
 use moli_webapi_declare::WebApiFunctionTemplate;
 
 #[derive(WebApiFunctionTemplate)]
-#[webapi(interface = web_api_interfaces::Blob, enumerable)]
+#[webapi(interface = web_api_interfaces::Blob, enumerable, receiver)]
 struct BlobTemplateMethodsDeclaration {
-    #[webapi(method, length = 0, callback = blob::blob_text_callback)]
+    #[webapi(method, length = 0, returns_promise, callback = blob::blob_text_callback)]
     text: (),
 
-    #[webapi(method, length = 0, callback = blob::blob_array_buffer_callback)]
+    #[webapi(method, length = 0, returns_promise, callback = blob::blob_array_buffer_callback)]
     array_buffer: (),
 
-    #[webapi(method, length = 0, callback = blob::blob_bytes_callback)]
+    #[webapi(method, length = 0, returns_promise, callback = blob::blob_bytes_callback)]
     bytes: (),
 
     #[webapi(method, length = 0, callback = blob::blob_stream_callback)]
@@ -86,7 +86,7 @@ struct OffscreenCanvasTemplateMethodsDeclaration {
 }
 
 #[derive(WebApiFunctionTemplate)]
-#[webapi(interface = web_api_interfaces::FileList, enumerable)]
+#[webapi(interface = web_api_interfaces::FileList, enumerable, receiver)]
 struct FileListTemplateMethodsDeclaration {
     #[webapi(method, length = 1, callback = file_list_item_callback)]
     item: (),

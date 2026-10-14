@@ -2249,4 +2249,6 @@ mod resize_observer_entries;
 
 mod payment_events;
 
+mod file_value_receivers;
+
 mod detached_node_producer_host;
