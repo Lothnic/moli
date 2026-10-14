@@ -15,6 +15,7 @@ enum Task<'a, Id> {
     EndList(usize),
     EndItem(String),
     RawChildren(Option<Id>, usize, bool),
+    RawLinkDestination(&'a str),
     EndRawBlock,
     EndCode,
     EndPre(Option<&'a str>),
@@ -134,6 +135,20 @@ impl<'a, D: Dom + ?Sized> Machine<'a, D> {
                     self.writer().block(item.into(), separation, separation);
                 }
                 Task::RawChildren(Some(node), depth, inline) => self.raw_node(node, depth, inline),
+                Task::RawLinkDestination(href) => {
+                    if !self.raw.is_empty()
+                        && !self
+                            .raw
+                            .chars()
+                            .next_back()
+                            .is_some_and(char::is_whitespace)
+                    {
+                        self.raw.push(' ');
+                    }
+                    self.raw.push('(');
+                    self.raw.push_str(href);
+                    self.raw.push(')');
+                }
                 Task::EndRawBlock => {
                     if !self.raw.is_empty() && !self.raw.ends_with('\n') {
                         self.raw.push('\n');
@@ -254,6 +269,32 @@ impl<'a, D: Dom + ?Sized> Machine<'a, D> {
                 }
                 return;
             }
+            "video" | "audio" => {
+                self.writer().boundary(2);
+                if tag == "video"
+                    && let Some(poster) = self.dom.attribute(node, "poster").and_then(resource_url)
+                {
+                    self.writer().image("Video poster", poster, None);
+                    self.writer().boundary(1);
+                }
+                if let Some(src) = self.dom.attribute(node, "src").and_then(resource_url) {
+                    self.resource_link(src, if tag == "video" { "Video" } else { "Audio" });
+                }
+                self.tasks.push(Task::Boundary);
+            }
+            "source" | "track" => {
+                if let Some(src) = self.dom.attribute(node, "src").and_then(resource_url) {
+                    self.resource_link(
+                        src,
+                        if tag == "source" {
+                            "Media source"
+                        } else {
+                            "Media track"
+                        },
+                    );
+                }
+                return;
+            }
             "code" | "pre" => {
                 self.raw.clear();
                 let end = if tag == "pre" {
@@ -319,6 +360,20 @@ impl<'a, D: Dom + ?Sized> Machine<'a, D> {
             let table = self.tables.pop().expect("table conversion is active");
             self.writer().block(table.finish(), 2, 2);
         }
+    }
+
+    fn resource_link(&mut self, href: &'a str, label: &str) {
+        self.serial += 1;
+        let serial = self.serial;
+        if self.writer().push_style(Style::Link {
+            serial,
+            href,
+            title: None,
+        }) {
+            self.writer().text(label);
+            self.writer().end_link(serial, None);
+        }
+        self.writer().boundary(1);
     }
 
     fn start_list(&mut self, node: D::NodeId, ordered: bool) {
@@ -407,6 +462,12 @@ impl<'a, D: Dom + ?Sized> Machine<'a, D> {
                     }
                     self.tasks.push(Task::EndRawBlock);
                 }
+                if !inline
+                    && let NodeKind::Element("a") = self.dom.node_kind(node)
+                    && let Some(href) = self.dom.attribute(node, "href").and_then(resource_url)
+                {
+                    self.tasks.push(Task::RawLinkDestination(href));
+                }
                 self.tasks.push(Task::RawChildren(
                     self.dom.first_child(node),
                     depth + 1,
@@ -453,6 +514,28 @@ impl<'a, D: Dom + ?Sized> Machine<'a, D> {
         block.push_str(&fence);
         self.writer().block(block.into(), 2, 2);
     }
+}
+
+fn resource_url(value: &str) -> Option<&str> {
+    let value = value.trim();
+    if value.is_empty() || value.starts_with('#') || value.eq_ignore_ascii_case("about:blank") {
+        return None;
+    }
+    let normalized = value
+        .chars()
+        .filter(|ch| !ch.is_ascii_control())
+        .collect::<String>();
+    let Some((scheme, _)) = normalized.split_once(':') else {
+        return Some(value);
+    };
+    if scheme.contains(['/', '#', '?']) {
+        return Some(value);
+    }
+    matches!(
+        scheme.to_ascii_lowercase().as_str(),
+        "http" | "https" | "mailto" | "tel" | "ftp"
+    )
+    .then_some(value)
 }
 
 fn class_language(class: Option<&str>) -> Option<&str> {

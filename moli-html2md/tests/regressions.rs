@@ -480,6 +480,53 @@ fn embedded_image_references_survive_regardless_of_pixel_content() {
 }
 
 #[test]
+fn native_media_elements_keep_declared_resource_urls() {
+    let result = markdown(
+        "<video src='/direct.mp4' poster='/poster.jpg'><source src='/movie.webm'><source src='/movie.mp4'><track src='/captions.vtt'></video><audio src='/episode.ogg'></audio>",
+        false,
+    );
+    for expected in [
+        "![Video poster](/poster.jpg)",
+        "[Video](/direct.mp4)",
+        "[Media source](/movie.webm)",
+        "[Media source](/movie.mp4)",
+        "[Media track](/captions.vtt)",
+        "[Audio](/episode.ogg)",
+    ] {
+        assert!(result.contains(expected), "missing {expected}: {result}");
+    }
+}
+
+#[test]
+fn media_elements_do_not_emit_active_script_urls() {
+    for unsafe_url in [
+        "javascript:alert(1)",
+        "java&#10;script:alert(1)",
+        "vbscript:bad",
+        "data:text/html,bad",
+        "about:blank",
+        "#fragment",
+    ] {
+        let source = format!("<video src='{unsafe_url}'><source src='{unsafe_url}'></video>");
+        let result = markdown(&source, false);
+        assert!(result.is_empty(), "{source}: {result}");
+    }
+}
+
+#[test]
+fn preformatted_directory_links_keep_their_destinations_as_text() {
+    let result = markdown(
+        "<pre><a href='release/file.mp4'>file.mp4</a> <a href='release/checksum.txt'>checksum</a></pre>",
+        false,
+    );
+    assert!(result.contains("file.mp4 (release/file.mp4)"), "{result}");
+    assert!(
+        result.contains("checksum (release/checksum.txt)"),
+        "{result}"
+    );
+}
+
+#[test]
 fn list_paragraphs_and_code_blocks_require_blank_lines_between_items() {
     for (html, expected) in [
         ("<ul><li>one</li><li>two</li></ul>", "- one\n- two"),
