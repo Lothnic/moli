@@ -1,4 +1,10 @@
-use std::sync::Arc;
+use std::{
+    io::Write,
+    sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    },
+};
 
 use anyhow::Result;
 use axum::{Router, response::Html, routing::get};
@@ -103,6 +109,86 @@ fn text_pdf(text: &str) -> Result<Vec<u8>> {
     Ok(bytes)
 }
 
+fn docx_archive(content_types: &str, document: &str) -> Vec<u8> {
+    fn crc32(bytes: &[u8]) -> u32 {
+        let mut crc = 0xffff_ffff_u32;
+        for byte in bytes {
+            crc ^= u32::from(*byte);
+            for _ in 0..8 {
+                let mask = 0_u32.wrapping_sub(crc & 1);
+                crc = (crc >> 1) ^ (0xedb8_8320 & mask);
+            }
+        }
+        !crc
+    }
+
+    let entries = [
+        ("[Content_Types].xml", content_types.as_bytes()),
+        ("word/document.xml", document.as_bytes()),
+    ];
+    let mut archive = Vec::new();
+    let mut central = Vec::new();
+    for (name, body) in entries {
+        let mut encoder =
+            flate2::write::DeflateEncoder::new(Vec::new(), flate2::Compression::default());
+        encoder.write_all(body).unwrap();
+        let compressed = encoder.finish().unwrap();
+        let offset = archive.len() as u32;
+        let name = name.as_bytes();
+        archive.extend_from_slice(b"PK\x03\x04");
+        archive.extend_from_slice(&20_u16.to_le_bytes());
+        archive.extend_from_slice(&0_u16.to_le_bytes());
+        archive.extend_from_slice(&8_u16.to_le_bytes());
+        archive.extend_from_slice(&0_u16.to_le_bytes());
+        archive.extend_from_slice(&0_u16.to_le_bytes());
+        archive.extend_from_slice(&crc32(body).to_le_bytes());
+        archive.extend_from_slice(&(compressed.len() as u32).to_le_bytes());
+        archive.extend_from_slice(&(body.len() as u32).to_le_bytes());
+        archive.extend_from_slice(&(name.len() as u16).to_le_bytes());
+        archive.extend_from_slice(&0_u16.to_le_bytes());
+        archive.extend_from_slice(name);
+        archive.extend_from_slice(&compressed);
+
+        central.extend_from_slice(b"PK\x01\x02");
+        central.extend_from_slice(&20_u16.to_le_bytes());
+        central.extend_from_slice(&20_u16.to_le_bytes());
+        central.extend_from_slice(&0_u16.to_le_bytes());
+        central.extend_from_slice(&8_u16.to_le_bytes());
+        central.extend_from_slice(&0_u16.to_le_bytes());
+        central.extend_from_slice(&0_u16.to_le_bytes());
+        central.extend_from_slice(&crc32(body).to_le_bytes());
+        central.extend_from_slice(&(compressed.len() as u32).to_le_bytes());
+        central.extend_from_slice(&(body.len() as u32).to_le_bytes());
+        central.extend_from_slice(&(name.len() as u16).to_le_bytes());
+        central.extend_from_slice(&0_u16.to_le_bytes());
+        central.extend_from_slice(&0_u16.to_le_bytes());
+        central.extend_from_slice(&0_u16.to_le_bytes());
+        central.extend_from_slice(&0_u16.to_le_bytes());
+        central.extend_from_slice(&0_u32.to_le_bytes());
+        central.extend_from_slice(&offset.to_le_bytes());
+        central.extend_from_slice(name);
+    }
+    let central_offset = archive.len() as u32;
+    let central_size = central.len() as u32;
+    archive.extend_from_slice(&central);
+    archive.extend_from_slice(b"PK\x05\x06");
+    archive.extend_from_slice(&0_u16.to_le_bytes());
+    archive.extend_from_slice(&0_u16.to_le_bytes());
+    archive.extend_from_slice(&(entries.len() as u16).to_le_bytes());
+    archive.extend_from_slice(&(entries.len() as u16).to_le_bytes());
+    archive.extend_from_slice(&central_size.to_le_bytes());
+    archive.extend_from_slice(&central_offset.to_le_bytes());
+    archive.extend_from_slice(&0_u16.to_le_bytes());
+    archive
+}
+
+fn docx_fixture(document: &str) -> Vec<u8> {
+    docx_archive(
+        r#"<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>"#,
+        document,
+    )
+}
+
 #[test]
 fn raw_pdf_markdown_extracts_document_text() -> Result<()> {
     let markdown = render_raw_document_markdown(&text_pdf("Document body 123")?)?;
@@ -111,13 +197,40 @@ fn raw_pdf_markdown_extracts_document_text() -> Result<()> {
 }
 
 #[test]
+fn raw_docx_markdown_preserves_paragraph_heading_break_and_table_rows() -> Result<()> {
+    let bytes = docx_fixture(
+        r#"<?xml version="1.0"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>Quarterly report</w:t></w:r></w:p><w:p><w:r><w:t>Revenue</w:t><w:tab/><w:t>42</w:t><w:br/><w:t>next</w:t></w:r></w:p><w:tbl><w:tr><w:tc><w:p><w:r><w:t>Product</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>Amount</w:t></w:r></w:p></w:tc></w:tr><w:tr><w:tc><w:p><w:r><w:t>Browser</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>7</w:t></w:r></w:p></w:tc></w:tr></w:tbl></w:body></w:document>"#,
+    );
+    let markdown = String::from_utf8(render_raw_document_markdown(&bytes)?)?;
+    assert_eq!(
+        markdown,
+        "# Quarterly report\n\nRevenue\t42\nnext\n\n| Product | Amount |\n| --- | --- |\n| Browser | 7 |"
+    );
+    Ok(())
+}
+
+#[test]
+fn raw_docx_markdown_rejects_non_docx_zip_malformed_xml_and_empty_body() {
+    let non_docx = docx_archive("<Types/>", "<document/>");
+    assert!(render_raw_document_markdown(&non_docx).is_err());
+    let malformed = docx_fixture("<w:document>");
+    assert!(render_raw_document_markdown(&malformed).is_err());
+    let empty = docx_fixture(
+        r#"<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p/></w:body></w:document>"#,
+    );
+    assert!(render_raw_document_markdown(&empty).is_err());
+}
+
+#[test]
 fn raw_markdown_rejects_unsupported_or_invalid_documents() {
-    let unsupported = render_raw_document_markdown(b"PK\x03\x04docx").unwrap_err();
+    let unsupported = render_raw_document_markdown(b"not a document").unwrap_err();
     assert!(
         unsupported
             .to_string()
-            .contains("native Markdown currently supports raw PDF documents")
+            .contains("native Markdown supports PDF and DOCX documents")
     );
+    let invalid_docx = render_raw_document_markdown(b"PK\x03\x04docx").unwrap_err();
+    assert!(invalid_docx.to_string().contains("invalid DOCX package"));
     let invalid = render_raw_document_markdown(b"%PDF-1.7\nnot a PDF").unwrap_err();
     assert!(
         invalid
@@ -127,7 +240,7 @@ fn raw_markdown_rejects_unsupported_or_invalid_documents() {
 }
 
 #[test]
-fn markdown_output_selects_pdf_only_raw_materialization() {
+fn markdown_output_selects_supported_document_raw_materialization() {
     let command = FetchCommandConfig {
         dump_mode: Some(DumpFormat::Markdown),
         ..FetchCommandConfig::default()
@@ -136,8 +249,82 @@ fn markdown_output_selects_pdf_only_raw_materialization() {
     assert_eq!(output, RawDocumentOutputPolicy::Markdown);
     assert_eq!(
         output.fetch_policy(),
-        moli_core::runtime::RawDocumentFetchPolicy::MaterializePdf
+        moli_core::runtime::RawDocumentFetchPolicy::MaterializeMarkdownDocument
     );
+}
+
+#[tokio::test]
+async fn framed_markdown_reuses_loaded_pdf_children_without_following_links() -> Result<()> {
+    use axum::{body::Body, http::Response};
+
+    let browser = Browser::new(BrowserConfig::default())?;
+    let listener = TcpListener::bind("127.0.0.1:0").await?;
+    let addr = listener.local_addr()?;
+    let pdf = Arc::new(text_pdf("Embedded PDF body")?);
+    let pdf_requests = Arc::new(AtomicUsize::new(0));
+    let linked_requests = Arc::new(AtomicUsize::new(0));
+    let app = Router::new()
+        .route(
+            "/",
+            get(|| async { Html(r#"<p>Parent</p><embed src="/doc.pdf" type="application/pdf"><object data="/doc.pdf" type="application/pdf"></object><iframe src="/doc.pdf"></iframe><a href="/linked.pdf">ordinary link</a>"#) }),
+        )
+        .route(
+            "/doc.pdf",
+            get({
+                let pdf = Arc::clone(&pdf);
+                let requests = Arc::clone(&pdf_requests);
+                move || {
+                    let pdf = Arc::clone(&pdf);
+                    let requests = Arc::clone(&requests);
+                    async move {
+                        requests.fetch_add(1, Ordering::SeqCst);
+                        Response::builder()
+                            .header("content-type", "application/pdf")
+                            .body(Body::from((*pdf).clone()))
+                            .unwrap()
+                    }
+                }
+            }),
+        )
+        .route(
+            "/linked.pdf",
+            get({
+                let requests = Arc::clone(&linked_requests);
+                move || {
+                    let requests = Arc::clone(&requests);
+                    async move {
+                        requests.fetch_add(1, Ordering::SeqCst);
+                        Response::builder()
+                            .header("content-type", "application/pdf")
+                            .body(Body::from(Vec::new()))
+                            .unwrap()
+                    }
+                }
+            }),
+        );
+    let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let mut page = browser.fetch(&format!("http://{addr}/")).await?;
+    let before = pdf_requests.load(Ordering::SeqCst);
+    let rendered = render_page_dump_with_options_async(
+        &mut page,
+        DumpFormat::Markdown,
+        StripOptions::default(),
+        false,
+        true,
+        false,
+        None,
+    )
+    .await?;
+    assert!(rendered.contains("Embedded PDF body"), "{rendered}");
+    assert_eq!(rendered.matches("Embedded PDF body").count(), 1);
+    assert_eq!(
+        pdf_requests.load(Ordering::SeqCst),
+        before,
+        "Markdown rendering must reuse the child response loaded with the page"
+    );
+    assert_eq!(linked_requests.load(Ordering::SeqCst), 0);
+    server.abort();
+    Ok(())
 }
 
 #[tokio::test]

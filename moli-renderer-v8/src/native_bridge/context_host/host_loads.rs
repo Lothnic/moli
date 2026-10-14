@@ -591,7 +591,7 @@ impl JsContextHost {
             document_open_replacement,
             security_origin_inherited: identity.security_origin_inherited,
             security_origin_opaque,
-            document_network: entry.take_completed_document_network_for_owner(finish.owner),
+            document_network: entry.completed_document_network_for_owner(finish.owner),
         })
     }
 

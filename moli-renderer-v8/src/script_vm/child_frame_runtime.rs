@@ -329,6 +329,7 @@ impl ScriptVm {
                 storage_key: snapshot.storage_key,
                 security_origin_inherited: snapshot.security_origin_inherited,
                 security_origin_opaque: snapshot.security_origin_opaque,
+                document_network: snapshot.document_network,
                 child_frames: snapshot.child_frames.into_iter().map(convert).collect(),
             }
         }

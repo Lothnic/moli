@@ -117,9 +117,10 @@ impl JsContextHost {
             (
                 entry.frame_identity_snapshot(),
                 entry.current_document_loader_id()?.to_owned(),
+                entry.completed_document_network_snapshot(),
             )
         };
-        let (identity, loader_id) = identity;
+        let (identity, loader_id, document_network) = identity;
         let url = self.child_browsing_context_current_url(handle)?;
         let security_origin_opaque = self.child_browsing_context_has_opaque_origin(handle);
         let storage_scope =
@@ -164,6 +165,7 @@ impl JsContextHost {
             storage_key,
             security_origin_inherited: identity.security_origin_inherited,
             security_origin_opaque,
+            document_network,
             child_frames,
         })
     }

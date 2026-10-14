@@ -64,7 +64,9 @@ pub async fn run_cli_with_config<W: Write>(
                 RawDocumentFetchPolicy::RequirePage if args.fail || args.fail_with_body => {
                     RawDocumentFetchPolicy::MetadataOnly
                 }
-                RawDocumentFetchPolicy::MaterializePdf => RawDocumentFetchPolicy::MaterializePdf,
+                RawDocumentFetchPolicy::MaterializeMarkdownDocument => {
+                    RawDocumentFetchPolicy::MaterializeMarkdownDocument
+                }
                 _ if args.fail => RawDocumentFetchPolicy::MaterializeBelowStatus(400),
                 policy => policy,
             };

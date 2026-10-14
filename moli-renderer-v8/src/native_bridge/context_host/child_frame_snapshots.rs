@@ -23,6 +23,8 @@ pub(crate) struct ChildBrowsingContextFrameSnapshot {
     pub(crate) security_origin_inherited: bool,
     #[serde(default)]
     pub(crate) security_origin_opaque: bool,
+    #[serde(skip)]
+    pub(crate) document_network: Option<crate::protocol_types::ChildFrameDocumentNetworkSnapshot>,
     #[serde(default)]
     pub(crate) child_frames: Vec<ChildBrowsingContextFrameSnapshot>,
 }

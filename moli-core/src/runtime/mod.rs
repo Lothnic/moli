@@ -66,8 +66,8 @@ pub enum RawDocumentFetchPolicy {
     /// Read the body only for statuses below the threshold. Otherwise return
     /// response metadata with an empty body and cancel the download.
     MaterializeBelowStatus(u16),
-    /// Read PDF bodies for native text extraction and cancel other raw downloads.
-    MaterializePdf,
+    /// Read PDF and DOCX bodies for native text extraction and cancel other raw downloads.
+    MaterializeMarkdownDocument,
     /// Require a renderable Page, rejecting raw responses from their headers.
     RequirePage,
 }
@@ -90,9 +90,13 @@ impl RawDocumentFetchPolicy {
             Self::Materialize => Ok(true),
             Self::MetadataOnly => Ok(false),
             Self::MaterializeBelowStatus(threshold) => Ok(status < threshold),
-            Self::MaterializePdf => {
-                Ok(extract_response_mime_essence(headers).as_deref() == Some("application/pdf"))
-            }
+            Self::MaterializeMarkdownDocument => Ok(matches!(
+                extract_response_mime_essence(headers).as_deref(),
+                Some("application/pdf")
+                    | Some(
+                        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                    )
+            )),
             Self::RequirePage => Err(anyhow::Error::new(RawDocumentPageRequired)),
         }
     }

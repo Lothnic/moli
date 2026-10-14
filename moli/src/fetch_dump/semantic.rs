@@ -137,6 +137,7 @@ mod tests {
             storage_key: String::new(),
             security_origin_inherited: false,
             security_origin_opaque: false,
+            document_network: None,
             child_frames,
         }
     }

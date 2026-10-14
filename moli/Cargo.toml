@@ -18,6 +18,7 @@ axum = { version = "0.8.6", features = ["ws"] }
 base64 = "0.22.1"
 cidr = "0.3.2"
 clap = { version = "4.5.39", features = ["derive", "env"] }
+flate2 = { version = "1.1.9", default-features = false, features = ["zlib"] }
 lopdf = { version = "0.45.0", default-features = false }
 moli-browser-profile = { path = "../moli-browser-profile" }
 moli-cookie-cache = { path = "../moli-cookie-cache" }
@@ -31,6 +32,7 @@ moli-protocol-server = { path = "../moli-protocol-server" }
 moli-robots = { path = "../moli-robots" }
 parking_lot = "0.12"
 regex = "1.12.3"
+roxmltree = "0.21.1"
 serde_json = "1.0.145"
 tokio = { version = "1.51.0", features = ["macros", "net", "rt-multi-thread", "signal", "sync"] }
 tracing = "0.1.41"

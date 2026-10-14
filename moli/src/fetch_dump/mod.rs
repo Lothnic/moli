@@ -1,3 +1,4 @@
+mod document;
 mod dom;
 mod node_details;
 mod pdf;
@@ -7,7 +8,7 @@ mod semantic;
 #[cfg(test)]
 mod tests;
 
-use anyhow::{Context, Result, anyhow, bail};
+use anyhow::{Result, anyhow, bail};
 use moli_core::{
     page::{Page, RendererScreenshotRegion, SubresourceResponseWaitCriteria},
     runtime::{RawDocument, RawDocumentFetchPolicy, RawDocumentPageRequired},
@@ -42,7 +43,7 @@ impl RawDocumentOutputPolicy {
     pub(crate) const fn fetch_policy(self) -> RawDocumentFetchPolicy {
         match self {
             Self::Passthrough | Self::Json => RawDocumentFetchPolicy::Materialize,
-            Self::Markdown => RawDocumentFetchPolicy::MaterializePdf,
+            Self::Markdown => RawDocumentFetchPolicy::MaterializeMarkdownDocument,
             Self::RequiresPage(_) => RawDocumentFetchPolicy::RequirePage,
         }
     }
@@ -132,24 +133,7 @@ pub(crate) fn render_raw_document_output(
 }
 
 fn render_raw_document_markdown(body: &[u8]) -> Result<Vec<u8>> {
-    if !body.starts_with(b"%PDF-") {
-        bail!(
-            "raw download cannot be converted to Markdown; native Markdown currently supports raw PDF documents"
-        );
-    }
-    let document = lopdf::Document::load_mem(body).context("failed to parse raw PDF document")?;
-    let pages = document.get_pages().keys().copied().collect::<Vec<_>>();
-    let text = document
-        .extract_text(&pages)
-        .context("failed to extract text from raw PDF document")?
-        .replace("\r\n", "\n")
-        .replace('\r', "\n")
-        .replace('\u{000c}', "\n\n");
-    let text = text.trim();
-    if text.is_empty() {
-        bail!("raw PDF document contains no extractable text");
-    }
-    Ok(text.as_bytes().to_vec())
+    document::render_document_markdown(body)
 }
 
 fn raw_document_requires_page_error(format: DumpFormat) -> anyhow::Error {

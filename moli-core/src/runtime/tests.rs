@@ -43,14 +43,26 @@ use tokio::{
 use url::Url;
 
 #[test]
-fn raw_pdf_policy_materializes_only_declared_pdf_documents() -> Result<()> {
+fn raw_markdown_policy_materializes_only_declared_supported_documents() -> Result<()> {
     let pdf = vec![("content-type".to_owned(), b"application/pdf".to_vec())];
+    let docx = vec![(
+        "content-type".to_owned(),
+        b"application/vnd.openxmlformats-officedocument.wordprocessingml.document".to_vec(),
+    )];
     let binary = vec![(
         "content-type".to_owned(),
         b"application/octet-stream".to_vec(),
     )];
-    assert!(RawDocumentFetchPolicy::MaterializePdf.should_materialize_body(200, &pdf)?);
-    assert!(!RawDocumentFetchPolicy::MaterializePdf.should_materialize_body(200, &binary)?);
+    assert!(
+        RawDocumentFetchPolicy::MaterializeMarkdownDocument.should_materialize_body(200, &pdf)?
+    );
+    assert!(
+        RawDocumentFetchPolicy::MaterializeMarkdownDocument.should_materialize_body(200, &docx)?
+    );
+    assert!(
+        !RawDocumentFetchPolicy::MaterializeMarkdownDocument
+            .should_materialize_body(200, &binary)?
+    );
     Ok(())
 }
 

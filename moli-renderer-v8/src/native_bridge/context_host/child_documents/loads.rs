@@ -782,7 +782,12 @@ fn child_document_load_outcome_from_response(
     let encoded_data_length = response_body.len();
     let content_type = child_document_content_type_from_headers(&head.headers)
         .or_else(|| child_document_content_type_for_url(&head.final_url));
-    let (markup, character_set) = {
+    let (markup, character_set) = if content_type.as_deref() == Some("application/pdf") {
+        (
+            "<!doctype html><html><body></body></html>".to_owned(),
+            "UTF-8".to_owned(),
+        )
+    } else {
         let body_bytes = response_body
             .try_bytes()
             .map_err(|error| format!("failed to read child document response body: {error}"))?;
@@ -830,8 +835,9 @@ fn child_document_response_should_ignore_navigation(
 ) -> bool {
     matches!(status, 204 | 205)
         || moli_web_mime::response_headers_indicate_attachment_download(headers)
-        || child_document_content_type_from_headers(headers)
-            .is_some_and(|mime| !moli_web_mime::is_supported_document_mime_type(&mime))
+        || child_document_content_type_from_headers(headers).is_some_and(|mime| {
+            mime != "application/pdf" && !moli_web_mime::is_supported_document_mime_type(&mime)
+        })
 }
 
 fn child_document_final_url_with_request_fragment(
@@ -909,6 +915,46 @@ mod tests {
     }
 
     #[test]
+    fn loaded_pdf_child_document_retains_bytes_without_decoding_them_as_markup() {
+        let body_bytes = b"%PDF-1.7\nopaque child body\xff".to_vec();
+        let outcome = child_document_load_outcome_from_response(
+            "https://example.test/child.pdf".to_owned(),
+            "GET".to_owned(),
+            Vec::new(),
+            moli_fetch::ResponseHead {
+                status_text: None,
+                final_url: url::Url::parse("https://example.test/child.pdf").unwrap(),
+                status: 200,
+                headers: vec![("Content-Type".to_owned(), b"application/pdf".to_vec())],
+                request_cookie_report: None,
+                cookie_set_reports: Vec::new(),
+                redirected: false,
+                redirect_chain: Vec::new(),
+                from_cache: false,
+                negotiated_http_version: None,
+            },
+            moli_fetch::ResponseBody::materialized_bytes(body_bytes.clone()),
+            "UTF-8",
+        )
+        .expect("PDF child document response should load");
+        let ChildDocumentLoadOutcome::Loaded(document) = outcome else {
+            panic!("successful PDF response should load an opaque child document");
+        };
+        assert_eq!(
+            document
+                .document_network
+                .as_ref()
+                .and_then(|network| network.response_body.as_ref())
+                .unwrap()
+                .try_bytes()
+                .unwrap()
+                .as_ref(),
+            body_bytes
+        );
+        assert_eq!(document.markup, "<!doctype html><html><body></body></html>");
+    }
+
+    #[test]
     fn child_document_final_url_preserves_request_fragment() {
         let final_url = url::Url::parse("https://example.test/frame.html").unwrap();
         let target_url = url::Url::parse("https://example.test/frame.html#target").unwrap();
@@ -974,12 +1020,7 @@ mod tests {
 
     #[test]
     fn child_document_response_disposition_rejects_unhandled_download_mime() {
-        for content_type in [
-            "application/octet-stream",
-            "application/pdf",
-            "application/zip",
-            "font/woff2",
-        ] {
+        for content_type in ["application/octet-stream", "application/zip", "font/woff2"] {
             assert!(child_document_response_should_ignore_navigation(
                 200,
                 &[("Content-Type".to_owned(), content_type.as_bytes().to_vec())],
@@ -994,6 +1035,7 @@ mod tests {
             "text/plain",
             "application/xml",
             "application/json",
+            "application/pdf",
             "image/png",
             "video/webm",
         ] {
