@@ -650,6 +650,8 @@ const PARSE_TIME_ASYNC_CLASSIC_HTML: &str =
     include_str!("../../moli-core/tests/fixtures/runtime/parse_time_async_classic.html");
 const PARSE_TIME_ASYNC_CLASSIC_CHUNKED_HTML: &str =
     include_str!("../../moli-core/tests/fixtures/runtime/parse_time_async_classic_chunked.html");
+const PARSE_TIME_ASYNC_CLASSIC_CHUNKED_JS: &str =
+    include_str!("../../moli-core/tests/fixtures/runtime/parse_time_async_classic_chunked.js");
 const PARSE_TIME_ASYNC_CLASSIC_SLOW_CHUNKED_TAIL_HTML: &str = include_str!(
     "../../moli-core/tests/fixtures/runtime/parse_time_async_classic_slow_chunked_tail.html"
 );

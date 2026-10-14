@@ -2096,8 +2096,11 @@ pub(super) async fn parse_time_async_classic_chunked_page(headers: HeaderMap) ->
         {
             return;
         }
-        let _ = tokio::time::timeout(Duration::from_millis(500), tail_gate.notified()).await;
-        sleep(Duration::from_millis(20)).await;
+        // A request for the asset does not imply that its body has arrived or
+        // executed. Its dedicated script acknowledges execution before tail
+        // delivery. The timeout is only a bounded failure escape: the test's
+        // before-tail assertions still fail if the parser cannot make progress.
+        let _ = tokio::time::timeout(Duration::from_secs(5), tail_gate.notified()).await;
         let _ = tx
             .send(Ok::<Bytes, std::convert::Infallible>(Bytes::from(tail)))
             .await;
@@ -2112,6 +2115,13 @@ pub(super) async fn parse_time_async_classic_chunked_page(headers: HeaderMap) ->
             tokio_stream::wrappers::ReceiverStream::new(rx),
         ))
         .expect("chunked async classic response should build")
+}
+
+pub(super) async fn parse_time_async_classic_chunked_executed(headers: HeaderMap) -> StatusCode {
+    if let Some(host_key) = request_host_key(&headers) {
+        notify_parse_time_async_chunked_tail_gate_if_present(&host_key);
+    }
+    StatusCode::NO_CONTENT
 }
 
 pub(super) async fn parse_time_async_classic_slow_chunked_tail_page() -> Response {
@@ -4362,11 +4372,12 @@ pub(super) async fn asset_parse_time_defer_script() -> Response {
     javascript_response(PARSE_TIME_DEFER_JS)
 }
 
-pub(super) async fn asset_parse_time_async_script(headers: HeaderMap) -> Response {
-    if let Some(host_key) = request_host_key(&headers) {
-        notify_parse_time_async_chunked_tail_gate_if_present(&host_key);
-    }
+pub(super) async fn asset_parse_time_async_script() -> Response {
     javascript_response(PARSE_TIME_ASYNC_JS)
+}
+
+pub(super) async fn asset_parse_time_async_chunked_script() -> Response {
+    javascript_response(PARSE_TIME_ASYNC_CLASSIC_CHUNKED_JS)
 }
 
 pub(super) async fn asset_parse_time_async_load_order_script() -> Response {
