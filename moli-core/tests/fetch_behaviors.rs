@@ -1647,6 +1647,88 @@ async fn fetch_with_domstable_waits_for_inflight_slow_fetch_dom_mutation() -> Re
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn fetch_with_domstable_waits_for_parser_async_module_graph() -> Result<()> {
+    let server = FixtureServer::spawn().await?;
+    let browser = Browser::new(AppConfig::default())?;
+    let started = Instant::now();
+
+    let page = browser
+        .fetch_with_wait_until(
+            &server.url("/wait-until-parser-async-module-slow"),
+            RenderedDomWaitUntil::DomStable,
+            Duration::from_secs(7),
+        )
+        .await?;
+
+    let html = page.serialize_html_async().await.unwrap();
+    assert!(html.contains("id=\"parser-async-module-result\""));
+    assert!(html.contains(">parser-async-module=settled<"));
+    assert!(
+        started.elapsed() < Duration::from_secs(6),
+        "domstable waited for an unrelated background timer: {:?}",
+        started.elapsed()
+    );
+
+    server.shutdown().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn fetch_with_domstable_waits_for_dedicated_worker_bootstrap_and_first_message() -> Result<()>
+{
+    let server = FixtureServer::spawn().await?;
+    let browser = Browser::new(AppConfig::default())?;
+    let started = Instant::now();
+
+    let page = browser
+        .fetch_with_wait_until(
+            &server.url("/wait-until-dedicated-worker-bootstrap-slow"),
+            RenderedDomWaitUntil::DomStable,
+            Duration::from_secs(7),
+        )
+        .await?;
+
+    let html = page.serialize_html_async().await.unwrap();
+    assert!(html.contains("id=\"dedicated-worker-bootstrap-result\""));
+    assert!(html.contains(">dedicated-worker-bootstrap=settled<"));
+    assert!(
+        started.elapsed() < Duration::from_secs(6),
+        "domstable waited for the lifetime of a running worker: {:?}",
+        started.elapsed()
+    );
+
+    server.shutdown().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn fetch_with_domstable_follows_http_redirect_from_script_navigation() -> Result<()> {
+    let server = FixtureServer::spawn().await?;
+    let browser = Browser::new(AppConfig::default())?;
+
+    let page = browser
+        .fetch_with_wait_until(
+            &server.url("/wait-until-navigation-http-redirect-source"),
+            RenderedDomWaitUntil::DomStable,
+            Duration::from_secs(7),
+        )
+        .await?;
+
+    let html = page.serialize_html_async().await?;
+    assert!(
+        html.contains("id=\"slow-http-success-head\""),
+        "script navigation stopped at the intermediate redirect response: {html}"
+    );
+    assert!(
+        html.contains("id=\"slow-http-success-tail\""),
+        "replacement Document returned before its response body completed: {html}"
+    );
+
+    server.shutdown().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn fetch_with_domstable_waits_for_inflight_slow_xhr_dom_mutation() -> Result<()> {
     let server = FixtureServer::spawn().await?;
     let browser = Browser::new(AppConfig::default())?;

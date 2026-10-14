@@ -106,8 +106,12 @@ impl TestDir {
             .duration_since(UNIX_EPOCH)
             .expect("system time should be after epoch")
             .as_nanos();
-        let path = std::env::temp_dir().join(format!("moli-indexeddb-test-{}-{nanos}", unique));
-        fs::create_dir_all(&path).expect("test dir should be created");
+        let path = std::env::temp_dir().join(format!(
+            "moli-indexeddb-test-{}-{}-{nanos}",
+            std::process::id(),
+            unique
+        ));
+        fs::create_dir(&path).expect("test dir should be created");
         Self { path }
     }
 }

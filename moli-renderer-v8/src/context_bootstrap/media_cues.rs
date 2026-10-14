@@ -252,12 +252,9 @@ pub(crate) fn new_media_error_value<'s>(
     code: u32,
     message: &str,
 ) -> Option<v8::Local<'s, v8::Object>> {
-    let global = scope.get_current_context().global(scope);
-    let constructor = global.get(scope, v8str(scope, "MediaError").into())?;
-    let constructor = v8::Local::<v8::Object>::try_from(constructor).ok()?;
-    let prototype = constructor.get(scope, v8str(scope, "prototype").into())?;
+    let prototype = super::ensure_intrinsic_interface_prototype(scope, "MediaError").ok()?;
     let object = v8::Object::new(scope);
-    if object.set_prototype(scope, prototype) != Some(true) {
+    if object.set_prototype(scope, prototype.into()) != Some(true) {
         return None;
     }
     set_private_value(
