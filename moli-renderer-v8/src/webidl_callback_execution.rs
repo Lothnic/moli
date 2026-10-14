@@ -157,25 +157,27 @@ impl PreparedWebIdlCallbackExecution {
         }
     }
 
-    pub(crate) fn invoke_and_report<'s>(
+    /// Capture a notification callback result without selecting its reporting
+    /// policy. Timer owners, for example, must disarm their watchdog before
+    /// routing a captured exception.
+    pub(crate) fn invoke_with_report<'s>(
         &self,
         scope: &mut v8::PinScope<'s, '_>,
-        event_type: &str,
+        callback_kind: &str,
+        log_label: &str,
         callback_name: &str,
         receiver: v8::Local<'s, v8::Value>,
         arguments: &[v8::Local<'s, v8::Value>],
-    ) {
-        // No registry borrow survives preparation. Author code may reenter
-        // the API or register another callback synchronously.
-        let result = self.invoke_with(
+    ) -> WebIdlCallbackExecutionOutcome<v8::Global<v8::Value>, Box<V8ExceptionReport>> {
+        self.invoke_with(
             scope,
             receiver,
             arguments,
             |scope, callback, receiver, arguments| {
                 invoke_callback_with_report(
                     scope,
-                    "callback",
-                    "Web IDL callback threw",
+                    callback_kind,
+                    log_label,
                     CallbackExceptionLogLevel::Debug,
                     callback_name,
                     callback,
@@ -183,10 +185,36 @@ impl PreparedWebIdlCallbackExecution {
                     arguments,
                 )
             },
-        );
-        if let WebIdlCallbackExecutionOutcome::Failed(report) = result {
-            self.environment
-                .report_exception(scope, &self.binding, event_type, report);
+        )
+    }
+
+    /// Return whether delivery was attempted. A reported exception still
+    /// counts as delivery; an unavailable execution binding does not.
+    pub(crate) fn invoke_and_report<'s>(
+        &self,
+        scope: &mut v8::PinScope<'s, '_>,
+        event_type: &str,
+        callback_name: &str,
+        receiver: v8::Local<'s, v8::Value>,
+        arguments: &[v8::Local<'s, v8::Value>],
+    ) -> bool {
+        // No registry borrow survives preparation. Author code may reenter
+        // the API or register another callback synchronously.
+        match self.invoke_with_report(
+            scope,
+            "callback",
+            "Web IDL callback threw",
+            callback_name,
+            receiver,
+            arguments,
+        ) {
+            WebIdlCallbackExecutionOutcome::Returned(_) => true,
+            WebIdlCallbackExecutionOutcome::Failed(report) => {
+                self.environment
+                    .report_exception(scope, &self.binding, event_type, report);
+                true
+            }
+            WebIdlCallbackExecutionOutcome::Unavailable => false,
         }
     }
 }

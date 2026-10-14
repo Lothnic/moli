@@ -74,7 +74,7 @@ const DIRECT_V8_CALL_ALLOWLIST: &[AllowedDirectCallFile] = &[
         1,
         DirectCallOwner::TypedWebIdlAdapter,
     ),
-    // The typed Window callback adapter checks exact Realm currentness and
+    // The shared callback executor checks exact Realm currentness and
     // enters the Web IDL relevant/incumbent contexts before normalizing the
     // Promise-returning execute callback. It owns no raw author-function root.
     allowed(

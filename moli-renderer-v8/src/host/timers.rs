@@ -1187,11 +1187,11 @@ fn run_window_timer_callback(
                 )));
             }
             match result {
-                crate::window_webidl_callback::WindowWebIdlCallbackFunctionOutcome::Returned
-                | crate::window_webidl_callback::WindowWebIdlCallbackFunctionOutcome::Retired => {
+                crate::webidl_callback_execution::WebIdlCallbackExecutionOutcome::Returned(_)
+                | crate::webidl_callback_execution::WebIdlCallbackExecutionOutcome::Unavailable => {
                     Ok(HostTimeoutRunResult::Consumed)
                 }
-                crate::window_webidl_callback::WindowWebIdlCallbackFunctionOutcome::Threw(
+                crate::webidl_callback_execution::WebIdlCallbackExecutionOutcome::Failed(
                     report,
                 ) => {
                     let message = report.formatted_error("callback", "Window Web IDL callback");
