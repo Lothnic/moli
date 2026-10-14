@@ -2252,3 +2252,5 @@ mod payment_events;
 mod detached_node_producer_host;
 
 mod local_fetch_integrity;
+
+mod blob_range;
