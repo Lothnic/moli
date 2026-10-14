@@ -19,10 +19,7 @@ use crate::{
         WindowExecutionContextOwner,
     },
     webidl_callback_execution::PreparedWebIdlCallbackExecution,
-    window_webidl_callback::{
-        PreparedWindowWebIdlCallbackFunction, WindowWebIdlCallbackFunction,
-        WindowWebIdlCallbackFunctionOutcome, invoke_window_webidl_callback_function,
-    },
+    window_webidl_callback::WindowWebIdlCallbackFunction,
 };
 
 pub(super) struct ObserverCallback {
@@ -46,11 +43,13 @@ impl ObserverCallback {
         }
     }
 
-    pub(super) fn prepare(&self, scope: &mut v8::PinScope<'_, '_>) -> PreparedObserverCallback {
-        PreparedObserverCallback {
-            callback: self.callback.prepare(scope),
-            observer_identity: self.observer_identity,
-        }
+    pub(super) fn prepare(
+        &self,
+        scope: &mut v8::PinScope<'_, '_>,
+        host_ptr: *mut JsContextHost,
+    ) -> Option<PreparedWebIdlCallbackExecution> {
+        self.callback
+            .prepare_execution(scope, host_ptr, Some(self.observer_identity?))
     }
 
     pub(super) fn is_owned_by(&self, owner: WindowExecutionContextOwner) -> bool {
@@ -194,7 +193,7 @@ impl ObserverCallbackRegistry {
         callback: v8::Local<'s, v8::Object>,
         relevant_global: v8::Local<'s, v8::Object>,
         incumbent_global: v8::Local<'s, v8::Object>,
-    ) -> Option<PreparedObserverCallback> {
+    ) -> Option<PreparedWebIdlCallbackExecution> {
         let (observer_identity, callback_identity) = {
             let state = self.state.borrow();
             let binding = state.bindings.get(&id)?;
@@ -211,13 +210,13 @@ impl ObserverCallbackRegistry {
             relevant_context,
             incumbent_context,
         )?;
-        Some(PreparedObserverCallback {
-            callback: PreparedWindowWebIdlCallbackFunction::Live {
-                callback,
-                relevant_identity: callback_identity?,
-            },
-            observer_identity,
-        })
+        PreparedWebIdlCallbackExecution::window(
+            scope,
+            callback,
+            std::ptr::from_ref(host).cast_mut(),
+            Some(observer_identity?),
+            callback_identity?,
+        )
     }
 
     pub(super) fn is_current(&self, host: &JsContextHost, id: ObserverCallbackId) -> bool {
@@ -316,75 +315,5 @@ impl ObserverCallbackRegistry {
                 drop(retired);
             }
         }
-    }
-}
-
-pub(crate) struct PreparedObserverCallback {
-    callback: PreparedWindowWebIdlCallbackFunction,
-    observer_identity: Option<WindowExecutionContextIdentity>,
-}
-
-impl PreparedObserverCallback {
-    /// Retain both registration-time identities while using the common
-    /// Window/Worker invocation and exception-reporting adapter.
-    pub(crate) fn into_execution(
-        self,
-        scope: &mut v8::PinScope<'_, '_>,
-        host_ptr: *mut JsContextHost,
-    ) -> Option<PreparedWebIdlCallbackExecution> {
-        let PreparedWindowWebIdlCallbackFunction::Live {
-            callback,
-            relevant_identity,
-        } = self.callback
-        else {
-            return None;
-        };
-        PreparedWebIdlCallbackExecution::window(
-            scope,
-            callback,
-            host_ptr,
-            Some(self.observer_identity?),
-            relevant_identity,
-        )
-    }
-
-    pub(crate) fn relevant_context<'s>(
-        &self,
-        scope: &mut v8::PinScope<'s, '_>,
-    ) -> Option<v8::Local<'s, v8::Context>> {
-        self.callback.relevant_context(scope)
-    }
-
-    pub(crate) fn is_current(&self, host: &JsContextHost) -> bool {
-        self.observer_identity
-            .is_some_and(|identity| host.window_execution_context_identity_is_current(identity))
-            && self.callback.is_current(host)
-    }
-
-    pub(crate) const fn relevant_identity(&self) -> Option<WindowExecutionContextIdentity> {
-        self.callback.relevant_identity()
-    }
-
-    pub(crate) fn invoke<'s>(
-        &self,
-        scope: &mut v8::PinScope<'s, '_>,
-        host_ptr: *mut JsContextHost,
-        callback_name: &str,
-        receiver: v8::Local<'s, v8::Value>,
-        arguments: &[v8::Local<'s, v8::Value>],
-    ) -> WindowWebIdlCallbackFunctionOutcome {
-        if !self.is_current(unsafe { &*host_ptr }) {
-            return WindowWebIdlCallbackFunctionOutcome::Retired;
-        }
-        invoke_window_webidl_callback_function(
-            scope,
-            host_ptr,
-            "callback",
-            "observer callback threw",
-            callback_name,
-            &self.callback,
-            receiver,
-            arguments,
-        )
     }
 }

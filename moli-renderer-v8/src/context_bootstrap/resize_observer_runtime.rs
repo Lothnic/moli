@@ -1,11 +1,9 @@
 mod entry;
 use super::*;
-use crate::host::report_event_callback_exception;
 use crate::observer_runtime::ObserverCallbackId;
 use crate::util::{get_private_value, serialize_v8_iter_array, set_private_value};
 use crate::web_api_interfaces;
 use crate::webidl;
-use crate::window_webidl_callback::WindowWebIdlCallbackFunctionOutcome;
 use entry::ResizeObserverEntryData;
 pub(super) use entry::install_resize_observer_entry_template_bindings;
 use moli_webapi_declare::WebApiObject;
@@ -276,9 +274,7 @@ fn resize_observer_flush_callback<'s>(
         set_resize_observer_pending_targets(scope, observer, pending_targets);
         return;
     };
-    let Some(callback_context) = callback.relevant_context(scope) else {
-        return;
-    };
+    let callback_context = callback.relevant_context(scope);
     let result = {
         let scope = &mut v8::ContextScope::new(scope, callback_context);
         build_resize_observer_entries(scope, pending_targets)
@@ -298,26 +294,13 @@ fn resize_observer_flush_callback<'s>(
         return;
     }
     let observer_value: v8::Local<'_, v8::Value> = observer.into();
-    match callback.invoke(
+    callback.invoke_and_report(
         scope,
-        host_ptr,
+        "resizeobserver",
         "ResizeObserver callback",
         observer_value,
         &[entries.into(), observer_value],
-    ) {
-        WindowWebIdlCallbackFunctionOutcome::Threw(report) => {
-            report_event_callback_exception(
-                scope,
-                host_ptr,
-                "resizeobserver",
-                callback.relevant_identity(),
-                None,
-                &report,
-            );
-        }
-        WindowWebIdlCallbackFunctionOutcome::Returned
-        | WindowWebIdlCallbackFunctionOutcome::Retired => {}
-    }
+    );
 }
 
 fn is_resize_observer_target<'s>(

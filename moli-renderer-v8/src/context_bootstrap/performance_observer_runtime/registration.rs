@@ -179,8 +179,7 @@ impl<'s> PerformanceObserverRegistration<'s> {
                     relevant,
                     incumbent,
                 );
-                crate::observer_runtime::prepare_callback(scope, host_ptr, residence)?
-                    .into_execution(scope, host_ptr)
+                crate::observer_runtime::prepare_callback(scope, host_ptr, residence)
             }
             RegistrationEnvironment::Worker => {
                 let context = self.observer.get_creation_context(scope)?;

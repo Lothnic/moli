@@ -3,6 +3,7 @@ use std::ptr::NonNull;
 use crate::{
     dom::native::{DomHost, DomMutationEffects, NativeNodeId},
     native_bridge::{JsContextHost, RuntimeObservableContextToken, WindowExecutionContextOwner},
+    webidl_callback_execution::PreparedWebIdlCallbackExecution,
 };
 use moli_webidl_callback::WebIdlCallbackFunction;
 
@@ -10,9 +11,7 @@ use super::{
     IntersectionMutationPlan, IntersectionObserverOptions, MutationObserverOptions,
     ObserverMutationPlan, ObserverStore, build_intersection_entries_array,
     build_mutation_records_array,
-    callback::{
-        ObserverCallback, ObserverCallbackBinding, ObserverCallbackId, PreparedObserverCallback,
-    },
+    callback::{ObserverCallback, ObserverCallbackBinding, ObserverCallbackId},
     intersection::{self, IntersectionCheckBatch},
     invoke_intersection_deliveries, invoke_mutation_deliveries, node_is_intersection_root,
     node_is_intersection_target,
@@ -99,7 +98,7 @@ pub(crate) fn prepare_callback<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     host_ptr: *mut JsContextHost,
     residence: ObserverCallbackResidence<'s>,
-) -> Option<PreparedObserverCallback> {
+) -> Option<PreparedWebIdlCallbackExecution> {
     let ObserverCallbackResidence {
         id,
         callback,
@@ -316,7 +315,7 @@ pub(super) fn flush_mutation_observers(
         host.begin_mutation_observer_delivery();
         let store = host.observers_mut(&OBSERVER_STORE_ACCESS);
         store.begin_task(ObserverTask::MutationDelivery);
-        store.collect_mutation_deliveries(scope)
+        store.collect_mutation_deliveries(scope, host_ptr)
     });
 
     // `access` holds no host reference here. The callback can safely call
@@ -525,7 +524,7 @@ pub(super) fn flush_intersection_observers(
 ) {
     let deliveries = ObserverHostAccess::new(host_ptr).store(|store| {
         store.begin_task(ObserverTask::IntersectionDelivery);
-        store.collect_intersection_deliveries(scope)
+        store.collect_intersection_deliveries(scope, host_ptr)
     });
 
     // Blink likewise removes observers from its controller pending set before

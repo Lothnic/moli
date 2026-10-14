@@ -19,6 +19,7 @@ use crate::{
         WindowExecutionContextOwner,
     },
     v8_traced_webidl_callback::V8TracedWebIdlCallbackFunction,
+    webidl_callback_execution::PreparedWebIdlCallbackExecution,
 };
 
 /// A callback-function residence traced through an owning V8 object.
@@ -115,6 +116,31 @@ impl WindowWebIdlCallbackFunction {
         }
     }
 
+    /// Prepare a single invocation while keeping the captured callback Realm
+    /// and any API-specific owner identity authoritative.
+    pub(crate) fn prepare_execution(
+        &self,
+        scope: &mut v8::PinScope<'_, '_>,
+        host_ptr: *mut JsContextHost,
+        owner_identity: Option<WindowExecutionContextIdentity>,
+    ) -> Option<PreparedWebIdlCallbackExecution> {
+        let Self::Live {
+            callback,
+            relevant_identity,
+        } = self
+        else {
+            return None;
+        };
+        let callback = callback.prepare(scope);
+        PreparedWebIdlCallbackExecution::window(
+            scope,
+            callback,
+            host_ptr,
+            owner_identity,
+            *relevant_identity,
+        )
+    }
+
     pub(crate) const fn relevant_identity(&self) -> Option<WindowExecutionContextIdentity> {
         match self {
             Self::Live {
@@ -180,16 +206,6 @@ pub(crate) enum PreparedWindowWebIdlCallbackFunctionOutcome<R, E> {
 }
 
 impl PreparedWindowWebIdlCallbackFunction {
-    pub(crate) fn relevant_context<'s>(
-        &self,
-        scope: &mut v8::PinScope<'s, '_>,
-    ) -> Option<v8::Local<'s, v8::Context>> {
-        match self {
-            Self::Live { callback, .. } => Some(callback.relevant_context(scope)),
-            Self::Retired => None,
-        }
-    }
-
     pub(crate) const fn relevant_identity(&self) -> Option<WindowExecutionContextIdentity> {
         match self {
             Self::Live {

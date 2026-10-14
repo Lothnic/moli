@@ -116,6 +116,17 @@ impl PreparedWebIdlCallbackExecution {
         })
     }
 
+    pub(crate) fn relevant_context<'s>(
+        &self,
+        scope: &mut v8::PinScope<'s, '_>,
+    ) -> v8::Local<'s, v8::Context> {
+        self.callback.relevant_context(scope)
+    }
+
+    pub(crate) fn is_current(&self, scope: &mut v8::PinScope<'_, '_>) -> bool {
+        self.environment.can_invoke(scope, &self.binding)
+    }
+
     /// Execute the caller's invocation and return conversion while the Web
     /// IDL relevant/incumbent contexts are entered. This entry point neither
     /// captures nor reports exceptions on behalf of the API algorithm.
@@ -131,7 +142,7 @@ impl PreparedWebIdlCallbackExecution {
             &'a [v8::Local<'s, v8::Value>],
         ) -> Result<R, E>,
     ) -> WebIdlCallbackExecutionOutcome<R, E> {
-        if !self.environment.can_invoke(scope, &self.binding) {
+        if !self.is_current(scope) {
             return WebIdlCallbackExecutionOutcome::Unavailable;
         }
         match invoke_webidl_callback_function(

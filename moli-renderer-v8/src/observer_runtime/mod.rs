@@ -37,7 +37,6 @@ use moli_webapi_declare::{WebApiFunctionTemplate, WebApiObject};
 
 use super::{
     context_bootstrap::{build_dom_rect_object, throw_dom_exception_value},
-    host::report_event_callback_exception,
     native_bridge::document::{DETACHED_STATE_SLOT, detached_native_handle_for_runtime},
     native_bridge::{
         JsContextHost, build_static_handle_node_list_wrapper, callback_value_dom_handle,
@@ -51,7 +50,7 @@ use super::{
         get_private_object, get_private_value, serialize_v8_array, serialize_v8_iter_array,
         set_private_value, throw_range_error, throw_type_error, v8_string, v8str,
     },
-    window_webidl_callback::WindowWebIdlCallbackFunctionOutcome,
+    webidl_callback_execution::PreparedWebIdlCallbackExecution,
 };
 
 const MUTATION_OBSERVER_ID_SLOT: &str = "__lmMutationObserverId";
@@ -758,6 +757,7 @@ impl ObserverStore {
     fn collect_mutation_deliveries<'s>(
         &mut self,
         scope: &mut v8::PinScope<'s, '_>,
+        host_ptr: *mut JsContextHost,
     ) -> Vec<MutationObserverDelivery<'s>> {
         let mut deliveries = Vec::new();
         let mut ids: Vec<_> = self.mutation_observers.keys().copied().collect();
@@ -770,10 +770,13 @@ impl ObserverStore {
                 continue;
             }
             let records = mem::take(&mut state.queued_records);
+            let Some(callback) = state.callback.prepare(scope, host_ptr) else {
+                continue;
+            };
             let observer = v8::Local::new(scope, &state.observer);
             deliveries.push(MutationObserverDelivery {
                 observer,
-                callback: state.callback.prepare(scope),
+                callback,
                 records,
             });
         }
@@ -783,6 +786,7 @@ impl ObserverStore {
     fn collect_intersection_deliveries<'s>(
         &mut self,
         scope: &mut v8::PinScope<'s, '_>,
+        host_ptr: *mut JsContextHost,
     ) -> Vec<IntersectionObserverDelivery<'s>> {
         let mut deliveries = Vec::new();
         for state in self.intersection_observers.values_mut() {
@@ -790,10 +794,13 @@ impl ObserverStore {
                 continue;
             }
             let entries = mem::take(&mut state.queued_entries);
+            let Some(callback) = state.callback.prepare(scope, host_ptr) else {
+                continue;
+            };
             let observer = v8::Local::new(scope, &state.observer);
             deliveries.push(IntersectionObserverDelivery {
                 observer,
-                callback: state.callback.prepare(scope),
+                callback,
                 entries,
                 options: state.options.clone(),
             });
@@ -837,13 +844,13 @@ impl ObserverStore {
 
 struct MutationObserverDelivery<'s> {
     observer: v8::Local<'s, v8::Object>,
-    callback: callback::PreparedObserverCallback,
+    callback: PreparedWebIdlCallbackExecution,
     records: Vec<QueuedMutationRecord>,
 }
 
 struct IntersectionObserverDelivery<'s> {
     observer: v8::Local<'s, v8::Object>,
-    callback: callback::PreparedObserverCallback,
+    callback: PreparedWebIdlCallbackExecution,
     entries: Vec<QueuedIntersectionEntry>,
     options: IntersectionObserverOptions,
 }
@@ -854,31 +861,18 @@ fn invoke_mutation_deliveries<'s>(
     deliveries: Vec<MutationObserverDelivery<'s>>,
 ) {
     for delivery in deliveries {
-        if !delivery.callback.is_current(unsafe { &*host_ptr }) {
+        if !delivery.callback.is_current(scope) {
             continue;
         }
         let records_array = build_mutation_records_array(scope, host_ptr, &delivery.records);
         let observer_value: v8::Local<'_, v8::Value> = delivery.observer.into();
-        match delivery.callback.invoke(
+        delivery.callback.invoke_and_report(
             scope,
-            host_ptr,
+            "mutationobserver",
             "MutationObserver callback",
             observer_value,
             &[records_array.into(), observer_value],
-        ) {
-            WindowWebIdlCallbackFunctionOutcome::Threw(report) => {
-                report_event_callback_exception(
-                    scope,
-                    host_ptr,
-                    "mutationobserver",
-                    delivery.callback.relevant_identity(),
-                    None,
-                    &report,
-                );
-            }
-            WindowWebIdlCallbackFunctionOutcome::Returned
-            | WindowWebIdlCallbackFunctionOutcome::Retired => {}
-        }
+        );
     }
 }
 
@@ -888,32 +882,19 @@ fn invoke_intersection_deliveries<'s>(
     deliveries: Vec<IntersectionObserverDelivery<'s>>,
 ) {
     for delivery in deliveries {
-        if !delivery.callback.is_current(unsafe { &*host_ptr }) {
+        if !delivery.callback.is_current(scope) {
             continue;
         }
         let entries =
             build_intersection_entries_array(scope, host_ptr, &delivery.options, &delivery.entries);
         let observer_value: v8::Local<'_, v8::Value> = delivery.observer.into();
-        match delivery.callback.invoke(
+        delivery.callback.invoke_and_report(
             scope,
-            host_ptr,
+            "intersectionobserver",
             "IntersectionObserver callback",
             observer_value,
             &[entries.into(), observer_value],
-        ) {
-            WindowWebIdlCallbackFunctionOutcome::Threw(report) => {
-                report_event_callback_exception(
-                    scope,
-                    host_ptr,
-                    "intersectionobserver",
-                    delivery.callback.relevant_identity(),
-                    None,
-                    &report,
-                );
-            }
-            WindowWebIdlCallbackFunctionOutcome::Returned
-            | WindowWebIdlCallbackFunctionOutcome::Retired => {}
-        }
+        );
     }
 }
 
