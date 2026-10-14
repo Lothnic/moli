@@ -762,6 +762,7 @@ fn queue_resize_observer_delivery<'s>(
     set_resize_observer_scheduled(scope, observer, true);
     if unsafe { &*host_ptr }.layout_policy().uses_real_layout() {
         unsafe { &mut *host_ptr }.queue_resize_observer_rendering_update(scope);
+        return;
     }
     push_object_to_global_queue(scope, RESIZE_OBSERVER_QUEUE_SLOT, observer);
     let host = unsafe { &mut *host_ptr };

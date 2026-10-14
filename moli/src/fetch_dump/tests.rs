@@ -246,7 +246,7 @@ async fn render_markdown_dump_uses_renderer_live_dump() -> Result<()> {
 }
 
 #[tokio::test]
-async fn markdown_dump_includes_content_created_from_observed_layout() -> Result<()> {
+async fn markdown_dump_reads_dom_after_explicit_layout_observer_update() -> Result<()> {
     let config = BrowserConfig::default().with_layout_policy(LayoutPolicy::OnDemand);
     let (_browser, mut page, http_server) = load_page_with_config(
         r#"<!doctype html><main id="viewport" style="width:520px;height:80px"></main><script>
@@ -276,8 +276,22 @@ async fn markdown_dump_includes_content_created_from_observed_layout() -> Result
     )
     .await?;
 
-    // Markdown output must observe the settled layout-driven DOM without a
-    // screenshot or a test-only layout publication first.
+    // Layout is an explicit operation. Once its ResizeObserver callback has
+    // updated the live DOM, Markdown reads that DOM without publishing layout.
+    page.publish_layout_async().await?;
+    page.evaluate_runtime_expression_with_await_async(
+        "new Promise((resolve,reject)=>{const end=Date.now()+2000;const poll=()=>document.getElementById('viewport').childElementCount===5?resolve():Date.now()>end?reject(new Error('layout-driven DOM update missing')):setTimeout(poll,1);poll()})",
+        true,
+    )
+    .await?;
+    assert_eq!(
+        page.evaluate_runtime_expression_async(
+            "document.getElementById('viewport').textContent.includes('Ada')",
+        )
+        .await?["value"],
+        true
+    );
+
     let rendered = render_page_dump_with_options_async(
         &mut page,
         DumpFormat::Markdown,
@@ -326,15 +340,15 @@ async fn fresh_layout_resize_observer_updates_virtual_children_and_deduplicates_
     let widths = page
         .evaluate_runtime_expression_async("JSON.stringify(widths)")
         .await?;
-    // Registration keeps the existing checkpoint delivery, which observes
-    // the pre-layout zero-size snapshot before the first rendered geometry.
-    // The layout path must then report each real size exactly once.
-    assert_eq!(widths["value"], "[0,120,420]");
+    // Real-layout observers receive the geometry produced by rendering
+    // updates. The non-layout fallback must not race them with a zero-size
+    // callback from the earlier DOM-only checkpoint path.
+    assert_eq!(widths["value"], "[120,420]");
     render_page_output_async(&mut page, &screenshot).await?;
     assert_eq!(
         page.evaluate_runtime_expression_async("JSON.stringify(widths)")
             .await?["value"],
-        "[0,120,420]"
+        "[120,420]"
     );
     server.abort();
     Ok(())
