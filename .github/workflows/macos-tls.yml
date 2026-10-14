@@ -39,3 +39,35 @@ jobs:
         run: cargo test --locked -p moli-curl
       - name: Test native trust and explicit CA overrides
         run: cargo test --locked -p moli-curl --test apple_sectrust -- --ignored --nocapture
+
+  release-artifact:
+    name: Build macOS aarch64 release artifact
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: macos-15
+    timeout-minutes: 120
+    env:
+      MACOSX_DEPLOYMENT_TARGET: "13.0"
+      CARGO_INCREMENTAL: "0"
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - name: Install pinned Rust toolchain
+        run: |
+          toolchain=$(tr -d '[:space:]' < rust-toolchain)
+          rustup toolchain install "$toolchain" --profile minimal --no-self-update
+      - name: Build release binary
+        run: cargo build --release --locked -p moli
+      - name: Package release binary
+        run: |
+          mkdir -p artifact
+          cp target/release/moli artifact/moli
+          git rev-parse HEAD > artifact/revision.txt
+          (cd artifact && shasum -a 256 moli > SHA256SUMS)
+      - name: Upload release binary
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: moli-release-macos-aarch64
+          path: artifact/
+          if-no-files-found: error
+          retention-days: 3
