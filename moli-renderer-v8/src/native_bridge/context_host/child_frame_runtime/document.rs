@@ -197,6 +197,17 @@ impl JsContextHost {
             .set_detached_content_window(scope, handle, window);
     }
 
+    #[cfg(test)]
+    pub(crate) fn detached_content_surface_cache_counts_for_test(&self) -> [usize; 6] {
+        self.child_window_proxy_records
+            .detached_content_surface_cache_counts_for_test()
+    }
+
+    pub(crate) fn prune_collected_iframe_content_surfaces(&mut self) {
+        self.child_window_proxy_records
+            .prune_collected_detached_content_surfaces();
+    }
+
     pub(crate) fn clear_cached_detached_iframe_content_surfaces(&mut self, handle: DomHandle) {
         self.child_window_proxy_records
             .clear_detached_content_surfaces(handle);

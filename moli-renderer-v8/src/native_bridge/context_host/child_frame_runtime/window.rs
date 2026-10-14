@@ -396,6 +396,47 @@ impl ChildWindowProxyRecords {
             .insert(handle, v8::Weak::new(scope, window));
     }
 
+    pub(in crate::native_bridge::context_host) fn prune_collected_detached_content_surfaces(
+        &mut self,
+    ) {
+        for cache in [
+            &mut self.detached_content_window_wrappers,
+            &mut self.detached_content_document_wrappers,
+        ] {
+            // Run after V8 returns, without a Host borrow spanning GC. Empty
+            // Weak handles still own native control blocks until they drop.
+            cache.retain(|_, wrapper| !wrapper.is_empty());
+            if cache.is_empty() {
+                *cache = HashMap::new();
+            } else if cache.len() <= cache.capacity() / 4 {
+                // Keep author-reachable identities; only rehash sparse maps.
+                cache.shrink_to_fit();
+            }
+        }
+    }
+
+    #[cfg(test)]
+    pub(in crate::native_bridge::context_host) fn detached_content_surface_cache_counts_for_test(
+        &self,
+    ) -> [usize; 6] {
+        // Window entries/dead targets, Document entries/dead targets, then map capacities.
+        // is_empty() neither creates V8 locals nor makes an author-unreachable target live.
+        [
+            self.detached_content_window_wrappers.len(),
+            self.detached_content_window_wrappers
+                .values()
+                .filter(|wrapper| wrapper.is_empty())
+                .count(),
+            self.detached_content_document_wrappers.len(),
+            self.detached_content_document_wrappers
+                .values()
+                .filter(|wrapper| wrapper.is_empty())
+                .count(),
+            self.detached_content_window_wrappers.capacity(),
+            self.detached_content_document_wrappers.capacity(),
+        ]
+    }
+
     pub(in crate::native_bridge::context_host) fn clear_detached_content_surfaces(
         &mut self,
         handle: DomHandle,
