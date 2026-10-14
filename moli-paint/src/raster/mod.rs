@@ -88,6 +88,8 @@ pub enum PaintError {
         operations: usize,
         max_operations: usize,
     },
+    /// Exact clipping arithmetic would exceed its coordinate precision budget.
+    CanvasClipCoordinateBudgetExceeded { bits: u64, max_bits: u64 },
     /// The snapshot contains too many positioned glyphs.
     PaintGlyphBudgetExceeded { glyphs: usize, max_glyphs: usize },
     /// The snapshot nests more clip/effect scopes than the backend boundary accepts.
@@ -165,6 +167,10 @@ impl fmt::Display for PaintError {
                 formatter,
                 "paint snapshot contains {operations} work units, exceeding the {max_operations}-unit budget"
             ),
+            Self::CanvasClipCoordinateBudgetExceeded { bits, max_bits } => write!(
+                formatter,
+                "Canvas clipping requires {bits}-bit coordinates, exceeding the {max_bits}-bit budget"
+            ),
             Self::PaintGlyphBudgetExceeded { glyphs, max_glyphs } => write!(
                 formatter,
                 "paint snapshot contains {glyphs} positioned glyphs, exceeding the {max_glyphs}-glyph budget"
@@ -213,6 +219,86 @@ struct RasterDimensions {
     width: u32,
     height: u32,
     byte_len: usize,
+}
+
+/// One immutable Canvas clipping path, already frozen in bitmap coordinates.
+#[derive(Clone, Debug)]
+pub struct CanvasClip {
+    pub path: PaintPath,
+    pub fill_rule: moli_layout::PaintFillRule,
+}
+
+/// Rasterize the geometric intersection of Canvas clips. Each path keeps its
+/// own winding rule; the backend receives a real clip stack, not a product of
+/// independently rasterized masks. No live layout or DOM state is consulted.
+pub fn raster_canvas_clip_mask(
+    width: u32,
+    height: u32,
+    clips: &[CanvasClip],
+) -> Result<RasterImage, PaintError> {
+    let surface =
+        PaintCaptureSurface::for_viewport(moli_layout::PaintViewport::new(width, height, 1.0));
+    let dimensions = validate_dimensions(surface)?;
+    if clips.len() > MAX_PAINT_LAYER_DEPTH {
+        return Err(PaintError::PaintLayerDepthBudgetExceeded {
+            depth: clips.len(),
+            max_depth: MAX_PAINT_LAYER_DEPTH,
+        });
+    }
+    let operations = clips.iter().fold(1_usize, |count, clip| {
+        count
+            .saturating_add(clip.path.elements.len())
+            .saturating_add(2)
+    });
+    if operations > MAX_PAINT_OPERATIONS {
+        return Err(PaintError::PaintOperationBudgetExceeded {
+            operations,
+            max_operations: MAX_PAINT_OPERATIONS,
+        });
+    }
+    validate_resource_budget(
+        dimensions,
+        PaintStreamMetrics {
+            operation_count: operations,
+            ..PaintStreamMetrics::default()
+        },
+    )?;
+    let mut renderer = VelloCpuImageRenderer::new(width, height);
+    let mut rgba = Vec::new();
+    renderer.render_to_vec(
+        |scene| {
+            for clip in clips {
+                scene.render_ctx.set_fill_rule(match clip.fill_rule {
+                    moli_layout::PaintFillRule::NonZero => Fill::NonZero,
+                    moli_layout::PaintFillRule::EvenOdd => Fill::EvenOdd,
+                });
+                scene.push_clip_layer(Affine::IDENTITY, &to_backend_path(&clip.path));
+            }
+            scene.fill(
+                Fill::NonZero,
+                Affine::IDENTITY,
+                Color::WHITE,
+                None,
+                &Rect::new(0.0, 0.0, f64::from(width), f64::from(height)),
+            );
+            for _ in clips {
+                scene.pop_layer();
+            }
+        },
+        &mut rgba,
+    );
+    if rgba.len() != dimensions.byte_len {
+        return Err(PaintError::UnexpectedBufferLength {
+            expected: dimensions.byte_len,
+            actual: rgba.len(),
+        });
+    }
+    unpremultiply_rgba(&mut rgba);
+    Ok(RasterImage {
+        width,
+        height,
+        rgba,
+    })
 }
 
 /// Rasterizes an owned snapshot to row-major, straight-alpha RGBA8 pixels with Vello CPU.
@@ -2727,5 +2813,70 @@ mod tests {
         image.rgba[offset..offset + 4]
             .try_into()
             .expect("one RGBA pixel")
+    }
+}
+
+#[cfg(test)]
+mod canvas_clip_tests {
+    use super::*;
+
+    fn clip_rect(x: f32, y: f32, width: f32, height: f32) -> CanvasClip {
+        let point = |x, y| moli_layout::LayoutPoint::new(x, y);
+        CanvasClip {
+            path: PaintPath {
+                bounds: PaintRect::new(x, y, width, height),
+                elements: vec![
+                    PaintPathElement::MoveTo(point(x, y)),
+                    PaintPathElement::LineTo(point(x + width, y)),
+                    PaintPathElement::LineTo(point(x + width, y + height)),
+                    PaintPathElement::LineTo(point(x, y + height)),
+                    PaintPathElement::Close,
+                ],
+            },
+            fill_rule: moli_layout::PaintFillRule::NonZero,
+        }
+    }
+    fn alpha(image: &RasterImage, x: usize, y: usize) -> u8 {
+        image.rgba[(y * image.width as usize + x) * 4 + 3]
+    }
+
+    #[test]
+    fn canvas_clips_intersect_geometry_and_keep_each_fill_rule() {
+        let left = clip_rect(0.0, 0.0, 3.0, 4.0);
+        let right = clip_rect(2.0, 0.0, 2.0, 4.0);
+        let mask = raster_canvas_clip_mask(4, 4, &[left, right]).unwrap();
+        assert_eq!(
+            [
+                alpha(&mask, 0, 1),
+                alpha(&mask, 1, 1),
+                alpha(&mask, 2, 1),
+                alpha(&mask, 3, 1)
+            ],
+            [0, 0, 255, 0]
+        );
+        let mut hole = clip_rect(0.0, 0.0, 4.0, 4.0);
+        hole.path
+            .elements
+            .extend(clip_rect(1.0, 1.0, 2.0, 2.0).path.elements);
+        hole.fill_rule = moli_layout::PaintFillRule::EvenOdd;
+        let mask = raster_canvas_clip_mask(4, 4, std::slice::from_ref(&hole)).unwrap();
+        assert_eq!(
+            [alpha(&mask, 0, 0), alpha(&mask, 1, 1), alpha(&mask, 3, 3)],
+            [255, 0, 255]
+        );
+        let mask = raster_canvas_clip_mask(4, 4, &[hole, clip_rect(1.0, 1.0, 2.0, 2.0)]).unwrap();
+        assert!(mask.rgba.chunks_exact(4).all(|p| p[3] == 0));
+    }
+
+    #[test]
+    fn empty_clip_is_empty_and_clip_depth_is_bounded_before_rendering() {
+        let mut empty = clip_rect(0.0, 0.0, 4.0, 4.0);
+        empty.path.elements.clear();
+        let mask = raster_canvas_clip_mask(4, 4, std::slice::from_ref(&empty)).unwrap();
+        assert!(mask.rgba.chunks_exact(4).all(|p| p[3] == 0));
+        assert!(matches!(
+            raster_canvas_clip_mask(1, 1, &vec![empty; MAX_PAINT_LAYER_DEPTH + 1]),
+            Err(PaintError::PaintLayerDepthBudgetExceeded { .. })
+        ));
     }
 }
