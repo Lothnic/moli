@@ -1132,6 +1132,10 @@ pub(super) fn build_router() -> Router {
             get(parse_time_async_classic_chunked_page),
         )
         .route(
+            "/compat/parse-time-async-classic-chunked-executed",
+            get(parse_time_async_classic_chunked_executed),
+        )
+        .route(
             "/compat/parse-time-async-classic-slow-chunked-tail",
             get(parse_time_async_classic_slow_chunked_tail_page),
         )
@@ -2139,6 +2143,10 @@ pub(super) fn build_router() -> Router {
         .route(
             "/assets/parse_time_async.js",
             get(asset_parse_time_async_script),
+        )
+        .route(
+            "/assets/parse_time_async_chunked.js",
+            get(asset_parse_time_async_chunked_script),
         )
         .route(
             "/assets/parse_time_async_load_order.js",
