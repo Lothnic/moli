@@ -2,7 +2,7 @@ use html5ever::tree_builder::QuirksMode as HtmlQuirksMode;
 use selectors::matching::QuirksMode;
 use url::Url;
 
-use super::{NativeDom, NativeNodeId};
+use super::{NativeDom, NativeNodeId, SvgUserTransform};
 
 mod base_url;
 
@@ -56,6 +56,8 @@ pub struct Document {
     default_language: Option<Box<str>>,
     source_last_modified_ms: Option<f64>,
     base_url_state: DocumentBaseUrlState,
+    // SVG document-root replacement retains magnification and panning.
+    svg_user_transform: Option<Box<SvgUserTransform>>,
 }
 
 impl Document {
@@ -75,6 +77,7 @@ impl Document {
             css_target: None,
             default_language: None,
             source_last_modified_ms: None,
+            svg_user_transform: None,
         }
     }
 
@@ -90,6 +93,7 @@ impl Document {
             css_target: None,
             default_language: None,
             source_last_modified_ms: None,
+            svg_user_transform: None,
         }
     }
 
@@ -107,6 +111,36 @@ impl Document {
 
     pub fn ready_state(&self) -> DocumentReadyState {
         self.ready_state
+    }
+
+    pub(super) fn clone_for_new_document(&self) -> Self {
+        Self {
+            svg_user_transform: None,
+            ..self.clone()
+        }
+    }
+
+    pub(super) fn svg_user_transform(&self) -> SvgUserTransform {
+        self.svg_user_transform
+            .as_deref()
+            .copied()
+            .unwrap_or_default()
+    }
+
+    pub(super) fn set_svg_user_transform(&mut self, value: SvgUserTransform) {
+        // Only x/y participate in the document's panning transform. The
+        // DOMPoint's z/w belong to its element, including during replacement.
+        let value = SvgUserTransform {
+            point: [value.point[0], value.point[1], 0.0, 1.0],
+            ..value
+        };
+        if value.is_default() {
+            self.svg_user_transform = None;
+        } else if let Some(current) = self.svg_user_transform.as_deref_mut() {
+            *current = value;
+        } else {
+            self.svg_user_transform = Some(Box::new(value));
+        }
     }
 
     pub fn default_language(&self) -> Option<&str> {
