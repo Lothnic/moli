@@ -90,7 +90,6 @@ pub(super) fn install_handlers<'s>(
     target: v8::Local<'s, v8::Object>,
     entry: bool,
 ) {
-    media_queries::install_simple_event_target_ordered_handlers(scope, target);
     bind_shared_target(scope, target, target);
     for (index, (property, _)) in HANDLERS.iter().enumerate() {
         if (*property == "ondispose") != entry {
@@ -141,17 +140,15 @@ fn handler_setter<'s>(
         return;
     };
     let target = args.this();
-    let active = args.get(0).is_object();
-    let value = if active {
-        args.get(0)
-    } else {
-        v8::null(scope).into()
-    };
-    set_private_value(scope, target, slot, value);
     let Some(listeners) = media_queries::simple_event_target_slot_name(scope, target) else {
         return;
     };
-    media_queries::simple_object_event_set_ordered_handler(
-        scope, target, &listeners, event_type, slot, active,
+    media_queries::simple_object_event_set_handler(
+        scope,
+        target,
+        &listeners,
+        event_type,
+        slot,
+        args.get(0),
     );
 }

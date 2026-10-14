@@ -926,6 +926,9 @@ async fn lightweight_popup_cross_document_navigation_clears_old_onload_handler()
         .eval(
             r#"
 (() => {
+  if (typeof Object.getOwnPropertyDescriptor(__popupOnloadWindow, "onload").set !== "function") {
+    throw new Error("popup script exports replaced the Window handler accessor");
+  }
   const reopened = open(__popupOnloadSecondUrl, "popupOnloadClearWindow");
   return [
     reopened === __popupOnloadWindow,

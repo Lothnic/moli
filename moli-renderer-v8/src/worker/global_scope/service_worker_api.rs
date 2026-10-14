@@ -1,4 +1,7 @@
 use super::*;
+use crate::context_bootstrap::{
+    simple_event_target_handler_getter_callback, simple_event_target_handler_setter_callback,
+};
 
 pub(super) fn install_service_worker_global_runtime<'s>(
     scope: &mut v8::PinScope<'s, '_>,
@@ -177,6 +180,8 @@ pub(in crate::worker) fn build_service_worker_global_service_worker<'s>(
 ) -> Result<v8::Local<'s, v8::Object>> {
     ensure_worker_interface_constructor(scope, "ServiceWorker")?;
     let worker = ServiceWorkerGlobalServiceWorkerDeclaration {
+        onstatechange: (),
+        onerror: (),
         script_url: version.script_url().as_str().to_owned(),
         state: version.state().to_owned(),
         post_message: (),
@@ -190,7 +195,7 @@ pub(in crate::worker) fn build_service_worker_global_service_worker<'s>(
         SERVICE_WORKER_VERSION_ID_SLOT,
         version_id_value.into(),
     );
-    install_simple_event_target_methods(scope, worker, SERVICE_WORKER_WORKER_EVENTS_SLOT, false);
+    install_simple_event_target_methods(scope, worker, SERVICE_WORKER_WORKER_EVENTS_SLOT);
     Ok(worker)
 }
 
@@ -1930,6 +1935,27 @@ struct ServiceWorkerGlobalRegistrationDeclaration<'scope> {
 #[derive(WebApiObject)]
 #[webapi(interface = web_api_interfaces::ServiceWorker,)]
 struct ServiceWorkerGlobalServiceWorkerDeclaration {
+    #[webapi(
+        accessor_property = "onstatechange",
+        getter = simple_event_target_handler_getter_callback,
+        setter = simple_event_target_handler_setter_callback,
+        data = v8str(scope, "onstatechange"),
+        setter_data = v8str(scope, "onstatechange"),
+        enumerable,
+        receiver = web_api_interfaces::ServiceWorker::is_instance
+    )]
+    onstatechange: (),
+    #[webapi(
+        accessor_property = "onerror",
+        getter = simple_event_target_handler_getter_callback,
+        setter = simple_event_target_handler_setter_callback,
+        data = v8str(scope, "onerror"),
+        setter_data = v8str(scope, "onerror"),
+        enumerable,
+        receiver = web_api_interfaces::ServiceWorker::is_instance
+    )]
+    onerror: (),
+
     #[webapi(data_property = "scriptURL", readonly)]
     script_url: String,
 

@@ -14,7 +14,7 @@ pub(in crate::context_bootstrap) fn event_target_constructor_callback<'s>(
         return;
     }
     let target = args.this();
-    install_simple_event_target_methods(scope, target, "__moliEventTargetListeners", false);
+    install_simple_event_target_methods(scope, target, "__moliEventTargetListeners");
     rv.set(target.into());
 }
 

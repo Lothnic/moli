@@ -7,10 +7,10 @@ use super::{
         current_document_content_security_policies, current_document_referrer_policy,
         document_referrer_policy_for_native_document,
     },
-    shared::{SIMPLE_EVENT_TARGET_ORDERED_HANDLERS_SLOT, SIMPLE_EVENT_TARGET_SLOT},
+    shared::SIMPLE_EVENT_TARGET_SLOT,
     simple_event_target_add_event_listener_callback, simple_event_target_dispatch_event_callback,
     simple_event_target_remove_event_listener_callback, simple_object_event_listeners_snapshot,
-    simple_object_event_set_ordered_handler,
+    simple_object_event_set_handler,
     worker_host::{
         document_query_encoding_override, is_cross_origin_http_worker_script,
         materialize_worker_script_source, resolve_worker_script_url, throw_worker_dom_exception,
@@ -55,9 +55,6 @@ const SHARED_WORKER_ONERROR_SLOT: &str = "__moliSharedWorkerOnError";
 struct SharedWorkerObjectDeclaration<'scope> {
     #[webapi(slot = SIMPLE_EVENT_TARGET_SLOT, value = SHARED_WORKER_LISTENERS_SLOT)]
     event_target_slot: (),
-
-    #[webapi(slot = SIMPLE_EVENT_TARGET_ORDERED_HANDLERS_SLOT, init = true)]
-    ordered_handlers: (),
 
     #[webapi(slot = SHARED_WORKER_ONERROR_SLOT, init = "null")]
     onerror_slot: (),
@@ -176,20 +173,13 @@ fn shared_worker_onerror_setter<'s>(
     args: v8::FunctionCallbackArguments<'s>,
     _rv: v8::ReturnValue<'_, v8::Value>,
 ) {
-    let value = args.get(0);
-    let stored = if value.is_object() {
-        value
-    } else {
-        v8::null(scope).into()
-    };
-    set_private_value(scope, args.this(), SHARED_WORKER_ONERROR_SLOT, stored);
-    simple_object_event_set_ordered_handler(
+    simple_object_event_set_handler(
         scope,
         args.this(),
         SHARED_WORKER_LISTENERS_SLOT,
         "error",
         SHARED_WORKER_ONERROR_SLOT,
-        stored.is_object(),
+        args.get(0),
     );
 }
 

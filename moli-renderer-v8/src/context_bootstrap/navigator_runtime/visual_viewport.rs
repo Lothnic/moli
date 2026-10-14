@@ -37,6 +37,37 @@ struct VisualViewportObjectDeclaration {
 #[derive(Default, WebApiFunctionTemplate)]
 #[webapi(interface = web_api_interfaces::VisualViewport)]
 struct VisualViewportPrototypeDeclaration {
+    #[webapi(
+        accessor_property = "onresize",
+        getter = simple_event_target_handler_getter_callback,
+        setter = simple_event_target_handler_setter_callback,
+        data = v8str(scope, "onresize"),
+        setter_data = v8str(scope, "onresize"),
+        enumerable,
+        receiver = web_api_interfaces::VisualViewport::is_instance
+    )]
+    onresize: (),
+    #[webapi(
+        accessor_property = "onscroll",
+        getter = simple_event_target_handler_getter_callback,
+        setter = simple_event_target_handler_setter_callback,
+        data = v8str(scope, "onscroll"),
+        setter_data = v8str(scope, "onscroll"),
+        enumerable,
+        receiver = web_api_interfaces::VisualViewport::is_instance
+    )]
+    onscroll: (),
+    #[webapi(
+        accessor_property = "onscrollend",
+        getter = simple_event_target_handler_getter_callback,
+        setter = simple_event_target_handler_setter_callback,
+        data = v8str(scope, "onscrollend"),
+        setter_data = v8str(scope, "onscrollend"),
+        enumerable,
+        receiver = web_api_interfaces::VisualViewport::is_instance
+    )]
+    onscrollend: (),
+
     #[webapi(accessor_property, getter = visual_viewport_attribute_getter_callback, data = callback_data_index_value(scope, 0), enumerable)]
     offset_left: (),
     #[webapi(accessor_property, getter = visual_viewport_attribute_getter_callback, data = callback_data_index_value(scope, 1), enumerable)]

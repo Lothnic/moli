@@ -72,7 +72,7 @@ struct SimpleObjectEventHandlerEntryDeclaration<'scope> {
     #[webapi(slot = SIMPLE_EVENT_TARGET_LISTENER_ORIGINAL_SLOT)]
     original: Option<v8::Local<'scope, v8::String>>,
     #[webapi(slot = SIMPLE_EVENT_TARGET_HANDLER_SLOT_FIELD)]
-    handler_slot: &'static str,
+    handler_slot: v8::Local<'scope, v8::String>,
     #[webapi(slot = SIMPLE_EVENT_TARGET_LISTENER_CALLBACK_SLOT)]
     callback: v8::Local<'scope, v8::Object>,
     #[webapi(slot = SIMPLE_EVENT_TARGET_LISTENER_RELEVANT_CONTEXT_ANCHOR_SLOT)]
@@ -573,29 +573,32 @@ pub(crate) fn simple_event_target_inspector_listener_snapshots<'s>(
     snapshots
 }
 
-pub(crate) fn simple_object_event_set_ordered_handler<'s>(
+/// Store the HTML EventHandler value and activate, update, or remove its listener.
+/// Replacing a non-null value keeps the entry in its original registration position.
+pub(crate) fn simple_object_event_set_handler<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     target: v8::Local<'s, v8::Object>,
     slot_name: &str,
     event_type: &str,
-    handler_slot_name: &'static str,
-    active: bool,
+    handler_slot_name: &str,
+    value: v8::Local<'s, v8::Value>,
 ) {
+    // EventHandler uses [LegacyTreatNonObjectAsNull]. Non-callable objects still
+    // activate the handler, but must never be treated as handleEvent listeners.
+    let callback = v8::Local::<v8::Object>::try_from(value).ok();
+    let active = callback.is_some();
+    set_private_value(
+        scope,
+        target,
+        handler_slot_name,
+        callback.map_or_else(|| v8::null(scope).into(), |callback| callback.into()),
+    );
     let Some(listeners) =
         simple_object_event_listener_array(scope, target, slot_name, event_type, active)
     else {
         return;
     };
-    if active {
-        let Some(callback) = get_private_value(scope, target, handler_slot_name)
-            .or_else(|| {
-                let key = v8_string(scope, handler_slot_name)?;
-                target.get(scope, key.into())
-            })
-            .and_then(|value| v8::Local::<v8::Object>::try_from(value).ok())
-        else {
-            return;
-        };
+    if let Some(callback) = callback {
         let (relevant_context_anchor, incumbent_context_anchor) =
             simple_callback_context_anchors(scope, callback);
         for index in 0..listeners.length() {
@@ -682,16 +685,6 @@ fn handler_belongs_to_target<'s>(
         .ok()
         .and_then(|entry| get_private_value(scope, entry, HANDLER_TARGET_SLOT))
         .is_some_and(|owner| owner.strict_equals(target.into()))
-}
-
-pub(in crate::context_bootstrap::media_queries::events::simple_event_target) fn simple_event_target_uses_ordered_handlers<
-    's,
->(
-    scope: &mut v8::PinScope<'s, '_>,
-    target: v8::Local<'s, v8::Object>,
-) -> bool {
-    simple_event_target_private_value(scope, target, SIMPLE_EVENT_TARGET_ORDERED_HANDLERS_SLOT)
-        .is_some_and(|value| value.is_true())
 }
 
 pub(crate) fn simple_object_event_remove_listener_value_for_type<'s>(
@@ -924,7 +917,7 @@ fn simple_object_event_listener_entry_object<'s>(
 
 fn simple_object_event_handler_entry_object<'s>(
     scope: &mut v8::PinScope<'s, '_>,
-    handler_slot_name: &'static str,
+    handler_slot_name: &str,
     callback: v8::Local<'s, v8::Object>,
     relevant_context_anchor: v8::Local<'s, v8::Object>,
     incumbent_context_anchor: v8::Local<'s, v8::Object>,
@@ -932,7 +925,7 @@ fn simple_object_event_handler_entry_object<'s>(
     let marker = format!("event-handler:{handler_slot_name}");
     SimpleObjectEventHandlerEntryDeclaration::new(
         v8_string(scope, &marker),
-        handler_slot_name,
+        v8_string(scope, handler_slot_name).expect("event handler slot"),
         callback,
         relevant_context_anchor,
         incumbent_context_anchor,

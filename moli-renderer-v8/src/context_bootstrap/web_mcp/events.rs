@@ -4,7 +4,7 @@ use super::bindings::{check_target, document_owner, js_string};
 use super::tasks::queue_task;
 use crate::document_runtime::DomHandle;
 use crate::native_bridge::JsContextHost;
-use crate::util::{get_private_value, set_private_value};
+use crate::util::get_private_value;
 use crate::web_api_interfaces;
 
 pub(super) const LISTENERS_SLOT: &str = "__moliModelContextListeners";
@@ -97,20 +97,13 @@ pub(super) fn handler_setter<'s>(
     };
     let target =
         crate::context_bootstrap::shared_event_targets::shared_target_owner(scope, args.this());
-    let active = args.get(0).is_object();
-    let value = if active {
-        args.get(0)
-    } else {
-        v8::null(scope).into()
-    };
-    set_private_value(scope, target, property, value);
-    crate::context_bootstrap::media_queries::simple_object_event_set_ordered_handler(
+    crate::context_bootstrap::media_queries::simple_object_event_set_handler(
         scope,
         target,
         LISTENERS_SLOT,
         event_type,
         property,
-        active,
+        args.get(0),
     );
 }
 

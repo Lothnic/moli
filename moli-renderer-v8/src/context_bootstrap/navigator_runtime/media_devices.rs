@@ -1,6 +1,6 @@
 use super::super::window_runtime::navigator_media_devices_get_user_media_callback;
 use super::super::*;
-use crate::util::{get_private_value, set_private_value, throw_type_error};
+use crate::util::{get_private_value, throw_type_error};
 use crate::web_api_interfaces;
 use moli_webapi_declare::{WebApiFunctionTemplate, WebApiObject};
 
@@ -14,9 +14,6 @@ const MEDIA_DEVICES_ONDEVICECHANGE_SLOT: &str = "__moliMediaDevicesOndevicechang
 struct MediaDevicesObjectDeclaration {
     #[webapi(slot = SIMPLE_EVENT_TARGET_SLOT, value = MEDIA_DEVICES_LISTENERS_SLOT)]
     event_target_slot: (),
-
-    #[webapi(slot = SIMPLE_EVENT_TARGET_ORDERED_HANDLERS_SLOT, init = true)]
-    ordered_handlers: (),
 
     #[webapi(slot = MEDIA_DEVICES_ONDEVICECHANGE_SLOT, init = "null")]
     ondevicechange: (),
@@ -126,24 +123,12 @@ fn ondevicechange_setter<'s>(
         throw_type_error(scope, "Illegal invocation");
         return;
     }
-    let value = args.get(0);
-    let stored = if value.is_object() {
-        value
-    } else {
-        v8::null(scope).into()
-    };
-    set_private_value(
-        scope,
-        args.this(),
-        MEDIA_DEVICES_ONDEVICECHANGE_SLOT,
-        stored,
-    );
-    simple_object_event_set_ordered_handler(
+    simple_object_event_set_handler(
         scope,
         args.this(),
         MEDIA_DEVICES_LISTENERS_SLOT,
         "devicechange",
         MEDIA_DEVICES_ONDEVICECHANGE_SLOT,
-        stored.is_object(),
+        args.get(0),
     );
 }

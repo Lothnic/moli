@@ -51,9 +51,6 @@ struct WebSocketObjectDeclaration {
     #[webapi(slot = SIMPLE_EVENT_TARGET_SLOT, value = WEBSOCKET_LISTENERS_SLOT)]
     event_target_slot: (),
 
-    #[webapi(slot = SIMPLE_EVENT_TARGET_ORDERED_HANDLERS_SLOT, init = true)]
-    ordered_handlers: (),
-
     #[webapi(method, enumerable, callback = simple_event_target_add_event_listener_callback)]
     add_event_listener: (),
 

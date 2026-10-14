@@ -111,9 +111,7 @@ pub(super) fn model_context_for_document<'s>(
     .bind(scope) else {
         return None;
     };
-    crate::context_bootstrap::media_queries::install_simple_event_target_ordered_handlers(
-        scope, target,
-    );
+
     set_private_value(scope, document, MODEL_CONTEXT_SLOT, target.into());
     if let Some(owner) = document_owner(unsafe { &*host_ptr }, handle) {
         bind_document_target(scope, host_ptr, handle, target, owner);

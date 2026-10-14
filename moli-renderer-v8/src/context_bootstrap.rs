@@ -338,12 +338,13 @@ pub(crate) use self::media_queries::{
     SimpleObjectEventListenerInspectorSnapshot, SimpleObjectEventListenerSnapshot,
     dispatch_media_query_list_change_events, dispatch_simple_event_target_event,
     dispatch_simple_event_target_event_collecting_errors,
-    evaluate_match_media_query_list_with_viewport, install_simple_event_target_methods,
-    install_simple_event_target_ordered_handlers, invoke_simple_event_listener,
+    evaluate_match_media_query_list_with_viewport, install_simple_event_target_handlers,
+    install_simple_event_target_methods, invoke_simple_event_listener,
     mark_simple_event_target_slot, simple_event_target_add_event_listener_callback,
-    simple_event_target_dispatch_event_callback, simple_event_target_inspector_listener_snapshots,
+    simple_event_target_dispatch_event_callback, simple_event_target_handler_getter_callback,
+    simple_event_target_handler_setter_callback, simple_event_target_inspector_listener_snapshots,
     simple_event_target_remove_event_listener_callback, simple_event_target_slot_name,
-    simple_object_event_listeners_snapshot, simple_object_event_set_ordered_handler,
+    simple_object_event_listeners_snapshot, simple_object_event_set_handler,
     simple_object_event_target_add_listener, simple_object_event_target_remove_listener,
     simple_object_has_event_listeners,
 };
@@ -408,6 +409,7 @@ pub(crate) use self::runtime_state::{
     ORIGINAL_WEBASSEMBLY_GLOBAL_VALUE_GETTER_SLOT, ORIGINAL_WEBASSEMBLY_INSTANCE_CONSTRUCTOR_SLOT,
     ORIGINAL_WEBASSEMBLY_LINK_ERROR_CONSTRUCTOR_SLOT,
 };
+pub(crate) use self::shared::SIMPLE_EVENT_TARGET_SLOT;
 #[cfg(test)]
 pub(crate) use self::shared::structured_deserialize_value;
 #[cfg(test)]
@@ -426,9 +428,6 @@ pub(crate) use self::shared::{
     structured_serialize_value_for_window_post_message,
     structured_serialize_value_for_window_post_message_options,
     wasm_module_message_allowed_for_target, wasm_module_message_allowed_for_target_origin,
-};
-pub(crate) use self::shared::{
-    SIMPLE_EVENT_TARGET_ORDERED_HANDLERS_SLOT, SIMPLE_EVENT_TARGET_SLOT,
 };
 pub(crate) use self::shared::{
     console_arg_remote_object_json, current_console_stack,
@@ -486,10 +485,12 @@ pub(crate) use self::webassembly_runtime::{
 };
 pub(crate) use self::websocket::{WebSocketDispatchResult, dispatch_websocket_event};
 pub(crate) use self::window_events::{
-    WINDOW_EVENT_HANDLER_PROPERTIES, dispatch_window_error_event_with_details,
-    dispatch_window_promise_rejection_event, dispatch_window_report_error_message,
-    event_handler_property_is_exposed, set_window_body_onerror_handler_compiled,
-    set_window_onerror_handler_value, window_body_onerror_handler_is_compiled,
+    WINDOW_EVENT_HANDLER_PROPERTIES, clear_simple_window_event_handler_values,
+    dispatch_window_error_event_with_details, dispatch_window_promise_rejection_event,
+    dispatch_window_report_error_message, event_handler_property_is_exposed,
+    install_simple_window_event_handlers, is_window_event_handler_property,
+    set_window_body_onerror_handler_compiled, set_window_onerror_handler_value,
+    window_body_onerror_handler_is_compiled,
 };
 #[cfg(test)]
 pub(crate) use self::window_lazy_surface::window_lazy_surface_diagnostics;

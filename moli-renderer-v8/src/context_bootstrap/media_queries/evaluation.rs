@@ -1,7 +1,6 @@
 use super::event::create_media_query_list_event;
 use super::{
-    dispatch_media_query_list_event, install_simple_event_target_ordered_handlers,
-    mark_simple_event_target_slot, simple_object_event_set_ordered_handler,
+    dispatch_media_query_list_event, mark_simple_event_target_slot, simple_object_event_set_handler,
 };
 use crate::context_bootstrap::DEFAULT_WINDOW_SURFACE_PROFILE;
 use crate::context_bootstrap::current_window_style_viewport;
@@ -136,21 +135,14 @@ fn media_query_list_onchange_setter_callback<'s>(
     args: v8::FunctionCallbackArguments<'s>,
     mut rv: v8::ReturnValue<'_, v8::Value>,
 ) {
-    let active = args.get(0).is_object();
-    let value = if active {
-        args.get(0)
-    } else {
-        v8::null(scope).into()
-    };
     let target = args.this();
-    set_media_query_list_slot_value(scope, target, MEDIA_QUERY_LIST_ONCHANGE_SLOT, value);
-    simple_object_event_set_ordered_handler(
+    simple_object_event_set_handler(
         scope,
         target,
         MEDIA_QUERY_LIST_LISTENERS_SLOT,
         "change",
         MEDIA_QUERY_LIST_ONCHANGE_SLOT,
-        active,
+        args.get(0),
     );
     rv.set_undefined();
 }
@@ -183,7 +175,7 @@ pub(crate) fn window_match_media_callback<'s>(
         .bind(scope)
         .expect("MediaQueryList declaration should bind");
     mark_simple_event_target_slot(scope, mql, MEDIA_QUERY_LIST_LISTENERS_SLOT);
-    install_simple_event_target_ordered_handlers(scope, mql);
+
     if global_queue_array(scope, MEDIA_QUERY_LIST_REGISTRY_SLOT).is_none() {
         let global = scope.get_current_context().global(scope);
         let registry = v8::Array::new(scope, 0);

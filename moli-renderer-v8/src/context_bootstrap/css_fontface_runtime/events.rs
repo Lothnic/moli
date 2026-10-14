@@ -106,7 +106,6 @@ pub(super) fn initialize_font_face_set_event_target<'s>(
     for handler in FONT_FACE_SET_EVENT_HANDLERS {
         set_private_value(scope, object, handler.slot_name, v8::null(scope).into());
     }
-    install_simple_event_target_ordered_handlers(scope, object);
 }
 
 fn font_face_set_event_handler_getter<'s>(
@@ -142,21 +141,13 @@ fn font_face_set_event_handler_setter<'s>(
     ) else {
         return;
     };
-    let value = args.get(0);
-    let active = value.is_object();
-    let stored = if active {
-        value
-    } else {
-        v8::null(scope).into()
-    };
-    set_private_value(scope, args.this(), handler.slot_name, stored);
-    simple_object_event_set_ordered_handler(
+    simple_object_event_set_handler(
         scope,
         args.this(),
         FONT_FACE_SET_LISTENERS_SLOT,
         handler.event_type,
         handler.slot_name,
-        active,
+        args.get(0),
     );
 }
 

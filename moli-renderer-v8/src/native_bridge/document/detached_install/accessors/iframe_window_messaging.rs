@@ -2,6 +2,7 @@ use crate::{
     context_bootstrap::{
         dispatch_simple_event_target_event, install_child_window_eval_runtime_state,
         install_child_window_own_methods, install_simple_event_target_methods,
+        install_simple_window_event_handlers,
     },
     util::v8str,
 };
@@ -22,12 +23,8 @@ pub(super) fn install_detached_iframe_window_messaging<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     window: v8::Local<'s, v8::Object>,
 ) {
-    install_simple_event_target_methods(
-        scope,
-        window,
-        DETACHED_IFRAME_WINDOW_EVENT_LISTENERS_SLOT,
-        false,
-    );
+    install_simple_event_target_methods(scope, window, DETACHED_IFRAME_WINDOW_EVENT_LISTENERS_SLOT);
+    install_simple_window_event_handlers(scope, window);
     let _ = DetachedIframeWindowMethodsDeclaration::default().initialize(scope, window);
     let _ = install_child_window_own_methods(scope, window);
     let _ = install_child_window_eval_runtime_state(scope, window);

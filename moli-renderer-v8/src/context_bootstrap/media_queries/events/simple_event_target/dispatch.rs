@@ -79,52 +79,7 @@ pub(crate) fn dispatch_simple_event_target_event_collecting_errors<'s>(
     } else {
         None
     };
-    let ordinary_arguments = [event.into()];
-    let handler_arguments = error_arguments
-        .as_ref()
-        .map_or(ordinary_arguments.as_slice(), |values| values.as_slice());
-    if can_invoke && !simple_event_target_uses_ordered_handlers(scope, target) {
-        let handler_name = format!("on{event_type}");
-        if let Some(handler_key) = v8_string(scope, &handler_name)
-            && let Some(handler_value) = target.get(scope, handler_key.into())
-            && let Ok(handler) = v8::Local::<v8::Object>::try_from(handler_value)
-            && handler.is_callable()
-        {
-            let current_context = scope.get_current_context();
-            let relevant_context = handler
-                .get_creation_context(scope)
-                .unwrap_or(current_context);
-            let incumbent_context = scope.get_incumbent_context().unwrap_or(current_context);
-            let outcome = invoke_simple_event_callback(
-                scope,
-                event_type,
-                &format!("simple event target {handler_name}"),
-                handler,
-                relevant_context,
-                incumbent_context,
-                true,
-                target.into(),
-                handler_arguments,
-                event,
-                callback_errors.as_deref_mut(),
-            );
-            dispatched |= outcome.invoked;
-            if let Some(returned) = outcome.value {
-                apply_handler_return_value(
-                    scope,
-                    event,
-                    v8::Local::new(scope, &returned),
-                    error_arguments.is_some(),
-                );
-            }
-        }
-    }
-
-    if !event_internal_bool_flag(
-        scope,
-        event,
-        crate::context_bootstrap::EVENT_STOP_PROPAGATION_SLOT,
-    ) {
+    if can_invoke {
         'phases: for capture_phase in [true, false] {
             // DOM clones the listener list for each invocation phase. A listener
             // added during capture can participate in the subsequent bubble phase.
@@ -253,41 +208,6 @@ fn invoke_simple_event_listener_collecting_errors<'s>(
         callback_name,
         callback_this,
         listener.relevant_context(),
-        invocation,
-        callback_errors,
-    )
-}
-
-#[allow(clippy::too_many_arguments)]
-fn invoke_simple_event_callback<'s>(
-    scope: &mut v8::PinScope<'s, '_>,
-    event_type: &str,
-    callback_name: &str,
-    callback: v8::Local<'s, v8::Object>,
-    relevant_context: v8::Local<'s, v8::Context>,
-    incumbent_context: v8::Local<'s, v8::Context>,
-    is_callable: bool,
-    callback_this: v8::Local<'s, v8::Value>,
-    arguments: &[v8::Local<'s, v8::Value>],
-    current_event: v8::Local<'s, v8::Object>,
-    callback_errors: Option<&mut Vec<crate::exception_reporting::V8ExceptionReport>>,
-) -> SimpleEventCallbackResult {
-    let invocation = CallbackInvocation::new(
-        callback,
-        callback_this,
-        relevant_context,
-        incumbent_context,
-        is_callable,
-        "handleEvent",
-        arguments,
-        Some(current_event),
-    );
-    invoke_simple_event_callback_with_invocation(
-        scope,
-        event_type,
-        callback_name,
-        callback_this,
-        relevant_context,
         invocation,
         callback_errors,
     )

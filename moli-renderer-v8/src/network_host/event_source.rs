@@ -3,8 +3,7 @@ mod parser;
 mod request;
 
 use crate::context_bootstrap::{
-    SIMPLE_EVENT_TARGET_ORDERED_HANDLERS_SLOT, SIMPLE_EVENT_TARGET_SLOT,
-    dispatch_simple_event_target_event, simple_object_event_set_ordered_handler,
+    SIMPLE_EVENT_TARGET_SLOT, dispatch_simple_event_target_event, simple_object_event_set_handler,
 };
 use crate::util::{
     callback_data_index_value, callback_data_item, context_host_ptr_from_global_bridge,

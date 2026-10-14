@@ -52,9 +52,6 @@ struct WorkerObjectDeclaration {
     #[webapi(slot = SIMPLE_EVENT_TARGET_SLOT, value = WORKER_LISTENERS_SLOT)]
     event_target_slot: (),
 
-    #[webapi(slot = SIMPLE_EVENT_TARGET_ORDERED_HANDLERS_SLOT, init = true)]
-    ordered_handlers: (),
-
     #[webapi(slot = WORKER_ONMESSAGE_SLOT, init = "null")]
     onmessage_slot: (),
 
@@ -695,22 +692,15 @@ fn worker_event_handler_setter<'s>(
     else {
         return;
     };
-    let value = args.get(0);
-    let stored = if value.is_object() {
-        value
-    } else {
-        v8::null(scope).into()
-    };
-    set_private_value(scope, args.this(), handler.slot_name, stored);
-    simple_object_event_set_ordered_handler(
+    simple_object_event_set_handler(
         scope,
         args.this(),
         WORKER_LISTENERS_SLOT,
         handler.event_type,
         handler.slot_name,
-        stored.is_object(),
+        args.get(0),
     );
-    if handler.event_type == "message" && stored.is_object() {
+    if handler.event_type == "message" && args.get(0).is_object() {
         super::flush_pending_worker_messages_for_listener(scope, args.this());
     }
 }

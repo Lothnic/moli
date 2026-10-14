@@ -95,8 +95,6 @@ struct RtcPeerConnectionObjectDeclaration<'scope> {
     has_data_channel: (),
     #[webapi(slot = SIMPLE_EVENT_TARGET_SLOT, value = RTC_PEER_CONNECTION_LISTENERS_SLOT)]
     event_target_slot: (),
-    #[webapi(slot = SIMPLE_EVENT_TARGET_ORDERED_HANDLERS_SLOT, init = true)]
-    ordered_handlers: (),
 }
 
 #[derive(WebApiObject)]
@@ -124,8 +122,6 @@ struct RtcDataChannelObjectDeclaration<'scope> {
     binary_type: (),
     #[webapi(slot = SIMPLE_EVENT_TARGET_SLOT, value = RTC_DATA_CHANNEL_LISTENERS_SLOT)]
     event_target_slot: (),
-    #[webapi(slot = SIMPLE_EVENT_TARGET_ORDERED_HANDLERS_SLOT, init = true)]
-    ordered_handlers: (),
 }
 
 #[derive(WebApiObject)]
@@ -260,7 +256,6 @@ pub(in crate::context_bootstrap) fn rtc_peer_connection_constructor_callback<'s>
         pending_local_description: (),
         has_data_channel: (),
         event_target_slot: (),
-        ordered_handlers: (),
     };
     if declaration.initialize(scope, args.this()).is_err() {
         rv.set_undefined();

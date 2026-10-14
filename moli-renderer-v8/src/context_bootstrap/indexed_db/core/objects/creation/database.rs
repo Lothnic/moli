@@ -1,4 +1,8 @@
 use super::*;
+use crate::context_bootstrap::{
+    SIMPLE_EVENT_TARGET_SLOT, simple_event_target_handler_getter_callback,
+    simple_event_target_handler_setter_callback,
+};
 use crate::web_api_interfaces;
 use moli_webapi_declare::WebApiObject;
 
@@ -11,19 +15,53 @@ use moli_webapi_declare::WebApiObject;
     enumerable
 )]
 struct IdbDatabaseObjectDeclaration<'scope, 'value> {
+    #[webapi(slot = SIMPLE_EVENT_TARGET_SLOT, value = INDEXED_DB_EVENT_LISTENERS_SLOT)]
+    event_target_slot: (),
     #[webapi(slot = INDEXED_DB_EVENT_LISTENERS_SLOT, init = "null_object")]
     event_listeners: (),
 
     name: &'value str,
     version: f64,
     object_store_names: v8::Local<'scope, v8::Object>,
-    #[webapi(init = "null")]
+    #[webapi(
+        accessor_property = "onabort",
+        getter = simple_event_target_handler_getter_callback,
+        setter = simple_event_target_handler_setter_callback,
+        data = v8str(scope, "onabort"),
+        setter_data = v8str(scope, "onabort"),
+        enumerable,
+        receiver = web_api_interfaces::IDBDatabase::is_instance
+    )]
     onabort: (),
-    #[webapi(init = "null")]
+    #[webapi(
+        accessor_property = "onclose",
+        getter = simple_event_target_handler_getter_callback,
+        setter = simple_event_target_handler_setter_callback,
+        data = v8str(scope, "onclose"),
+        setter_data = v8str(scope, "onclose"),
+        enumerable,
+        receiver = web_api_interfaces::IDBDatabase::is_instance
+    )]
     onclose: (),
-    #[webapi(init = "null")]
+    #[webapi(
+        accessor_property = "onerror",
+        getter = simple_event_target_handler_getter_callback,
+        setter = simple_event_target_handler_setter_callback,
+        data = v8str(scope, "onerror"),
+        setter_data = v8str(scope, "onerror"),
+        enumerable,
+        receiver = web_api_interfaces::IDBDatabase::is_instance
+    )]
     onerror: (),
-    #[webapi(init = "null")]
+    #[webapi(
+        accessor_property = "onversionchange",
+        getter = simple_event_target_handler_getter_callback,
+        setter = simple_event_target_handler_setter_callback,
+        data = v8str(scope, "onversionchange"),
+        setter_data = v8str(scope, "onversionchange"),
+        enumerable,
+        receiver = web_api_interfaces::IDBDatabase::is_instance
+    )]
     onversionchange: (),
 }
 

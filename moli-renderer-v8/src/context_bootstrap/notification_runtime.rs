@@ -1,6 +1,7 @@
 use super::{
-    SIMPLE_EVENT_TARGET_ORDERED_HANDLERS_SLOT, SIMPLE_EVENT_TARGET_SLOT, global_constructor_object,
+    SIMPLE_EVENT_TARGET_SLOT, global_constructor_object,
     simple_event_target_add_event_listener_callback, simple_event_target_dispatch_event_callback,
+    simple_event_target_handler_getter_callback, simple_event_target_handler_setter_callback,
     simple_event_target_remove_event_listener_callback, structured_clone_value_for_storage,
 };
 use crate::web_api_interfaces;
@@ -98,21 +99,6 @@ struct NotificationObjectDeclaration<'scope> {
     #[webapi(slot = SIMPLE_EVENT_TARGET_SLOT, value = NOTIFICATION_LISTENERS_SLOT)]
     event_target_slot: (),
 
-    #[webapi(slot = SIMPLE_EVENT_TARGET_ORDERED_HANDLERS_SLOT, init = true)]
-    ordered_handlers: (),
-
-    #[webapi(data_property = "onclick", init = "null")]
-    onclick: (),
-
-    #[webapi(data_property = "onerror", init = "null")]
-    onerror: (),
-
-    #[webapi(data_property = "onshow", init = "null")]
-    onshow: (),
-
-    #[webapi(data_property = "onclose", init = "null")]
-    onclose: (),
-
     #[webapi(
         method,
         enumerable,
@@ -141,6 +127,47 @@ struct NotificationObjectDeclaration<'scope> {
 #[derive(WebApiFunctionTemplate)]
 #[webapi(interface = web_api_interfaces::Notification)]
 struct NotificationPrototypeDeclaration {
+    #[webapi(
+        accessor_property = "onclick",
+        getter = simple_event_target_handler_getter_callback,
+        setter = simple_event_target_handler_setter_callback,
+        data = v8str(scope, "onclick"),
+        setter_data = v8str(scope, "onclick"),
+        enumerable,
+        receiver = web_api_interfaces::Notification::is_instance
+    )]
+    onclick: (),
+    #[webapi(
+        accessor_property = "onerror",
+        getter = simple_event_target_handler_getter_callback,
+        setter = simple_event_target_handler_setter_callback,
+        data = v8str(scope, "onerror"),
+        setter_data = v8str(scope, "onerror"),
+        enumerable,
+        receiver = web_api_interfaces::Notification::is_instance
+    )]
+    onerror: (),
+    #[webapi(
+        accessor_property = "onshow",
+        getter = simple_event_target_handler_getter_callback,
+        setter = simple_event_target_handler_setter_callback,
+        data = v8str(scope, "onshow"),
+        setter_data = v8str(scope, "onshow"),
+        enumerable,
+        receiver = web_api_interfaces::Notification::is_instance
+    )]
+    onshow: (),
+    #[webapi(
+        accessor_property = "onclose",
+        getter = simple_event_target_handler_getter_callback,
+        setter = simple_event_target_handler_setter_callback,
+        data = v8str(scope, "onclose"),
+        setter_data = v8str(scope, "onclose"),
+        enumerable,
+        receiver = web_api_interfaces::Notification::is_instance
+    )]
+    onclose: (),
+
     #[webapi(
         accessor_property,
         getter = notification_title_getter_callback,
@@ -927,11 +954,7 @@ fn initialize_notification_object<'s>(
         require_interaction: metadata.require_interaction,
         actions: action_array,
         event_target_slot: (),
-        ordered_handlers: (),
-        onclick: (),
-        onerror: (),
-        onshow: (),
-        onclose: (),
+
         add_event_listener: (),
         remove_event_listener: (),
         dispatch_event: (),

@@ -1,6 +1,6 @@
 use super::super::util::{throw_type_error, v8_string};
 use super::context_host_ptr_from_global_bridge;
-use super::mark_simple_event_target_slot;
+use super::{mark_simple_event_target_slot, simple_object_event_set_handler};
 use crate::document_runtime::DomHandle;
 use crate::native_bridge::JsContextHost;
 use crate::native_bridge::throw_dom_exception;
@@ -22,6 +22,7 @@ const TEXT_TRACK_CUE_SIZE_SLOT: &str = "__moliTextTrackCueSize";
 const TEXT_TRACK_CUE_ALIGN_SLOT: &str = "__moliTextTrackCueAlign";
 const TEXT_TRACK_CUE_ONENTER_SLOT: &str = "__moliTextTrackCueOnEnter";
 const TEXT_TRACK_CUE_ONEXIT_SLOT: &str = "__moliTextTrackCueOnExit";
+const TEXT_TRACK_CUE_LISTENERS_SLOT: &str = "__moliTextTrackCueListeners";
 const TEXT_TRACK_CUE_TEXT_SLOT: &str = "__moliTextTrackCueText";
 const MEDIA_ERROR_CODE_SLOT: &str = "__moliMediaErrorCode";
 const MEDIA_ERROR_MESSAGE_SLOT: &str = "__moliMediaErrorMessage";
@@ -303,7 +304,7 @@ pub(super) fn vtt_cue_constructor_callback<'s>(
         return;
     };
 
-    mark_simple_event_target_slot(scope, args.this(), "__moliTextTrackCueListeners");
+    mark_simple_event_target_slot(scope, args.this(), TEXT_TRACK_CUE_LISTENERS_SLOT);
     VttCuePrivateStateDeclaration::new(parsed.start_time, parsed.end_time, parsed.text)
         .initialize(scope, args.this())
         .expect("VTTCue private state declaration should initialize");
@@ -1020,7 +1021,7 @@ fn text_track_cue_onenter_setter<'s>(
     args: v8::FunctionCallbackArguments<'s>,
     _rv: v8::ReturnValue<'_, v8::Value>,
 ) {
-    event_handler_setter(scope, args, TEXT_TRACK_CUE_ONENTER_SLOT);
+    event_handler_setter(scope, args, "enter", TEXT_TRACK_CUE_ONENTER_SLOT);
 }
 
 fn text_track_cue_onexit_getter<'s>(
@@ -1036,7 +1037,7 @@ fn text_track_cue_onexit_setter<'s>(
     args: v8::FunctionCallbackArguments<'s>,
     _rv: v8::ReturnValue<'_, v8::Value>,
 ) {
-    event_handler_setter(scope, args, TEXT_TRACK_CUE_ONEXIT_SLOT);
+    event_handler_setter(scope, args, "exit", TEXT_TRACK_CUE_ONEXIT_SLOT);
 }
 
 fn event_handler_getter<'s>(
@@ -1054,17 +1055,20 @@ fn event_handler_getter<'s>(
 fn event_handler_setter<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     args: v8::FunctionCallbackArguments<'s>,
+    event_type: &str,
     slot: &'static str,
 ) {
     let Some(receiver) = text_track_cue_receiver(scope, &args) else {
         return;
     };
-    let value = args.get(0);
-    if value.is_function() {
-        set_private_value(scope, receiver, slot, value);
-    } else {
-        set_private_value(scope, receiver, slot, v8::null(scope).into());
-    }
+    simple_object_event_set_handler(
+        scope,
+        receiver,
+        TEXT_TRACK_CUE_LISTENERS_SLOT,
+        event_type,
+        slot,
+        args.get(0),
+    );
 }
 
 fn finite_double_property<'s>(

@@ -42,6 +42,17 @@ const SERVICE_WORKER_CONTAINER_CONTROLLER_SLOT: &str = "__moliServiceWorkerConta
 #[derive(WebApiObject)]
 #[webapi(interface = web_api_interfaces::ServiceWorkerRegistration)]
 struct ServiceWorkerRegistrationObjectDeclaration<'scope> {
+    #[webapi(
+        accessor_property = "onupdatefound",
+        getter = simple_event_target_handler_getter_callback,
+        setter = simple_event_target_handler_setter_callback,
+        data = v8str(scope, "onupdatefound"),
+        setter_data = v8str(scope, "onupdatefound"),
+        enumerable,
+        receiver = web_api_interfaces::ServiceWorkerRegistration::is_instance
+    )]
+    onupdatefound: (),
+
     #[webapi(data_property, readonly)]
     scope: String,
 
@@ -252,6 +263,27 @@ struct ServiceWorkerPushSubscriptionDeclaration<'scope> {
 #[derive(WebApiObject)]
 #[webapi(interface = web_api_interfaces::ServiceWorker)]
 struct ServiceWorkerObjectDeclaration {
+    #[webapi(
+        accessor_property = "onstatechange",
+        getter = simple_event_target_handler_getter_callback,
+        setter = simple_event_target_handler_setter_callback,
+        data = v8str(scope, "onstatechange"),
+        setter_data = v8str(scope, "onstatechange"),
+        enumerable,
+        receiver = web_api_interfaces::ServiceWorker::is_instance
+    )]
+    onstatechange: (),
+    #[webapi(
+        accessor_property = "onerror",
+        getter = simple_event_target_handler_getter_callback,
+        setter = simple_event_target_handler_setter_callback,
+        data = v8str(scope, "onerror"),
+        setter_data = v8str(scope, "onerror"),
+        enumerable,
+        receiver = web_api_interfaces::ServiceWorker::is_instance
+    )]
+    onerror: (),
+
     #[webapi(data_property = "scriptURL", readonly)]
     script_url: String,
 
@@ -991,25 +1023,13 @@ pub(in crate::context_bootstrap) fn navigator_service_worker_message_handler_set
     args: v8::FunctionCallbackArguments<'s>,
     _rv: v8::ReturnValue<'_, v8::Value>,
 ) {
-    let value = args.get(0);
-    let stored = if value.is_object() {
-        value
-    } else {
-        v8::null(scope).into()
-    };
-    set_private_value(
-        scope,
-        args.this(),
-        SERVICE_WORKER_CONTAINER_ONMESSAGE_SLOT,
-        stored,
-    );
-    simple_object_event_set_ordered_handler(
+    simple_object_event_set_handler(
         scope,
         args.this(),
         SERVICE_WORKER_CONTAINER_LISTENERS_SLOT,
         "message",
         SERVICE_WORKER_CONTAINER_ONMESSAGE_SLOT,
-        stored.is_object(),
+        args.get(0),
     );
 }
 
@@ -1036,25 +1056,13 @@ pub(in crate::context_bootstrap) fn navigator_service_worker_messageerror_handle
     args: v8::FunctionCallbackArguments<'s>,
     _rv: v8::ReturnValue<'_, v8::Value>,
 ) {
-    let value = args.get(0);
-    let stored = if value.is_object() {
-        value
-    } else {
-        v8::null(scope).into()
-    };
-    set_private_value(
-        scope,
-        args.this(),
-        SERVICE_WORKER_CONTAINER_ONMESSAGEERROR_SLOT,
-        stored,
-    );
-    simple_object_event_set_ordered_handler(
+    simple_object_event_set_handler(
         scope,
         args.this(),
         SERVICE_WORKER_CONTAINER_LISTENERS_SLOT,
         "messageerror",
         SERVICE_WORKER_CONTAINER_ONMESSAGEERROR_SLOT,
-        stored.is_object(),
+        args.get(0),
     );
 }
 
@@ -1081,25 +1089,13 @@ pub(in crate::context_bootstrap) fn navigator_service_worker_controllerchange_ha
     args: v8::FunctionCallbackArguments<'s>,
     _rv: v8::ReturnValue<'_, v8::Value>,
 ) {
-    let value = args.get(0);
-    let stored = if value.is_object() {
-        value
-    } else {
-        v8::null(scope).into()
-    };
-    set_private_value(
-        scope,
-        args.this(),
-        SERVICE_WORKER_CONTAINER_ONCONTROLLERCHANGE_SLOT,
-        stored,
-    );
-    simple_object_event_set_ordered_handler(
+    simple_object_event_set_handler(
         scope,
         args.this(),
         SERVICE_WORKER_CONTAINER_LISTENERS_SLOT,
         "controllerchange",
         SERVICE_WORKER_CONTAINER_ONCONTROLLERCHANGE_SLOT,
-        stored.is_object(),
+        args.get(0),
     );
 }
 

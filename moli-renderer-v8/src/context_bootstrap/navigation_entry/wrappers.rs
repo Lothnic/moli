@@ -124,7 +124,6 @@ fn allocate_in_current_realm<'s>(
         scope,
         wrapper,
         NAVIGATION_ENTRY_EVENT_LISTENERS_SLOT,
-        false,
     );
     shared_event_targets::install_handlers(scope, wrapper, true);
     set_runtime_window_owner(scope, wrapper, owner);

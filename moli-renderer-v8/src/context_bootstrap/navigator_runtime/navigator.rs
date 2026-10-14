@@ -406,9 +406,6 @@ struct ServiceWorkerContainerDeclaration {
     #[webapi(slot = SIMPLE_EVENT_TARGET_SLOT, value = SERVICE_WORKER_CONTAINER_LISTENERS_SLOT)]
     event_target_slot: (),
 
-    #[webapi(slot = SIMPLE_EVENT_TARGET_ORDERED_HANDLERS_SLOT, init = true)]
-    ordered_handlers: (),
-
     #[webapi(slot = SERVICE_WORKER_CONTAINER_ONMESSAGE_SLOT, init = "null")]
     _onmessage: (),
 

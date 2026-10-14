@@ -275,16 +275,6 @@ fn materialized_xhr_event_target_initializes_its_private_state() {
         .expect("listener slot string")
         .to_rust_string_lossy(scope);
         assert_eq!(listener_slot, "__moliXhrEventTargetListeners");
-        for slot in [
-            crate::context_bootstrap::SIMPLE_EVENT_TARGET_ORDERED_HANDLERS_SLOT,
-            "__moliXhrUsesSimpleEventTarget",
-        ] {
-            assert!(
-                get_private_value(scope, interface.prototype, slot)
-                    .expect("event target marker")
-                    .is_true()
-            );
-        }
         assert!(matches!(
             &*interface.realm.entry(interface.id).unwrap(),
             RealmInterfaceEntry::Ready

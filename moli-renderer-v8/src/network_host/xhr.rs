@@ -7,9 +7,7 @@ mod response_type;
 mod send;
 
 use super::*;
-use crate::context_bootstrap::{
-    SIMPLE_EVENT_TARGET_ORDERED_HANDLERS_SLOT, SIMPLE_EVENT_TARGET_SLOT,
-};
+use crate::context_bootstrap::SIMPLE_EVENT_TARGET_SLOT;
 use crate::native_bridge::throw_dom_exception;
 use crate::util::{get_private_value, private_key};
 use crate::web_api_interfaces;
@@ -46,7 +44,6 @@ const XHR_PENDING_BODY_LENGTH_SLOT: &str = "__lmXhrPendingBodyLength";
 const XHR_PENDING_HEADERS_SLOT: &str = "__lmXhrPendingHeadersJson";
 pub(crate) const XHR_ACTIVE_INTERNAL_ID_SLOT: &str = "__lmXhrActiveInternalId";
 pub(crate) const XHR_SIMPLE_EVENT_TARGET_LISTENERS_SLOT: &str = "__moliXhrEventTargetListeners";
-pub(crate) const XHR_SIMPLE_EVENT_TARGET_MARKER_SLOT: &str = "__moliXhrUsesSimpleEventTarget";
 
 pub(crate) use self::bindings::{
     install_window_xml_http_request_template_bindings, install_xml_http_request_bindings,
@@ -101,23 +98,15 @@ pub(crate) fn finalize_xml_http_request_event_target_realm_bindings<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     event_target_prototype: v8::Local<'s, v8::Object>,
 ) -> anyhow::Result<()> {
-    let marker: v8::Local<'_, v8::Value> = v8::Boolean::new(scope, true).into();
-    for (slot, value) in [
-        (
-            SIMPLE_EVENT_TARGET_SLOT,
-            v8str(scope, XHR_SIMPLE_EVENT_TARGET_LISTENERS_SLOT).into(),
-        ),
-        (SIMPLE_EVENT_TARGET_ORDERED_HANDLERS_SLOT, marker),
-        (XHR_SIMPLE_EVENT_TARGET_MARKER_SLOT, marker),
-    ] {
-        let key = private_key(scope, slot).ok_or_else(|| {
-            anyhow::anyhow!("failed to allocate XMLHttpRequestEventTarget slot `{slot}`")
-        })?;
-        if event_target_prototype.set_private(scope, key, value) != Some(true) {
-            return Err(anyhow::anyhow!(
-                "failed to finalize XMLHttpRequestEventTarget slot `{slot}`"
-            ));
-        }
+    let slot = SIMPLE_EVENT_TARGET_SLOT;
+    let key = private_key(scope, slot).ok_or_else(|| {
+        anyhow::anyhow!("failed to allocate XMLHttpRequestEventTarget slot `{slot}`")
+    })?;
+    let value = v8str(scope, XHR_SIMPLE_EVENT_TARGET_LISTENERS_SLOT).into();
+    if event_target_prototype.set_private(scope, key, value) != Some(true) {
+        return Err(anyhow::anyhow!(
+            "failed to finalize XMLHttpRequestEventTarget slot `{slot}`"
+        ));
     }
     Ok(())
 }

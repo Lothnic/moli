@@ -566,9 +566,11 @@ fn screen_orientation_onchange_setter_callback<'s>(
         throw_type_error(scope, "Illegal invocation");
         return;
     }
-    set_private_value(
+    super::super::simple_object_event_set_handler(
         scope,
         args.this(),
+        SCREEN_ORIENTATION_EVENT_LISTENERS_SLOT,
+        "change",
         SCREEN_ORIENTATION_ONCHANGE_SLOT,
         args.get(0),
     );

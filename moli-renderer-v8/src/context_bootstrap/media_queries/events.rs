@@ -1,7 +1,6 @@
 use super::{
-    MEDIA_QUERY_LIST_LISTENERS_SLOT, SIMPLE_EVENT_TARGET_ORDERED_HANDLERS_SLOT,
-    SIMPLE_EVENT_TARGET_SLOT, object_property_as_array, object_string_property_defined, v8_string,
-    v8str,
+    MEDIA_QUERY_LIST_LISTENERS_SLOT, SIMPLE_EVENT_TARGET_SLOT, object_property_as_array,
+    object_string_property_defined, v8str,
 };
 const SIMPLE_EVENT_TARGET_HANDLER_SLOT_FIELD: &str = "handlerSlot";
 
@@ -15,13 +14,14 @@ pub(in crate::context_bootstrap) use media_query_list::{
 pub(crate) use simple_event_target::{
     SimpleObjectEventListenerInspectorSnapshot, SimpleObjectEventListenerSnapshot,
     dispatch_simple_event_target_event, dispatch_simple_event_target_event_collecting_errors,
-    install_simple_event_target_methods, install_simple_event_target_ordered_handlers,
+    install_simple_event_target_handlers, install_simple_event_target_methods,
     invoke_simple_event_listener, mark_simple_event_target_slot,
     simple_event_target_add_event_listener_callback, simple_event_target_dispatch_event_callback,
+    simple_event_target_handler_getter_callback, simple_event_target_handler_setter_callback,
     simple_event_target_inspector_listener_snapshots,
     simple_event_target_remove_event_listener_callback, simple_event_target_slot_name,
     simple_object_event_listeners_snapshot, simple_object_event_remove_listener_value_for_type,
-    simple_object_event_set_ordered_handler, simple_object_event_target_add_listener,
+    simple_object_event_set_handler, simple_object_event_target_add_listener,
     simple_object_event_target_register_webidl_listener,
     simple_object_event_target_remove_listener, simple_object_has_event_listeners,
 };

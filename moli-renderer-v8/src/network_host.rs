@@ -291,7 +291,6 @@ use super::{
     blob,
     context_bootstrap::{new_readable_stream_from_array_buffer, new_readable_stream_from_source},
     dom_parser,
-    exception_reporting::invoke_callback,
     native_bridge::JsContextHost,
     page_task_queue::RendererResourceCompletionSender,
     types::{

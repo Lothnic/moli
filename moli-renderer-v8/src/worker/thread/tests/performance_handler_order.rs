@@ -1,6 +1,40 @@
 use super::*;
 
 #[tokio::test]
+async fn worker_simple_event_handlers_share_dispatch_and_mutation_semantics() {
+    ensure_v8();
+    let probe =
+        include_str!("../../../script_vm/tests/browser_api/simple_event_target_handlers.js");
+    for kind in [WorkerScriptKind::Classic, WorkerScriptKind::Module] {
+        let source = format!(
+            r#"{probe}
+            const targets = [
+              [self, 'message'], [self, 'online'],
+              [performance, 'resourcetimingbufferfull'],
+              [new AbortController().signal, 'abort'],
+              ...['loadstart', 'progress', 'load', 'loadend', 'error', 'abort'].map(type => [new FileReader(), type]),
+              ...['click', 'show', 'error', 'close'].map(type => [new Notification('handlers'), type]),
+            ];
+            for (const [target, type] of targets) {{
+              checkHandlerDispatch(target, type);
+              checkUnregisteredHandler(target);
+            }}
+            checkUnregisteredHandler(new EventTarget());
+            postMessage(true);
+            close();"#
+        );
+        let mut handle = spawn_test_worker_with_options(
+            WorkerSpawnOptions::new(
+                source,
+                "https://simple-event-target-handlers.test/worker.js".to_owned(),
+            )
+            .with_script_kind(kind),
+        );
+        assert_eq!(recv_post_json(&mut handle).await, "true");
+    }
+}
+
+#[tokio::test]
 async fn worker_performance_handlers_keep_their_listener_position_across_replacement() {
     ensure_v8();
     for kind in [WorkerScriptKind::Classic, WorkerScriptKind::Module] {

@@ -140,25 +140,13 @@ fn on_resource_timing_buffer_full_setter<'s>(
     _rv: v8::ReturnValue<'_, v8::Value>,
 ) {
     let performance = args.this();
-    let value = args.get(0);
-    let handler = if value.is_object() {
-        value
-    } else {
-        v8::null(scope).into()
-    };
-    set_private_value(
-        scope,
-        performance,
-        PERFORMANCE_ON_RESOURCE_TIMING_BUFFER_FULL_SLOT,
-        handler,
-    );
-    simple_object_event_set_ordered_handler(
+    simple_object_event_set_handler(
         scope,
         performance,
         PERFORMANCE_EVENT_LISTENERS_SLOT,
         RESOURCE_TIMING_BUFFER_FULL_EVENT,
         PERFORMANCE_ON_RESOURCE_TIMING_BUFFER_FULL_SLOT,
-        handler.is_object(),
+        args.get(0),
     );
 }
 

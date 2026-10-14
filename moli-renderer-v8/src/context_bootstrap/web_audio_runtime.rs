@@ -146,8 +146,6 @@ struct OfflineAudioContextObjectDeclaration<'scope> {
     state: &'static str,
     #[webapi(data_property)]
     destination: v8::Local<'scope, v8::Object>,
-    #[webapi(data_property = "oncomplete", init = "null")]
-    oncomplete: (),
     #[webapi(method, enumerable, callback = simple_event_target_add_event_listener_callback)]
     add_event_listener: (),
     #[webapi(
@@ -378,11 +376,33 @@ struct AudioContextTemplateDeclaration {
     constructor_length = 2,
     enumerable
 )]
-struct AudioWorkletNodeTemplateDeclaration {}
+struct AudioWorkletNodeTemplateDeclaration {
+    #[webapi(
+        accessor_property = "onprocessorerror",
+        getter = simple_event_target_handler_getter_callback,
+        setter = simple_event_target_handler_setter_callback,
+        data = v8str(scope, "onprocessorerror"),
+        setter_data = v8str(scope, "onprocessorerror"),
+        enumerable,
+        receiver = web_api_interfaces::AudioWorkletNode::is_instance
+    )]
+    onprocessorerror: (),
+}
 
 #[derive(WebApiFunctionTemplate)]
 #[webapi(interface = web_api_interfaces::BaseAudioContext, enumerable)]
 struct BaseAudioContextPrototypeDeclaration {
+    #[webapi(
+        accessor_property = "onstatechange",
+        getter = simple_event_target_handler_getter_callback,
+        setter = simple_event_target_handler_setter_callback,
+        data = v8str(scope, "onstatechange"),
+        setter_data = v8str(scope, "onstatechange"),
+        enumerable,
+        receiver = web_api_interfaces::BaseAudioContext::is_instance
+    )]
+    onstatechange: (),
+
     #[webapi(method = "createBiquadFilter", length = 0, callback = biquad::create_biquad_filter)]
     create_biquad_filter: (),
 
@@ -411,6 +431,17 @@ struct BaseAudioContextPrototypeDeclaration {
 #[derive(WebApiFunctionTemplate)]
 #[webapi(interface = web_api_interfaces::OfflineAudioContext, enumerable)]
 struct OfflineAudioContextPrototypeDeclaration {
+    #[webapi(
+        accessor_property = "oncomplete",
+        getter = simple_event_target_handler_getter_callback,
+        setter = simple_event_target_handler_setter_callback,
+        data = v8str(scope, "oncomplete"),
+        setter_data = v8str(scope, "oncomplete"),
+        enumerable,
+        receiver = web_api_interfaces::OfflineAudioContext::is_instance
+    )]
+    oncomplete: (),
+
     #[webapi(
         method = "startRendering",
         length = 0,

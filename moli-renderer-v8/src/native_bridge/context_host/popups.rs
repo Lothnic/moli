@@ -1,15 +1,14 @@
 mod renderer_owned;
 
-use super::{
-    JsContextHost, NavigationHistoryEntrySeed, child_frame_runtime::WINDOW_EVENT_HANDLER_PROPERTIES,
-};
+use super::{JsContextHost, NavigationHistoryEntrySeed};
 use crate::web_api_interfaces;
 use crate::{
     content_security_policy::content_security_policy_forces_opaque_origin,
     context_bootstrap::{
         SharedWebStorageStore, WINDOW_NAME_SLOT, apply_local_window_location_navigation,
-        deep_clone_shared_web_storage_store, dispatch_simple_event_target_event,
-        install_navigation_bootstrap_entry_for_holder, install_simple_event_target_methods,
+        clear_simple_window_event_handler_values, deep_clone_shared_web_storage_store,
+        dispatch_simple_event_target_event, install_navigation_bootstrap_entry_for_holder,
+        install_simple_event_target_methods, install_simple_window_event_handlers,
         install_storage_aliases_for_window,
         install_window_location_history_navigation_runtime_state, new_shared_web_storage_store,
         scoped_indexed_db_factory, sync_document_location_runtime_state_from_window,
@@ -867,12 +866,8 @@ impl JsContextHost {
             }
         }
         let _ = install_storage_aliases_for_window(scope, window);
-        install_simple_event_target_methods(
-            scope,
-            window,
-            LIGHTWEIGHT_POPUP_EVENT_LISTENERS_SLOT,
-            false,
-        );
+        install_simple_event_target_methods(scope, window, LIGHTWEIGHT_POPUP_EVENT_LISTENERS_SLOT);
+        install_simple_window_event_handlers(scope, window);
         let _ = LightweightPopupWindowMethodsDeclaration::default().initialize(scope, window);
         let initial_document_owner = self.allocate_lightweight_popup_document_owner(popup_id);
         let initial_local_window_id = self.allocate_lightweight_popup_local_window_id();
@@ -3794,7 +3789,7 @@ impl JsContextHost {
                     document_remained_current = false;
                     break;
                 }
-                set_object_slot(scope, window, &name, value);
+                set_lightweight_popup_script_global(scope, window, &name, value);
                 if !self.lightweight_popup_document_owner_is_current(script_document_owner) {
                     document_remained_current = false;
                     break;
@@ -3821,7 +3816,7 @@ impl JsContextHost {
                 if value.is_undefined() {
                     continue;
                 }
-                set_object_slot(scope, window, &name, value);
+                set_lightweight_popup_script_global(scope, window, &name, value);
                 if !self.lightweight_popup_document_owner_is_current(script_document_owner) {
                     document_remained_current = false;
                     break;
@@ -4920,6 +4915,21 @@ fn sync_lightweight_popup_window_location<'s>(
     }
 }
 
+fn set_lightweight_popup_script_global(
+    scope: &mut v8::PinScope<'_, '_>,
+    window: v8::Local<'_, v8::Object>,
+    name: &str,
+    value: v8::Local<'_, v8::Value>,
+) {
+    // Exporting a script global must retain Window's handler accessor and its
+    // registration position, rather than replacing it with a data property.
+    if crate::context_bootstrap::is_window_event_handler_property(name) {
+        set_object_value(scope, window, name, value);
+    } else {
+        set_object_slot(scope, window, name, value);
+    }
+}
+
 fn clear_lightweight_popup_window_document_event_state<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     window: v8::Local<'s, v8::Object>,
@@ -4931,10 +4941,7 @@ fn clear_lightweight_popup_window_document_event_state<'s>(
         LIGHTWEIGHT_POPUP_EVENT_LISTENERS_SLOT,
         undefined.into(),
     );
-    let null = v8::null(scope).into();
-    for name in WINDOW_EVENT_HANDLER_PROPERTIES {
-        let _ = window.set(scope, v8str(scope, name).into(), null);
-    }
+    clear_simple_window_event_handler_values(scope, window);
 }
 
 fn lightweight_popup_effective_navigation_kind(

@@ -1,12 +1,11 @@
 use super::media_queries::{
     dispatch_simple_event_target_event, simple_event_target_add_event_listener_callback,
     simple_event_target_dispatch_event_callback,
-    simple_event_target_remove_event_listener_callback, simple_object_event_set_ordered_handler,
+    simple_event_target_remove_event_listener_callback, simple_object_event_set_handler,
 };
 use super::shared::{
-    READABLE_STREAM_HWM_SLOT, READABLE_STREAM_PENDING_READS_SLOT,
-    SIMPLE_EVENT_TARGET_ORDERED_HANDLERS_SLOT, SIMPLE_EVENT_TARGET_SLOT, WRITABLE_STREAM_SINK_SLOT,
-    define_non_enumerable_string_property, global_constructor_prototype,
+    READABLE_STREAM_HWM_SLOT, READABLE_STREAM_PENDING_READS_SLOT, SIMPLE_EVENT_TARGET_SLOT,
+    WRITABLE_STREAM_SINK_SLOT, define_non_enumerable_string_property, global_constructor_prototype,
     new_uint8_array_from_bytes,
 };
 use super::stream_adapter::{

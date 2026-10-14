@@ -41,9 +41,6 @@ struct EventSourceObjectDeclaration<'scope> {
 
     #[webapi(slot = SIMPLE_EVENT_TARGET_SLOT, value = EVENT_SOURCE_LISTENERS_SLOT)]
     event_target_slot: (),
-
-    #[webapi(slot = SIMPLE_EVENT_TARGET_ORDERED_HANDLERS_SLOT, init = true)]
-    ordered_handlers: (),
 }
 
 #[derive(WebApiFunctionTemplate)]
@@ -541,20 +538,13 @@ fn event_source_event_handler_setter<'s>(
     ) else {
         return;
     };
-    let value = args.get(0);
-    let stored = if value.is_object() {
-        value
-    } else {
-        v8::null(scope).into()
-    };
-    set_private_value(scope, args.this(), handler.slot_name, stored);
-    simple_object_event_set_ordered_handler(
+    simple_object_event_set_handler(
         scope,
         args.this(),
         EVENT_SOURCE_LISTENERS_SLOT,
         handler.event_type,
         handler.slot_name,
-        stored.is_object(),
+        args.get(0),
     );
 }
 

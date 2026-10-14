@@ -1,5 +1,5 @@
 use super::*;
-use crate::context_bootstrap::simple_object_event_set_ordered_handler;
+use crate::context_bootstrap::simple_object_event_set_handler;
 use crate::util::{
     callback_data_index_value, callback_data_item, get_private_value, set_private_value,
 };
@@ -412,9 +412,9 @@ fn xhr_with_credentials_setter<'s>(
     set_xhr_state_bool(scope, xhr, XHR_WITH_CREDENTIALS_SLOT, parsed.value);
 }
 
-fn xhr_value_setter(
-    scope: &mut v8::PinScope<'_, '_>,
-    args: v8::FunctionCallbackArguments<'_>,
+fn xhr_value_setter<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    args: v8::FunctionCallbackArguments<'s>,
     _rv: v8::ReturnValue<'_, v8::Value>,
 ) {
     let Some(xhr) = args.this().to_object(scope) else {
@@ -443,16 +443,17 @@ fn xhr_value_setter(
         value
     };
     set_xhr_state_value(scope, xhr, key, stored);
-    set_private_value(scope, xhr, key, stored);
     if let Some(event_type) = xhr_event_type_for_handler_slot(key) {
-        simple_object_event_set_ordered_handler(
+        simple_object_event_set_handler(
             scope,
             xhr,
             XHR_SIMPLE_EVENT_TARGET_LISTENERS_SLOT,
             event_type,
             key,
-            stored.is_object(),
+            stored,
         );
+    } else {
+        set_private_value(scope, xhr, key, stored);
     }
 }
 

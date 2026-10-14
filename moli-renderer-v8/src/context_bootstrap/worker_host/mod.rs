@@ -1,8 +1,8 @@
 use super::media_queries::{
     simple_event_target_add_event_listener_callback, simple_event_target_dispatch_event_callback,
-    simple_event_target_remove_event_listener_callback, simple_object_event_set_ordered_handler,
+    simple_event_target_remove_event_listener_callback, simple_object_event_set_handler,
 };
-use super::shared::{SIMPLE_EVENT_TARGET_ORDERED_HANDLERS_SLOT, SIMPLE_EVENT_TARGET_SLOT};
+use super::shared::SIMPLE_EVENT_TARGET_SLOT;
 use crate::{
     util::context_host_ptr_from_global_bridge,
     util::{

@@ -24,18 +24,6 @@ struct HistoryRuntimeObjectDeclaration {}
 struct NavigationRuntimeObjectDeclaration<'scope> {
     #[webapi(slot = NAVIGATION_CURRENT_ENTRY_SLOT)]
     current_entry: v8::Local<'scope, v8::Object>,
-
-    #[webapi(data_property = "onnavigate", init = "null")]
-    onnavigate: (),
-
-    #[webapi(data_property = "onnavigatesuccess", init = "null")]
-    onnavigatesuccess: (),
-
-    #[webapi(data_property = "onnavigateerror", init = "null")]
-    onnavigateerror: (),
-
-    #[webapi(data_property = "oncurrententrychange", init = "null")]
-    oncurrententrychange: (),
 }
 
 pub(in crate::context_bootstrap) fn build_history_runtime_state<'s>(
@@ -100,7 +88,6 @@ pub(in crate::context_bootstrap) fn build_navigation_runtime_state<'s>(
         scope,
         navigation,
         NAVIGATION_EVENT_LISTENERS_SLOT,
-        false,
     );
     super::super::shared_event_targets::install_handlers(scope, navigation, false);
     let owner = history_window_owner(scope, window);

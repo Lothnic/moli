@@ -1,4 +1,8 @@
 use super::*;
+use crate::context_bootstrap::{
+    SIMPLE_EVENT_TARGET_SLOT, simple_event_target_handler_getter_callback,
+    simple_event_target_handler_setter_callback,
+};
 use crate::web_api_interfaces;
 use moli_webapi_declare::WebApiObject;
 
@@ -10,6 +14,8 @@ use moli_webapi_declare::WebApiObject;
     enumerable
 )]
 struct IdbTransactionObjectDeclaration<'scope> {
+    #[webapi(slot = SIMPLE_EVENT_TARGET_SLOT, value = INDEXED_DB_EVENT_LISTENERS_SLOT)]
+    event_target_slot: (),
     #[webapi(slot = INDEXED_DB_EVENT_LISTENERS_SLOT, init = "null_object")]
     event_listeners: (),
 
@@ -18,11 +24,35 @@ struct IdbTransactionObjectDeclaration<'scope> {
     #[webapi(init = "null")]
     error: (),
     object_store_names: v8::Local<'scope, v8::Object>,
-    #[webapi(init = "null")]
+    #[webapi(
+        accessor_property = "onabort",
+        getter = simple_event_target_handler_getter_callback,
+        setter = simple_event_target_handler_setter_callback,
+        data = v8str(scope, "onabort"),
+        setter_data = v8str(scope, "onabort"),
+        enumerable,
+        receiver = web_api_interfaces::IDBTransaction::is_instance
+    )]
     onabort: (),
-    #[webapi(init = "null")]
+    #[webapi(
+        accessor_property = "oncomplete",
+        getter = simple_event_target_handler_getter_callback,
+        setter = simple_event_target_handler_setter_callback,
+        data = v8str(scope, "oncomplete"),
+        setter_data = v8str(scope, "oncomplete"),
+        enumerable,
+        receiver = web_api_interfaces::IDBTransaction::is_instance
+    )]
     oncomplete: (),
-    #[webapi(init = "null")]
+    #[webapi(
+        accessor_property = "onerror",
+        getter = simple_event_target_handler_getter_callback,
+        setter = simple_event_target_handler_setter_callback,
+        data = v8str(scope, "onerror"),
+        setter_data = v8str(scope, "onerror"),
+        enumerable,
+        receiver = web_api_interfaces::IDBTransaction::is_instance
+    )]
     onerror: (),
 }
 

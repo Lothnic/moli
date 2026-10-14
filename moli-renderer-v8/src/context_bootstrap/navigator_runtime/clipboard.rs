@@ -1,4 +1,4 @@
-use super::super::{SIMPLE_EVENT_TARGET_ORDERED_HANDLERS_SLOT, SIMPLE_EVENT_TARGET_SLOT};
+use super::super::SIMPLE_EVENT_TARGET_SLOT;
 use crate::web_api_interfaces;
 use crate::{
     blob,
@@ -21,9 +21,6 @@ const CLIPBOARD_ITEM_PRESENTATION_STYLE_SLOT: &str = "__moliClipboardItemPresent
 struct ClipboardObjectDeclaration {
     #[webapi(slot = SIMPLE_EVENT_TARGET_SLOT, value = CLIPBOARD_EVENT_LISTENERS_SLOT)]
     event_target_slot: (),
-
-    #[webapi(slot = SIMPLE_EVENT_TARGET_ORDERED_HANDLERS_SLOT, init = true)]
-    ordered_handlers: (),
 }
 
 #[derive(Default, WebApiFunctionTemplate)]

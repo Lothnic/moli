@@ -1,5 +1,6 @@
 use crate::context_bootstrap::{
     dispatch_simple_event_target_event, mark_simple_event_target_slot, set_text_track_cue_track,
+    simple_event_target_slot_name, simple_object_event_set_handler,
 };
 use crate::document_runtime::DomHandle;
 use crate::dom::native::Node;
@@ -434,6 +435,7 @@ fn text_track_list_onaddtrack_setter<'s>(
         scope,
         receiver,
         args.get(0),
+        "addtrack",
         TEXT_TRACK_LIST_ONADDTRACK_SLOT,
     );
 }
@@ -461,6 +463,7 @@ fn text_track_list_onremovetrack_setter<'s>(
         scope,
         receiver,
         args.get(0),
+        "removetrack",
         TEXT_TRACK_LIST_ONREMOVETRACK_SLOT,
     );
 }
@@ -910,7 +913,13 @@ fn text_track_oncuechange_setter<'s>(
     let Some(receiver) = text_track_receiver(scope, &args) else {
         return;
     };
-    text_track_event_handler_setter(scope, receiver, args.get(0), TEXT_TRACK_ONCUECHANGE_SLOT);
+    text_track_event_handler_setter(
+        scope,
+        receiver,
+        args.get(0),
+        "cuechange",
+        TEXT_TRACK_ONCUECHANGE_SLOT,
+    );
 }
 
 fn text_track_event_handler_getter<'s>(
@@ -926,18 +935,13 @@ fn text_track_event_handler_setter<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     receiver: v8::Local<'s, v8::Object>,
     value: v8::Local<'s, v8::Value>,
+    event_type: &str,
     slot: &'static str,
 ) {
-    set_private_value(
-        scope,
-        receiver,
-        slot,
-        if value.is_function() {
-            value
-        } else {
-            v8::null(scope).into()
-        },
-    );
+    let Some(listeners_slot) = simple_event_target_slot_name(scope, receiver) else {
+        return;
+    };
+    simple_object_event_set_handler(scope, receiver, &listeners_slot, event_type, slot, value);
 }
 
 fn text_track_add_cue_callback<'s>(

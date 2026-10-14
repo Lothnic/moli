@@ -1,7 +1,4 @@
-use super::{
-    SIMPLE_EVENT_TARGET_ORDERED_HANDLERS_SLOT, SIMPLE_EVENT_TARGET_SLOT,
-    simple_object_event_set_ordered_handler,
-};
+use super::{SIMPLE_EVENT_TARGET_SLOT, simple_object_event_set_handler};
 use crate::util::{
     callback_data_index_value, callback_data_item, get_private_value, set_private_value,
     throw_type_error,
@@ -54,9 +51,6 @@ struct SpeechSynthesisObjectDeclaration {
 
     #[webapi(slot = SIMPLE_EVENT_TARGET_SLOT, value = SPEECH_SYNTHESIS_LISTENERS_SLOT)]
     event_target_slot: (),
-
-    #[webapi(slot = SIMPLE_EVENT_TARGET_ORDERED_HANDLERS_SLOT, init = true)]
-    ordered_handlers: (),
 }
 
 #[derive(Default, WebApiFunctionTemplate)]
@@ -150,9 +144,6 @@ struct SpeechSynthesisUtteranceObjectDeclaration<'scope> {
 
     #[webapi(slot = SIMPLE_EVENT_TARGET_SLOT, value = SPEECH_UTTERANCE_LISTENERS_SLOT)]
     event_target_slot: (),
-
-    #[webapi(slot = SIMPLE_EVENT_TARGET_ORDERED_HANDLERS_SLOT, init = true)]
-    ordered_handlers: (),
 }
 
 #[derive(Default, WebApiFunctionTemplate)]
@@ -398,7 +389,6 @@ pub(in crate::context_bootstrap) fn speech_synthesis_utterance_constructor_callb
         onmark: (),
         onboundary: (),
         event_target_slot: (),
-        ordered_handlers: (),
     };
     if declaration.initialize(scope, utterance).is_err() {
         rv.set_undefined();
@@ -531,13 +521,13 @@ fn speech_synthesis_onvoiceschanged_setter<'s>(
     if !require_brand(scope, args.this(), "SpeechSynthesis") {
         return;
     }
-    set_event_handler(
+    simple_object_event_set_handler(
         scope,
         args.this(),
-        args.get(0),
         SPEECH_SYNTHESIS_LISTENERS_SLOT,
         "voiceschanged",
         SPEECH_SYNTHESIS_ONVOICESCHANGED_SLOT,
+        args.get(0),
     );
 }
 
@@ -728,13 +718,13 @@ fn speech_utterance_event_handler_setter<'s>(
     ) else {
         return;
     };
-    set_event_handler(
+    simple_object_event_set_handler(
         scope,
         args.this(),
-        args.get(0),
         SPEECH_UTTERANCE_LISTENERS_SLOT,
         handler.event_type,
         handler.slot,
+        args.get(0),
     );
 }
 
@@ -757,31 +747,6 @@ fn speech_voice_getter<'s>(
     };
     rv.set(
         get_private_value(scope, args.this(), slot).unwrap_or_else(|| v8::undefined(scope).into()),
-    );
-}
-
-fn set_event_handler<'s>(
-    scope: &mut v8::PinScope<'s, '_>,
-    target: v8::Local<'s, v8::Object>,
-    value: v8::Local<'s, v8::Value>,
-    listeners_slot: &'static str,
-    event_type: &'static str,
-    handler_slot: &'static str,
-) {
-    let active = value.is_object();
-    let stored = if active {
-        value
-    } else {
-        v8::null(scope).into()
-    };
-    set_private_value(scope, target, handler_slot, stored);
-    simple_object_event_set_ordered_handler(
-        scope,
-        target,
-        listeners_slot,
-        event_type,
-        handler_slot,
-        active,
     );
 }
 

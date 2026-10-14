@@ -22,24 +22,6 @@ struct FileReaderObjectDeclaration {
     #[webapi(slot = FILE_READER_ERROR_SLOT, init = "null")]
     error: (),
 
-    #[webapi(data_property = "onloadstart", init = "null")]
-    onloadstart: (),
-
-    #[webapi(data_property = "onprogress", init = "null")]
-    onprogress: (),
-
-    #[webapi(data_property = "onload", init = "null")]
-    onload: (),
-
-    #[webapi(data_property = "onloadend", init = "null")]
-    onloadend: (),
-
-    #[webapi(data_property = "onerror", init = "null")]
-    onerror: (),
-
-    #[webapi(data_property = "onabort", init = "null")]
-    onabort: (),
-
     #[webapi(slot = FILE_READER_LISTENERS_SLOT, init = "null_object")]
     listeners: (),
 
@@ -62,6 +44,67 @@ struct FileReaderObjectDeclaration {
 #[derive(WebApiFunctionTemplate)]
 #[webapi(interface = web_api_interfaces::FileReader)]
 struct FileReaderPrototypeAccessorsDeclaration {
+    #[webapi(
+        accessor_property = "onloadstart",
+        getter = simple_event_target_handler_getter_callback,
+        setter = simple_event_target_handler_setter_callback,
+        data = v8str(scope, "onloadstart"),
+        setter_data = v8str(scope, "onloadstart"),
+        enumerable,
+        receiver = web_api_interfaces::FileReader::is_instance
+    )]
+    onloadstart: (),
+    #[webapi(
+        accessor_property = "onprogress",
+        getter = simple_event_target_handler_getter_callback,
+        setter = simple_event_target_handler_setter_callback,
+        data = v8str(scope, "onprogress"),
+        setter_data = v8str(scope, "onprogress"),
+        enumerable,
+        receiver = web_api_interfaces::FileReader::is_instance
+    )]
+    onprogress: (),
+    #[webapi(
+        accessor_property = "onload",
+        getter = simple_event_target_handler_getter_callback,
+        setter = simple_event_target_handler_setter_callback,
+        data = v8str(scope, "onload"),
+        setter_data = v8str(scope, "onload"),
+        enumerable,
+        receiver = web_api_interfaces::FileReader::is_instance
+    )]
+    onload: (),
+    #[webapi(
+        accessor_property = "onloadend",
+        getter = simple_event_target_handler_getter_callback,
+        setter = simple_event_target_handler_setter_callback,
+        data = v8str(scope, "onloadend"),
+        setter_data = v8str(scope, "onloadend"),
+        enumerable,
+        receiver = web_api_interfaces::FileReader::is_instance
+    )]
+    onloadend: (),
+    #[webapi(
+        accessor_property = "onerror",
+        getter = simple_event_target_handler_getter_callback,
+        setter = simple_event_target_handler_setter_callback,
+        data = v8str(scope, "onerror"),
+        setter_data = v8str(scope, "onerror"),
+        enumerable,
+        receiver = web_api_interfaces::FileReader::is_instance
+    )]
+    onerror: (),
+    #[webapi(
+        accessor_property = "onabort",
+        getter = simple_event_target_handler_getter_callback,
+        setter = simple_event_target_handler_setter_callback,
+        data = v8str(scope, "onabort"),
+        setter_data = v8str(scope, "onabort"),
+        enumerable,
+        receiver = web_api_interfaces::FileReader::is_instance
+    )]
+    onabort: (),
+
     #[webapi(
         accessor_property,
         getter = file_reader_ready_state_getter_callback,
