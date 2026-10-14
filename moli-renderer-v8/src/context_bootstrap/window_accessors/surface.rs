@@ -117,6 +117,7 @@ fn set_receiver_window_alias<'s>(
     slot: &'static str,
     mut rv: v8::ReturnValue<'_, v8::Value>,
 ) {
+    let accessing_context = scope.get_current_context();
     let Some(receiver) = window_receiver(scope, args) else {
         return;
     };
@@ -130,9 +131,20 @@ fn set_receiver_window_alias<'s>(
         .get_creation_context(scope)
         .unwrap_or_else(|| scope.get_current_context());
     let scope = &mut v8::ContextScope::new(scope, context);
-    rv.set(
-        window_hidden_value(scope, receiver, slot).unwrap_or_else(|| context.global(scope).into()),
-    );
+    let value =
+        window_hidden_value(scope, receiver, slot).unwrap_or_else(|| context.global(scope).into());
+    let value = v8::Local::<v8::Object>::try_from(value)
+        .ok()
+        .and_then(|target| {
+            super::super::shared_event_targets::window_target_in_realm(
+                scope,
+                target,
+                accessing_context,
+            )
+        })
+        .map(Into::into)
+        .unwrap_or(value);
+    rv.set(value);
 }
 
 pub(crate) fn window_opener_getter<'s>(
