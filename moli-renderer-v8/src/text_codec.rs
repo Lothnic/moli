@@ -9,12 +9,10 @@ use parking_lot::Mutex;
 use super::util::{get_private_value, set_private_value};
 
 const TEXT_DECODER_ID_SLOT: &str = "__lmTextDecoderId";
-const DECODER_WEAK_COMPACTION_INTERVAL: usize = 64;
 
+#[derive(Default)]
 pub(super) struct TextCodecStore {
     state: Arc<Mutex<TextCodecStoreState>>,
-    decoder_weaks: Vec<v8::Weak<v8::Object>>,
-    decoder_weak_insertions_since_compaction: usize,
 }
 
 #[derive(Default)]
@@ -36,16 +34,6 @@ pub(super) enum TextDecodeError {
     MalformedInput,
 }
 
-impl Default for TextCodecStore {
-    fn default() -> Self {
-        Self {
-            state: Arc::new(Mutex::new(TextCodecStoreState::default())),
-            decoder_weaks: Vec::new(),
-            decoder_weak_insertions_since_compaction: 0,
-        }
-    }
-}
-
 impl TextDecodeError {
     pub(super) fn message(&self) -> &'static str {
         match self {
@@ -56,7 +44,7 @@ impl TextDecodeError {
 
 impl TextCodecStore {
     pub(super) fn init_decoder(
-        &mut self,
+        &self,
         scope: &mut v8::PinScope<'_, '_>,
         decoder: v8::Local<'_, v8::Object>,
         encoding: &'static Encoding,
@@ -78,12 +66,15 @@ impl TextCodecStore {
             TEXT_DECODER_ID_SLOT,
             v8::Number::new(scope, decoder_id as f64).into(),
         );
-        self.track_decoder_lifetime(scope, decoder, decoder_id);
+        let state = Arc::downgrade(&self.state);
+        crate::v8_finalizer::track_context_owned_v8_finalizer(scope, decoder, move || {
+            remove_decoder_state(&state, decoder_id);
+        });
         decoder_id
     }
 
     pub(super) fn decode(
-        &mut self,
+        &self,
         decoder_id: u32,
         bytes: &[u8],
         stream: bool,
@@ -104,32 +95,6 @@ impl TextCodecStore {
             .and_then(|value| value.number_value(scope))
             .filter(|value| value.is_finite() && *value >= 1.0)
             .map(|value| value as u32)
-    }
-
-    fn track_decoder_lifetime(
-        &mut self,
-        scope: &mut v8::PinScope<'_, '_>,
-        decoder: v8::Local<'_, v8::Object>,
-        decoder_id: u32,
-    ) {
-        let state = Arc::downgrade(&self.state);
-        let weak = v8::Weak::with_guaranteed_finalizer(
-            scope,
-            decoder,
-            Box::new(move || remove_decoder_state(&state, decoder_id)),
-        );
-        self.decoder_weaks.push(weak);
-        self.decoder_weak_insertions_since_compaction = self
-            .decoder_weak_insertions_since_compaction
-            .saturating_add(1);
-        if self.decoder_weak_insertions_since_compaction >= DECODER_WEAK_COMPACTION_INTERVAL {
-            self.compact_decoder_weaks();
-        }
-    }
-
-    fn compact_decoder_weaks(&mut self) {
-        self.decoder_weaks.retain(|weak| !weak.is_empty());
-        self.decoder_weak_insertions_since_compaction = 0;
     }
 }
 
@@ -248,6 +213,75 @@ fn new_encoding_decoder(encoding: &'static Encoding, ignore_bom: bool) -> Decode
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn common_text_codec_state_releases_collected_and_teardown_decoders() {
+        use crate::{
+            common_runtime::{CommonRuntimeBinding, CommonRuntimeState},
+            native_bridge::JsContextHost,
+            util::ContextHostLifecycle,
+        };
+        use std::{cell::Cell, rc::Rc};
+
+        crate::ensure_v8_for_test();
+        let common = Rc::new(CommonRuntimeState::default());
+        let lifecycle = Rc::new(Cell::new(ContextHostLifecycle::Active));
+        let mut isolate = v8::Isolate::new(Default::default());
+        let (context, retained_decoder, retained_id) = {
+            let scope = std::pin::pin!(v8::HandleScope::new(&mut isolate));
+            let scope = &mut scope.init();
+            let context = v8::Context::new(scope, Default::default());
+            // Component lookup needs an owner identity, but never dereferences
+            // the opaque host address in this native backing lifetime test.
+            CommonRuntimeBinding::install_window(
+                context,
+                &common,
+                std::ptr::NonNull::<JsContextHost>::dangling().as_ptr(),
+                &lifecycle,
+            );
+            let scope = &mut v8::ContextScope::new(scope, context);
+            let collected = v8::Object::new(scope);
+            common
+                .text_codecs
+                .init_decoder(scope, collected, encoding_rs::UTF_8, false, false);
+            let retained = v8::Object::new(scope);
+            let id =
+                common
+                    .text_codecs
+                    .init_decoder(scope, retained, encoding_rs::UTF_8, false, false);
+            assert_eq!(common.text_codecs.state.lock().decoders.len(), 2);
+            (
+                v8::Global::new(scope, context),
+                v8::Global::new(scope, retained),
+                id,
+            )
+        };
+        for _ in 0..2 {
+            isolate.low_memory_notification();
+        }
+        assert_eq!(common.text_codecs.state.lock().decoders.len(), 1);
+        assert_eq!(
+            common
+                .text_codecs
+                .decode(retained_id, &[0xE2, 0x82], true)
+                .unwrap(),
+            ""
+        );
+        assert_eq!(
+            common
+                .text_codecs
+                .decode(retained_id, &[0xAC], false)
+                .unwrap(),
+            "€"
+        );
+        common.clear_for_context_teardown();
+        assert_eq!(common.text_codecs.state.lock().decoders.len(), 0);
+        assert_eq!(common.finalizer_count(), 0);
+        common.clear_for_context_teardown();
+        drop(retained_decoder);
+        drop(context);
+        drop(isolate);
+    }
 
     #[test]
     fn text_decoder_state_streams_split_utf8_sequences() {

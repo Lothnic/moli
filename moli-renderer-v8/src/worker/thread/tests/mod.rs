@@ -1,6 +1,7 @@
 mod abort_signal_events;
 mod callback_execution;
 mod error_reporting_guard;
+mod text_codecs;
 use std::pin::pin;
 use std::sync::Arc;
 use std::time::Duration;

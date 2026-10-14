@@ -378,7 +378,6 @@ impl JsContextHost {
             custom_element_registry_associations: LinkedHashMap::new(),
             next_scoped_custom_elements_registry_id: 1,
             observers: ObserverStore::default(),
-            text_codecs: TextCodecStore::default(),
             child_browsing_contexts: IndexMap::new(),
             frame_owner_store,
             frame_parser_classic_scripts: FrameParserClassicScriptRunnerStore::default(),
@@ -2455,10 +2454,6 @@ impl JsContextHost {
             }
         }
         false
-    }
-
-    pub(crate) fn text_codecs_mut(&mut self) -> &mut TextCodecStore {
-        &mut self.text_codecs
     }
 
     pub(crate) fn renderer_backend_node_id_for_live_handle(

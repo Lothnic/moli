@@ -105,7 +105,6 @@ use crate::runtime::{
     ServiceWorkerShowNotificationResult, ServiceWorkerSyncGetTagsResult,
     ServiceWorkerSyncRegistrationResult,
 };
-use crate::text_codec::TextCodecStore;
 use crate::types::{BroadcastChannelId, DedicatedWorkerId, MessagePortId, NetworkBodySourceId};
 use crate::util::{
     get_private_value, global_constructor_object, global_constructor_prototype, set_private_value,

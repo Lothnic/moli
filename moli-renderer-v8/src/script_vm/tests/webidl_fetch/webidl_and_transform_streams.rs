@@ -1,6 +1,20 @@
 use super::*;
 
 #[test]
+fn text_codec_runtime_preserves_streaming_bom_and_fatal_errors() {
+    let mut vm = new_storage_test_vm("https://text-codec-runtime.test/");
+    let source = format!(
+        "({}).then(result => globalThis.__textCodecRuntimeResult = result, error => globalThis.__textCodecRuntimeResult = {{ error: String(error) }});",
+        include_str!("../../../../tests/fixtures/text-codec-runtime.js"),
+    );
+    vm.eval(&source).expect("queue shared text codec probe");
+    assert_eq!(
+        vm.eval("JSON.stringify(__textCodecRuntimeResult)").unwrap(),
+        r#"{"split":"€","utf8":"hé","legacy":"太平洋","bomKept":true,"fatal":["TypeError","TypeError"]}"#,
+    );
+}
+
+#[test]
 fn webidl_required_nullable_dictionary_rejects_undefined_member() {
     let vm = new_storage_test_vm("https://webidl-dictionary-nullable-required.test/");
     let context_ptr: *const v8::Global<v8::Context> = &vm.page_default_runtime.context as *const _;

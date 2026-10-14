@@ -15,6 +15,7 @@ use std::{
 
 use crate::{
     native_bridge::JsContextHost,
+    text_codec::TextCodecStore,
     util::{ContextHostLifecycle, page_context_is_disconnected},
     v8_finalizer::V8FinalizerRegistry,
     worker::WorkerGlobalState,
@@ -23,9 +24,20 @@ use crate::{
 #[derive(Default)]
 pub(crate) struct CommonRuntimeState {
     pub(crate) finalizers: RefCell<V8FinalizerRegistry>,
+    pub(crate) text_codecs: TextCodecStore,
 }
 
 impl CommonRuntimeState {
+    /// Resolve native components without borrowing the Window or Worker
+    /// host. Retained backing state and callback execution permission remain
+    /// separate: asynchronous callbacks must still revalidate their identities.
+    pub(crate) fn from_scope(scope: &mut v8::PinScope<'_, '_>) -> Option<Rc<Self>> {
+        let context = scope.get_current_context();
+        let binding = context.get_slot::<CommonRuntimeBinding>()?;
+        let (runtime, _) = binding.resolve_owner(context)?;
+        Some(runtime)
+    }
+
     pub(crate) fn clear_for_context_teardown(&self) {
         // Cleanup may reenter native components. Drop the component borrow
         // before executing any cleanup, just as registration releases owner
@@ -119,7 +131,7 @@ impl CommonRuntimeBinding {
     ) -> Option<(Rc<Self>, RuntimeExecutionContext)> {
         let context = scope.get_current_context();
         let binding = context.get_slot::<Self>()?;
-        let owner = binding.resolve_owner(context)?;
+        let (_, owner) = binding.resolve_owner(context)?;
         Some((binding, owner))
     }
 
@@ -130,9 +142,9 @@ impl CommonRuntimeBinding {
     fn resolve_owner(
         &self,
         context: v8::Local<'_, v8::Context>,
-    ) -> Option<RuntimeExecutionContext> {
-        self.runtime()?;
-        match &self.owner {
+    ) -> Option<(Rc<CommonRuntimeState>, RuntimeExecutionContext)> {
+        let runtime = self.runtime()?;
+        let owner = match &self.owner {
             RuntimeOwner::Window {
                 host_ptr,
                 lifecycle,
@@ -142,13 +154,14 @@ impl CommonRuntimeBinding {
                 {
                     return None;
                 }
-                Some(RuntimeExecutionContext::Window(*host_ptr))
+                RuntimeExecutionContext::Window(*host_ptr)
             }
             RuntimeOwner::Worker { state, .. } => {
                 state.upgrade()?;
-                Some(RuntimeExecutionContext::Worker)
+                RuntimeExecutionContext::Worker
             }
-        }
+        };
+        Some((runtime, owner))
     }
 
     pub(crate) fn execution_context(
@@ -160,7 +173,7 @@ impl CommonRuntimeBinding {
         if !std::ptr::eq(self, installed.as_ref()) {
             return None;
         }
-        self.resolve_owner(context)
+        self.resolve_owner(context).map(|(_, owner)| owner)
     }
 
     /// Recheck the exact Context and owner immediately before author code.
@@ -236,6 +249,10 @@ mod tests {
             let (binding, owner) = CommonRuntimeBinding::from_scope(scope).unwrap();
             assert!(matches!(owner, RuntimeExecutionContext::Window(ptr) if ptr == host));
             assert!(Rc::ptr_eq(&binding.runtime().unwrap(), &common));
+            assert!(Rc::ptr_eq(
+                &CommonRuntimeState::from_scope(scope).unwrap(),
+                &common
+            ));
             assert!(binding.callback_execution_context(scope).is_some());
             binding
         };
@@ -253,6 +270,7 @@ mod tests {
             assert!(!Rc::ptr_eq(&binding.runtime().unwrap(), &common));
             other_lifecycle.set(ContextHostLifecycle::Destroyed);
             assert!(CommonRuntimeBinding::from_scope(scope).is_none());
+            assert!(CommonRuntimeState::from_scope(scope).is_none());
             // A previously resolved owner is not a cached execution permit.
             assert!(binding.callback_execution_context(scope).is_none());
         }

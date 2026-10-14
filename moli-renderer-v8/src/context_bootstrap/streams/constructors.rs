@@ -391,11 +391,11 @@ pub(in crate::context_bootstrap) fn text_decoder_stream_constructor_callback<'s>
         0.0,
         None,
     );
-    if let Some(host_ptr) = context_host_ptr_from_global_bridge(scope)
-        && let Some(writable) = object_property_as_object(scope, args.this(), "writable")
+    if let Some(writable) = object_property_as_object(scope, args.this(), "writable")
+        && let Some(common) = crate::common_runtime::CommonRuntimeState::from_scope(scope)
     {
-        unsafe { &mut *host_ptr }
-            .text_codecs_mut()
+        common
+            .text_codecs
             .init_decoder(scope, writable, encoding, fatal, ignore_bom);
     }
     TextDecoderStreamObjectDeclaration::new(encoding_name, fatal, ignore_bom)

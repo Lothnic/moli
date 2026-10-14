@@ -89,9 +89,6 @@ pub(crate) struct WorkerGlobalState {
     pub(in crate::worker) next_xhr_id: u32,
     /// Worker-owned CSP report requests paused for Fetch domain request-stage interception.
     pub(in crate::worker) pending_csp_reports: HashMap<u32, PendingWorkerCspReport>,
-    /// Worker-local TextDecoder state. TextEncoder is stateless, but TextDecoder
-    /// can stream and needs decoder state tied to this worker's isolate.
-    pub(crate) text_codecs: TextCodecStore,
     /// Worker-local AbortController/AbortSignal runtime state.
     pub(in crate::worker) abort: Rc<RefCell<WorkerAbortStore>>,
     /// Worker-thread view of the creator's browser-context/partition runtime.

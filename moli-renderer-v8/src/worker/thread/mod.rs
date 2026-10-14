@@ -1658,7 +1658,6 @@ async fn worker_main(
         pending_xhrs: std::collections::HashMap::new(),
         next_xhr_id: 0,
         pending_csp_reports: std::collections::HashMap::new(),
-        text_codecs: crate::text_codec::TextCodecStore::default(),
         abort: Rc::new(RefCell::new(super::abort::WorkerAbortStore::default())),
         worker_context_runtime,
         service_worker_runtime,

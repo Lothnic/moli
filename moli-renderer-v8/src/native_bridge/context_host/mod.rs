@@ -35,7 +35,6 @@ use crate::{
         script_provenance::CompiledStringProvenance,
         shared_worker_runtime::SharedWorkerClientEndpointOwner,
         style_engine::MoliStyleEngine,
-        text_codec::TextCodecStore,
         types::{
             BroadcastChannelId, DedicatedWorkerId, ImageRequestKey,
             InFlightWorkerSubresourceFetchState, MessagePortId, NetworkBodySourceId,
@@ -855,7 +854,6 @@ pub(crate) struct JsContextHost {
         LinkedHashMap<DomHandle, CustomElementRegistryAssociation>,
     next_scoped_custom_elements_registry_id: u64,
     observers: ObserverStore,
-    text_codecs: TextCodecStore,
     // Key order is browsing-context insertion order and therefore frame-tree sibling order.
     child_browsing_contexts: IndexMap<DomHandle, ChildBrowsingContextEntry>,
     frame_owner_store: FrameOwnerStore,

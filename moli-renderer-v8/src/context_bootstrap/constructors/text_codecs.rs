@@ -415,15 +415,8 @@ fn init_text_decoder_state(
     fatal: bool,
     ignore_bom: bool,
 ) {
-    if let Some(host_ptr) = context_host_ptr_from_global_bridge(scope) {
-        unsafe { &mut *host_ptr }
-            .text_codecs_mut()
-            .init_decoder(scope, decoder, encoding, fatal, ignore_bom);
-        return;
-    }
-    if let Some(worker_state) = crate::worker::get_worker_state(scope) {
-        worker_state
-            .borrow_mut()
+    if let Some(common) = crate::common_runtime::CommonRuntimeState::from_scope(scope) {
+        common
             .text_codecs
             .init_decoder(scope, decoder, encoding, fatal, ignore_bom);
     }
@@ -435,17 +428,6 @@ fn decode_text_decoder_state(
     bytes: &[u8],
     stream: bool,
 ) -> Option<Result<String, TextDecodeError>> {
-    if let Some(host_ptr) = context_host_ptr_from_global_bridge(scope) {
-        return Some(
-            unsafe { &mut *host_ptr }
-                .text_codecs_mut()
-                .decode(decoder_id, bytes, stream),
-        );
-    }
-    crate::worker::get_worker_state(scope).map(|worker_state| {
-        worker_state
-            .borrow_mut()
-            .text_codecs
-            .decode(decoder_id, bytes, stream)
-    })
+    let common = crate::common_runtime::CommonRuntimeState::from_scope(scope)?;
+    Some(common.text_codecs.decode(decoder_id, bytes, stream))
 }

@@ -2287,15 +2287,13 @@ fn decode_text_decoder_stream<'s>(
     bytes: &[u8],
     stream_decode: bool,
 ) -> Result<String, TextDecodeError> {
-    let Some(host_ptr) = context_host_ptr_from_global_bridge(scope) else {
+    let Some(common) = crate::common_runtime::CommonRuntimeState::from_scope(scope) else {
         return Ok(String::new());
     };
     let Some(decoder_id) = text_decoder_stream_decoder_id(scope, stream) else {
         return Ok(String::new());
     };
-    unsafe { &mut *host_ptr }
-        .text_codecs_mut()
-        .decode(decoder_id, bytes, stream_decode)
+    common.text_codecs.decode(decoder_id, bytes, stream_decode)
 }
 
 fn text_decoder_stream_decoder_id<'s>(
