@@ -2116,9 +2116,10 @@ where
     let mut prepared_context_count = 0usize;
     let mut text_unit_count = 0usize;
     let mut reused_context_count = 0usize;
+    world.prepare_inline_storage();
     for (index, layout_box) in world.boxes.iter_mut().enumerate() {
         if retain_prepared {
-            if let Some(context) = layout_box.inline_layout.as_mut() {
+            if let Some(context) = world.inline_layouts[index].as_mut() {
                 let preserve_numeric = world
                     .inline_numeric_reuse
                     .as_ref()
@@ -2126,7 +2127,7 @@ where
                 context.prepare_for_retention(preserve_numeric);
             }
         } else {
-            layout_box.inline_layout = None;
+            world.inline_layouts[index] = None;
         }
         layout_box.inline_context_owner = None;
         layout_box.inline_flattened = false;
@@ -2159,7 +2160,7 @@ where
         {
             continue;
         }
-        if world.boxes[owner.index()].inline_layout.is_some() {
+        if world.inline_layouts[owner.index()].is_some() {
             reused_context_count += 1;
             initialized = true;
             continue;
@@ -2171,7 +2172,7 @@ where
             preparation_elapsed += started.elapsed();
             prepared_context_count += 1;
         }
-        world.boxes[owner.index()].inline_layout = Some(context);
+        world.inline_layouts[owner.index()] = Some(context);
         initialized = true;
     }
     if initialized {
@@ -2377,8 +2378,7 @@ impl InlineBuildInput {
                 .find(&self.text, style, quantize)
         });
         let layout = if let Some(cached_owner) = cached_owner {
-            let layout = world.boxes[cached_owner.index()]
-                .inline_layout
+            let layout = world.inline_layouts[cached_owner.index()]
                 .as_ref()
                 .and_then(|context| context.measurement_layout.as_ref())
                 .expect("preparation index only references earlier contexts in this pass");
