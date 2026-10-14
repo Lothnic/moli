@@ -488,18 +488,31 @@ fn parse_transfer_values<'s>(
                     continue;
                 }
                 Some("MessagePort") => {
-                    if let Some(port_id) = message_port_id_from_object(scope, object) {
-                        if Some(port_id) == source_port_id {
-                            operation.throw_data_clone_error(
-                                scope,
-                                "transfer list contains the source MessagePort.",
-                            );
-                            return None;
-                        }
-                        seen.push(object.into());
-                        entries.push(WireTransfer::MessagePort(object));
-                        continue;
+                    let target = moli_webapi_declare::web_api_object_target(scope, object)?;
+                    if seen
+                        .iter()
+                        .any(|existing| existing.strict_equals(target.into()))
+                    {
+                        operation.throw_data_clone_error(
+                            scope,
+                            "transfer list contains duplicate transferable entries.",
+                        );
+                        return None;
                     }
+                    if source_port_id.is_some()
+                        && message_port_id_from_object(scope, target) == source_port_id
+                    {
+                        operation.throw_data_clone_error(
+                            scope,
+                            "transfer list contains the source MessagePort.",
+                        );
+                        return None;
+                    }
+                    // A missing endpoint is a detached port, checked by the
+                    // transfer steps after the message's getters have run.
+                    seen.push(target.into());
+                    entries.push(WireTransfer::MessagePort(target));
+                    continue;
                 }
                 Some("ReadableStream") => {
                     seen.push(object.into());

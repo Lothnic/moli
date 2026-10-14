@@ -63,6 +63,7 @@ const HOST_OBJECT_TAG_RTC_CERTIFICATE: u32 = 18;
 pub(crate) const HOST_OBJECT_TAG_IMAGE_DATA_GRAPH: u32 = 19;
 pub(crate) const HOST_OBJECT_TAG_IMAGE_BITMAP: u32 = 20;
 const HOST_OBJECT_TAG_TRANSFERRED_IMAGE_BITMAP: u32 = 21;
+const HOST_OBJECT_TAG_TRANSFERRED_MESSAGE_PORT: u32 = 22;
 
 const GEOMETRY_KIND_DOM_POINT_READONLY: u32 = 0;
 const GEOMETRY_KIND_DOM_POINT: u32 = 1;
@@ -340,7 +341,7 @@ pub(crate) struct StructuredCloneMetadata {
 }
 
 struct WireSerializer {
-    allowed_message_port_ids: HashSet<MessagePortId>,
+    transferred_message_ports: Vec<v8::Global<v8::Object>>,
     allowed_readable_streams: Vec<v8::Global<v8::Object>>,
     allowed_writable_streams: Vec<v8::Global<v8::Object>>,
     allowed_transform_streams: Vec<v8::Global<v8::Object>>,
@@ -433,18 +434,21 @@ impl v8::ValueSerializerImpl for WireSerializer {
     ) -> Option<bool> {
         match moli_webapi_declare::web_api_object_type(scope, object).map(|kind| kind.name()) {
             Some("MessagePort") => {
-                if let Some(port_id) = message_port_id_from_object(scope, object) {
-                    if !self.allowed_message_port_ids.contains(&port_id) {
-                        throw_data_clone_exception(
-                            scope,
-                            "MessagePort must be listed in the postMessage transfer list.",
-                        );
-                        return None;
-                    }
-                    serializer.write_uint32(HOST_OBJECT_TAG_MESSAGE_PORT);
-                    serializer.write_uint64(port_id);
-                    return Some(true);
-                }
+                let target = moli_webapi_declare::web_api_object_target(scope, object)?;
+                let Some(index) = self
+                    .transferred_message_ports
+                    .iter()
+                    .position(|port| v8::Local::new(scope, port).strict_equals(target.into()))
+                else {
+                    throw_data_clone_exception(
+                        scope,
+                        "MessagePort must be listed in the postMessage transfer list.",
+                    );
+                    return None;
+                };
+                serializer.write_uint32(HOST_OBJECT_TAG_TRANSFERRED_MESSAGE_PORT);
+                serializer.write_uint32(index as u32);
+                return Some(true);
             }
             Some(
                 "DOMPoint" | "DOMPointReadOnly" | "DOMRect" | "DOMRectReadOnly" | "DOMQuad"
@@ -741,6 +745,7 @@ impl v8::ValueSerializerImpl for WireSerializer {
 }
 
 struct WireDeserializer {
+    transferred_message_ports: Vec<MessagePortId>,
     wasm_modules: HashMap<u32, ClonedWasmModule>,
     readable_streams: HashMap<u32, ReadableStreamClonePayload>,
     writable_streams: HashMap<u32, WritableStreamClonePayload>,
@@ -786,6 +791,19 @@ impl v8::ValueDeserializerImpl for WireDeserializer {
             return None;
         }
         match tag {
+            HOST_OBJECT_TAG_TRANSFERRED_MESSAGE_PORT => {
+                let port_id = read_u32(deserializer)
+                    .and_then(|index| self.transferred_message_ports.get(index as usize).copied());
+                port_id
+                    .and_then(|id| ensure_message_port_wrapper_for_id(scope, id))
+                    .or_else(|| {
+                        throw_data_clone_exception(
+                            scope,
+                            "Failed to deserialize transferred MessagePort.",
+                        );
+                        None
+                    })
+            }
             HOST_OBJECT_TAG_MESSAGE_PORT => {
                 let mut port_id = 0;
                 if !deserializer.read_uint64(&mut port_id) {
@@ -1700,10 +1718,6 @@ fn serialize_for_wire_with_policy<'s>(
         }
     }
     let context = scope.get_current_context();
-    let transferred_message_ports: Vec<MessagePortId> = message_port_transfers
-        .iter()
-        .filter_map(|port| message_port_id_from_object(scope, *port))
-        .collect();
     let wasm_modules = Rc::new(RefCell::new(ClonedWasmModuleStore::default()));
     let blobs = Rc::new(RefCell::new(ClonedBlobStore::default()));
     let file_system_handles = Rc::new(RefCell::new(ClonedFileSystemHandleStore::default()));
@@ -1711,7 +1725,10 @@ fn serialize_for_wire_with_policy<'s>(
     let serializer = v8::ValueSerializer::new(
         scope,
         Box::new(WireSerializer {
-            allowed_message_port_ids: transferred_message_ports.iter().copied().collect(),
+            transferred_message_ports: message_port_transfers
+                .iter()
+                .map(|port| v8::Global::new(scope, *port))
+                .collect(),
             allowed_readable_streams: readable_stream_transfers
                 .iter()
                 .map(|stream| v8::Global::new(scope, *stream))
@@ -1761,6 +1778,7 @@ fn serialize_for_wire_with_policy<'s>(
         }
     }
     let mut transferred_array_buffers = Vec::with_capacity(array_buffer_transfers.len());
+    let mut transferred_message_ports = Vec::with_capacity(message_port_transfers.len());
     let mut readable_streams = Vec::with_capacity(readable_stream_transfers.len());
     let mut writable_streams = Vec::with_capacity(writable_stream_transfers.len());
     let mut transform_streams = Vec::with_capacity(transform_stream_transfers.len());
@@ -1788,10 +1806,12 @@ fn serialize_for_wire_with_policy<'s>(
             }
             WireTransfer::MessagePort(port) => {
                 let Some(port_id) = message_port_id_from_object(scope, port) else {
-                    continue;
+                    throw_data_clone_exception(scope, "A transferred MessagePort is detached.");
+                    return None;
                 };
                 detach_message_port_owner_for_transfer(scope, port_id);
                 detach_transferred_message_port(scope, port);
+                transferred_message_ports.push(port_id);
             }
             WireTransfer::ReadableStream(stream) => {
                 let prepared = prepare_readable_stream_transfer(scope, stream)?;
@@ -1939,6 +1959,7 @@ fn deserialize_from_wire_impl<'s>(
     let deserializer = v8::ValueDeserializer::new(
         scope,
         Box::new(WireDeserializer {
+            transferred_message_ports: payload.base.transferred_message_ports.clone(),
             wasm_modules,
             readable_streams,
             writable_streams,

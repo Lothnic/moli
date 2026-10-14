@@ -287,7 +287,7 @@ pub(crate) fn message_port_id_from_object<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     port: v8::Local<'s, v8::Object>,
 ) -> Option<MessagePortId> {
-    let value = get_private_value(scope, port, MESSAGE_PORT_ID_SLOT)?;
+    let value = message_port_slot_value(scope, port, MESSAGE_PORT_ID_SLOT)?;
     if let Ok(big) = v8::Local::<v8::BigInt>::try_from(value) {
         let (n, lossless) = big.u64_value();
         return lossless.then_some(n);
@@ -329,7 +329,7 @@ pub(crate) fn detach_transferred_message_port<'s>(
         return;
     };
     forget_message_port_wrapper(scope, port_id);
-    set_private_value(
+    set_message_port_slot_value(
         scope,
         port,
         MESSAGE_PORT_ID_SLOT,
@@ -349,7 +349,7 @@ pub(in crate::context_bootstrap) fn close_message_port_object<'s>(
             forget_message_port_wrapper(scope, port_id);
         }
     }
-    set_private_value(
+    set_message_port_slot_value(
         scope,
         port,
         MESSAGE_PORT_ID_SLOT,
@@ -604,6 +604,7 @@ fn message_port_slot_value<'s>(
     port: v8::Local<'s, v8::Object>,
     slot: &str,
 ) -> Option<v8::Local<'s, v8::Value>> {
+    let port = moli_webapi_declare::web_api_object_target(scope, port)?;
     get_private_value(scope, port, slot)
 }
 
@@ -613,6 +614,9 @@ fn set_message_port_slot_value<'s>(
     slot: &str,
     value: v8::Local<'s, v8::Value>,
 ) {
+    let Some(port) = moli_webapi_declare::web_api_object_target(scope, port) else {
+        return;
+    };
     set_private_value(scope, port, slot, value);
 }
 

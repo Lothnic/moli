@@ -1549,6 +1549,7 @@ mod imported_scripts;
 mod indexed_db;
 mod lazy_storage;
 mod lifecycle;
+mod message_port_transfer;
 mod modules;
 mod offscreen_canvas_blob;
 mod offscreen_canvas_transfer;
