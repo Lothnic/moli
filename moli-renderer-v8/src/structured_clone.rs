@@ -10,27 +10,29 @@ use crate::{
     context_bootstrap::{
         CryptoKeyAlgorithmClonePayload, CryptoKeyClonePayload, EncodedVideoChunkClonePayload,
         EncodedVideoChunkType, FileSystemFileSnapshotClonePayload, FileSystemHandleClonePayload,
-        GeometryClonePayload, ImageDataClonePayload, ReadableStreamClonePayload,
-        TransformStreamClonePayload, WebTransportErrorClonePayload, WebTransportErrorSource,
-        WritableStreamClonePayload, attach_file_system_file_snapshot_clone_payload,
+        GeometryClonePayload, ImageBitmapClonePayload, ImageDataClonePayload,
+        ReadableStreamClonePayload, TransformStreamClonePayload, WebTransportErrorClonePayload,
+        WebTransportErrorSource, WritableStreamClonePayload,
+        attach_file_system_file_snapshot_clone_payload,
         build_encoded_video_chunk_from_clone_payload, build_file_list_object, build_file_object,
         build_file_system_handle_from_clone_payload, build_geometry_object_from_clone_payload,
-        build_image_data_object_from_clone_payload, build_image_data_object_from_legacy_bytes,
-        build_readable_stream_clone_shell, build_transform_stream_clone_shell,
-        build_web_transport_error_from_clone_payload, build_writable_stream_clone_shell,
-        crypto_key_clone_payload_from_object, crypto_key_object_from_clone_payload,
+        build_image_bitmap_from_clone_payload, build_image_data_object_from_clone_payload,
+        build_image_data_object_from_legacy_bytes, build_readable_stream_clone_shell,
+        build_transform_stream_clone_shell, build_web_transport_error_from_clone_payload,
+        build_writable_stream_clone_shell, crypto_key_clone_payload_from_object,
+        crypto_key_object_from_clone_payload, detach_image_bitmap,
         detach_message_port_owner_for_transfer, detach_transferred_message_port,
         dom_exception_clone_fields, encoded_video_chunk_clone_payload_from_object,
         ensure_message_port_wrapper_for_id, file_list_files_from_object,
         file_system_file_snapshot_clone_payload_from_object,
         file_system_handle_clone_payload_from_object, geometry_clone_payload_from_object,
-        image_data_clone_payload_from_object, initialize_readable_stream_clone_shell,
-        initialize_transform_stream_clone_shell, initialize_writable_stream_clone_shell,
-        message_port_id_from_object, new_dom_exception_value, new_quota_exceeded_error_value,
-        prepare_readable_stream_transfer, prepare_transform_stream_transfer,
-        prepare_writable_stream_transfer, quota_exceeded_error_clone_fields,
-        require_internal_stream_value, selected_file_from_object,
-        web_transport_error_clone_payload_from_object,
+        image_bitmap_clone_payload_from_object, image_data_clone_payload_from_object,
+        initialize_readable_stream_clone_shell, initialize_transform_stream_clone_shell,
+        initialize_writable_stream_clone_shell, message_port_id_from_object,
+        new_dom_exception_value, new_quota_exceeded_error_value, prepare_readable_stream_transfer,
+        prepare_transform_stream_transfer, prepare_writable_stream_transfer,
+        quota_exceeded_error_clone_fields, require_internal_stream_value,
+        selected_file_from_object, web_transport_error_clone_payload_from_object,
     },
     dom::native::SelectedFile,
     types::MessagePortId,
@@ -59,6 +61,8 @@ const HOST_OBJECT_TAG_RTC_ENCODED_AUDIO_FRAME: u32 = 16;
 const HOST_OBJECT_TAG_RTC_ENCODED_VIDEO_FRAME: u32 = 17;
 const HOST_OBJECT_TAG_RTC_CERTIFICATE: u32 = 18;
 pub(crate) const HOST_OBJECT_TAG_IMAGE_DATA_GRAPH: u32 = 19;
+pub(crate) const HOST_OBJECT_TAG_IMAGE_BITMAP: u32 = 20;
+const HOST_OBJECT_TAG_TRANSFERRED_IMAGE_BITMAP: u32 = 21;
 
 const GEOMETRY_KIND_DOM_POINT_READONLY: u32 = 0;
 const GEOMETRY_KIND_DOM_POINT: u32 = 1;
@@ -78,6 +82,7 @@ pub(crate) struct V8StructuredClonePayload {
     blobs: Vec<ClonedBlob>,
     file_system_handles: Vec<ClonedFileSystemHandle>,
     rtc_certificates: Vec<ClonedCertificate>,
+    image_bitmaps: Vec<ImageBitmapClonePayload>,
     pub(crate) metadata: StructuredCloneMetadata,
 }
 
@@ -339,6 +344,7 @@ struct WireSerializer {
     allowed_readable_streams: Vec<v8::Global<v8::Object>>,
     allowed_writable_streams: Vec<v8::Global<v8::Object>>,
     allowed_transform_streams: Vec<v8::Global<v8::Object>>,
+    transferred_image_bitmaps: Vec<v8::Global<v8::Object>>,
     policy: StructuredClonePolicy,
     wasm_modules: Rc<RefCell<ClonedWasmModuleStore>>,
     blobs: Rc<RefCell<ClonedBlobStore>>,
@@ -453,6 +459,20 @@ impl v8::ValueSerializerImpl for WireSerializer {
                 if let Some(payload) = image_data_clone_payload_from_object(scope, object) {
                     return write_image_data_payload(scope, serializer, payload);
                 }
+            }
+            Some("ImageBitmap") => {
+                let target = moli_webapi_declare::web_api_object_target(scope, object)?;
+                if let Some(index) = self
+                    .transferred_image_bitmaps
+                    .iter()
+                    .position(|bitmap| v8::Local::new(scope, bitmap).strict_equals(target.into()))
+                {
+                    // Transfer steps run after the entire message is serialized.
+                    serializer.write_uint32(HOST_OBJECT_TAG_TRANSFERRED_IMAGE_BITMAP);
+                    serializer.write_uint32(index as u32);
+                    return Some(true);
+                }
+                return write_image_bitmap_payload(scope, serializer, target);
             }
             Some("VideoFrame") => {
                 if self.policy == StructuredClonePolicy::Storage {
@@ -730,6 +750,7 @@ struct WireDeserializer {
     blob_objects: RefCell<HashMap<u32, v8::Global<v8::Object>>>,
     file_system_handles: HashMap<u32, FileSystemHandleClonePayload>,
     rtc_certificates: HashMap<u32, crate::context_bootstrap::rtc_certificate::CertificatePayload>,
+    image_bitmaps: Vec<ImageBitmapClonePayload>,
 }
 
 impl WireDeserializer {
@@ -778,6 +799,17 @@ impl v8::ValueDeserializerImpl for WireDeserializer {
             }
             HOST_OBJECT_TAG_IMAGE_DATA => read_image_data_payload(scope, deserializer),
             HOST_OBJECT_TAG_IMAGE_DATA_GRAPH => read_image_data_graph_payload(scope, deserializer),
+            HOST_OBJECT_TAG_IMAGE_BITMAP => read_image_bitmap_payload(scope, deserializer),
+            HOST_OBJECT_TAG_TRANSFERRED_IMAGE_BITMAP => {
+                let payload = read_u32(deserializer)
+                    .and_then(|index| self.image_bitmaps.get(index as usize).cloned());
+                payload
+                    .and_then(|payload| build_image_bitmap_from_clone_payload(scope, payload))
+                    .or_else(|| {
+                        throw_data_clone_exception(scope, "Failed to deserialize ImageBitmap.");
+                        None
+                    })
+            }
             HOST_OBJECT_TAG_VIDEO_FRAME => {
                 let info = read_raw_vec(deserializer)
                     .and_then(|bytes| serde_json::from_slice(&bytes).ok());
@@ -1077,6 +1109,35 @@ pub(crate) fn build_blob_object_from_clone_payload<'s>(
             Some(object)
         }
     }
+}
+
+pub(crate) fn write_image_bitmap_payload<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    serializer: &dyn v8::ValueSerializerHelper,
+    bitmap: v8::Local<'s, v8::Object>,
+) -> Option<bool> {
+    let Some(payload) = image_bitmap_clone_payload_from_object(scope, bitmap) else {
+        throw_data_clone_exception(
+            scope,
+            "A closed or non-origin-clean ImageBitmap cannot be cloned.",
+        );
+        return None;
+    };
+    serializer.write_uint32(HOST_OBJECT_TAG_IMAGE_BITMAP);
+    payload.write(serializer);
+    Some(true)
+}
+
+pub(crate) fn read_image_bitmap_payload<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    deserializer: &dyn v8::ValueDeserializerHelper,
+) -> Option<v8::Local<'s, v8::Object>> {
+    ImageBitmapClonePayload::read(deserializer)
+        .and_then(|payload| build_image_bitmap_from_clone_payload(scope, payload))
+        .or_else(|| {
+            throw_data_clone_exception(scope, "Failed to deserialize ImageBitmap.");
+            None
+        })
 }
 
 pub(crate) fn write_image_data_payload<'s>(
@@ -1546,15 +1607,21 @@ fn copy_array_buffer_bytes(buffer: v8::Local<'_, v8::ArrayBuffer>) -> Vec<u8> {
     unsafe { std::slice::from_raw_parts(data.as_ptr().cast::<u8>(), length) }.to_vec()
 }
 
-/// Borrowed native transfer identities, validated before any sender is detached.
+/// Transfer steps retain the observable order of the author's transfer list.
+#[derive(Clone, Copy)]
+pub(crate) enum WireTransfer<'s> {
+    ArrayBuffer(v8::Local<'s, v8::ArrayBuffer>),
+    MessagePort(v8::Local<'s, v8::Object>),
+    ReadableStream(v8::Local<'s, v8::Object>),
+    WritableStream(v8::Local<'s, v8::Object>),
+    TransformStream(v8::Local<'s, v8::Object>),
+    VideoFrame(v8::Local<'s, v8::Object>),
+    ImageBitmap(v8::Local<'s, v8::Object>),
+}
+
 #[derive(Default)]
 pub(crate) struct WireTransfers<'a, 's> {
-    pub array_buffers: &'a [v8::Local<'s, v8::ArrayBuffer>],
-    pub message_ports: &'a [v8::Local<'s, v8::Object>],
-    pub readable_streams: &'a [v8::Local<'s, v8::Object>],
-    pub writable_streams: &'a [v8::Local<'s, v8::Object>],
-    pub transform_streams: &'a [v8::Local<'s, v8::Object>],
-    pub video_frames: &'a [v8::Local<'s, v8::Object>],
+    pub entries: &'a [WireTransfer<'s>],
 }
 
 pub(crate) fn serialize_for_wire_for_runtime<'s>(
@@ -1608,12 +1675,25 @@ fn serialize_for_wire_with_policy<'s>(
     transfers: &WireTransfers<'_, 's>,
     policy: StructuredClonePolicy,
 ) -> Option<V8StructuredClonePayload> {
-    let array_buffer_transfers = transfers.array_buffers;
-    let message_port_transfers = transfers.message_ports;
-    let readable_stream_transfers = transfers.readable_streams;
-    let writable_stream_transfers = transfers.writable_streams;
-    let transform_stream_transfers = transfers.transform_streams;
-    for frame in transfers.video_frames {
+    let mut array_buffer_transfers = Vec::new();
+    let mut message_port_transfers = Vec::new();
+    let mut readable_stream_transfers = Vec::new();
+    let mut writable_stream_transfers = Vec::new();
+    let mut transform_stream_transfers = Vec::new();
+    let mut video_frame_transfers = Vec::new();
+    let mut image_bitmap_transfers = Vec::new();
+    for transfer in transfers.entries {
+        match *transfer {
+            WireTransfer::ArrayBuffer(buffer) => array_buffer_transfers.push(buffer),
+            WireTransfer::MessagePort(port) => message_port_transfers.push(port),
+            WireTransfer::ReadableStream(stream) => readable_stream_transfers.push(stream),
+            WireTransfer::WritableStream(stream) => writable_stream_transfers.push(stream),
+            WireTransfer::TransformStream(stream) => transform_stream_transfers.push(stream),
+            WireTransfer::VideoFrame(frame) => video_frame_transfers.push(frame),
+            WireTransfer::ImageBitmap(bitmap) => image_bitmap_transfers.push(bitmap),
+        }
+    }
+    for frame in &video_frame_transfers {
         if crate::context_bootstrap::video_frame::is_closed(scope, *frame) {
             throw_data_clone_exception(scope, "A transferred VideoFrame is closed.");
             return None;
@@ -1644,6 +1724,10 @@ fn serialize_for_wire_with_policy<'s>(
                 .iter()
                 .map(|stream| v8::Global::new(scope, *stream))
                 .collect(),
+            transferred_image_bitmaps: image_bitmap_transfers
+                .iter()
+                .map(|bitmap| v8::Global::new(scope, *bitmap))
+                .collect(),
             policy,
             wasm_modules: Rc::clone(&wasm_modules),
             blobs: Rc::clone(&blobs),
@@ -1652,7 +1736,6 @@ fn serialize_for_wire_with_policy<'s>(
         }),
     );
     serializer.write_header();
-    let mut transferred_array_buffers = Vec::with_capacity(array_buffer_transfers.len());
     for (index, buffer) in array_buffer_transfers.iter().enumerate() {
         if buffer.get_backing_store().is_resizable_by_user_javascript() {
             // V8's inline wire representation preserves a resizable backing
@@ -1662,17 +1745,13 @@ fn serialize_for_wire_with_policy<'s>(
         }
         let transfer_id = index as u32 + 1;
         serializer.transfer_array_buffer(transfer_id, *buffer);
-        transferred_array_buffers.push(TransferredArrayBuffer {
-            transfer_id,
-            bytes: copy_array_buffer_bytes(*buffer),
-        });
     }
     let Some(true) = serializer.write_value(context, value) else {
         return None;
     };
     // Serialization may run getters that close even an unreferenced transfer.
     // Validate every media frame before detaching ArrayBuffers or other senders.
-    for frame in transfers.video_frames {
+    for frame in &video_frame_transfers {
         if crate::context_bootstrap::video_frame::is_closed(scope, *frame) {
             throw_data_clone_exception(
                 scope,
@@ -1681,51 +1760,75 @@ fn serialize_for_wire_with_policy<'s>(
             return None;
         }
     }
-    for frame in transfers.video_frames {
-        crate::context_bootstrap::video_frame::close_object(scope, *frame);
-    }
-    for buffer in array_buffer_transfers {
-        if buffer.detach(None) != Some(true) {
-            throw_data_clone_exception(scope, "Failed to transfer ArrayBuffer.");
-            return None;
-        }
-    }
-    for port in message_port_transfers {
-        let Some(port_id) = message_port_id_from_object(scope, *port) else {
-            continue;
-        };
-        detach_message_port_owner_for_transfer(scope, port_id);
-        detach_transferred_message_port(scope, *port);
-    }
+    let mut transferred_array_buffers = Vec::with_capacity(array_buffer_transfers.len());
     let mut readable_streams = Vec::with_capacity(readable_stream_transfers.len());
-    for (clone_id, stream) in readable_stream_transfers.iter().enumerate() {
-        let prepared = prepare_readable_stream_transfer(scope, *stream)?;
-        let clone_id =
-            u32::try_from(clone_id).expect("a JavaScript transfer sequence length fits in u32");
-        readable_streams.push(ClonedReadableStream {
-            clone_id,
-            payload: prepared.commit(scope),
-        });
-    }
     let mut writable_streams = Vec::with_capacity(writable_stream_transfers.len());
-    for (clone_id, stream) in writable_stream_transfers.iter().enumerate() {
-        let prepared = prepare_writable_stream_transfer(scope, *stream)?;
-        let clone_id =
-            u32::try_from(clone_id).expect("a JavaScript transfer sequence length fits in u32");
-        writable_streams.push(ClonedWritableStream {
-            clone_id,
-            payload: prepared.commit(scope),
-        });
-    }
     let mut transform_streams = Vec::with_capacity(transform_stream_transfers.len());
-    for (clone_id, stream) in transform_stream_transfers.iter().enumerate() {
-        let prepared = prepare_transform_stream_transfer(scope, *stream)?;
-        let clone_id =
-            u32::try_from(clone_id).expect("a JavaScript transfer sequence length fits in u32");
-        transform_streams.push(ClonedTransformStream {
-            clone_id,
-            payload: prepared.commit(scope),
-        });
+    let mut image_bitmaps = Vec::with_capacity(image_bitmap_transfers.len());
+    let mut array_buffer_index = 0;
+    for transfer in transfers.entries {
+        match *transfer {
+            WireTransfer::ArrayBuffer(buffer) => {
+                array_buffer_index += 1;
+                if buffer.was_detached() {
+                    throw_data_clone_exception(scope, "A transferred ArrayBuffer is detached.");
+                    return None;
+                }
+                // Getters in the message may have changed the backing bytes.
+                if !buffer.get_backing_store().is_resizable_by_user_javascript() {
+                    transferred_array_buffers.push(TransferredArrayBuffer {
+                        transfer_id: array_buffer_index,
+                        bytes: copy_array_buffer_bytes(buffer),
+                    });
+                }
+                if buffer.detach(None) != Some(true) {
+                    throw_data_clone_exception(scope, "Failed to transfer ArrayBuffer.");
+                    return None;
+                }
+            }
+            WireTransfer::MessagePort(port) => {
+                let Some(port_id) = message_port_id_from_object(scope, port) else {
+                    continue;
+                };
+                detach_message_port_owner_for_transfer(scope, port_id);
+                detach_transferred_message_port(scope, port);
+            }
+            WireTransfer::ReadableStream(stream) => {
+                let prepared = prepare_readable_stream_transfer(scope, stream)?;
+                readable_streams.push(ClonedReadableStream {
+                    clone_id: readable_streams.len() as u32,
+                    payload: prepared.commit(scope),
+                });
+            }
+            WireTransfer::WritableStream(stream) => {
+                let prepared = prepare_writable_stream_transfer(scope, stream)?;
+                writable_streams.push(ClonedWritableStream {
+                    clone_id: writable_streams.len() as u32,
+                    payload: prepared.commit(scope),
+                });
+            }
+            WireTransfer::TransformStream(stream) => {
+                let prepared = prepare_transform_stream_transfer(scope, stream)?;
+                transform_streams.push(ClonedTransformStream {
+                    clone_id: transform_streams.len() as u32,
+                    payload: prepared.commit(scope),
+                });
+            }
+            WireTransfer::VideoFrame(frame) => {
+                crate::context_bootstrap::video_frame::close_object(scope, frame);
+            }
+            WireTransfer::ImageBitmap(bitmap) => {
+                let Some(payload) = image_bitmap_clone_payload_from_object(scope, bitmap) else {
+                    throw_data_clone_exception(
+                        scope,
+                        "A closed or non-origin-clean ImageBitmap cannot be transferred.",
+                    );
+                    return None;
+                };
+                image_bitmaps.push(payload);
+                detach_image_bitmap(scope, bitmap);
+            }
+        }
     }
     let wasm_modules = wasm_modules.borrow().modules.clone();
     let blobs = blobs.borrow().blobs.clone();
@@ -1745,6 +1848,7 @@ fn serialize_for_wire_with_policy<'s>(
         blobs,
         file_system_handles,
         rtc_certificates,
+        image_bitmaps,
         metadata,
     })
 }
@@ -1844,6 +1948,7 @@ fn deserialize_from_wire_impl<'s>(
             blob_objects: RefCell::new(HashMap::new()),
             file_system_handles,
             rtc_certificates,
+            image_bitmaps: payload.image_bitmaps.clone(),
         }),
         &payload.base.wire_bytes,
     );
