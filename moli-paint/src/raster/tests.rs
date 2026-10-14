@@ -188,6 +188,7 @@ fn snapshot_image_resource_rasterizes_without_copying_the_owned_pixels() {
     snapshot.push_fragment(PaintFragment::Image(PaintImage {
         image,
         destination: PaintRect::new(0.0, 0.0, 4.0, 2.0),
+        repeat_bounds: None,
         sampling: PaintImageSampling::Nearest,
         transform: PaintTransform2D::IDENTITY,
     }));
@@ -204,6 +205,31 @@ fn snapshot_image_resource_rasterizes_without_copying_the_owned_pixels() {
         1,
         "one-shot snapshot drop must release its shared image reference"
     );
+}
+
+#[test]
+fn repeated_snapshot_image_preserves_fractional_period_and_finite_bounds() {
+    let mut snapshot = snapshot(24, 8, 1.0);
+    let image = snapshot.add_image(Arc::new(
+        moli_image::RgbaImage::try_new(2, 1, vec![255, 0, 0, 255, 0, 255, 0, 255]).unwrap(),
+    ));
+    snapshot.push_fragment(PaintFragment::Image(PaintImage {
+        image,
+        destination: PaintRect::new(-0.5, 0.0, 3.5, 2.0),
+        repeat_bounds: Some(PaintRect::new(0.0, 0.0, 21.0, 6.0)),
+        sampling: PaintImageSampling::Nearest,
+        transform: PaintTransform2D::IDENTITY,
+    }));
+    let rendered = raster_snapshot(&snapshot).expect("fractional repeated image");
+    for x in [0, 3, 7, 10, 14, 17] {
+        assert_eq!(pixel(&rendered, x, 1), [255, 0, 0, 255], "red at {x}");
+    }
+    for x in [1, 2, 5, 8, 9, 12, 15, 16, 19] {
+        assert_eq!(pixel(&rendered, x, 1), [0, 255, 0, 255], "green at {x}");
+    }
+    assert_eq!(pixel(&rendered, 21, 1), [255; 4]);
+    assert_eq!(pixel(&rendered, 1, 6), [255; 4]);
+    assert_eq!(snapshot.fragments.len(), 1);
 }
 
 #[test]
@@ -276,6 +302,7 @@ fn missing_snapshot_image_resource_is_rejected_before_backend_creation() {
     snapshot.push_fragment(PaintFragment::Image(PaintImage {
         image: moli_layout::PaintImageId::from_index(0),
         destination: PaintRect::new(0.0, 0.0, 1.0, 1.0),
+        repeat_bounds: None,
         sampling: PaintImageSampling::Linear,
         transform: PaintTransform2D::IDENTITY,
     }));

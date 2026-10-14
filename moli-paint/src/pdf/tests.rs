@@ -397,3 +397,63 @@ fn native_path_fill_rules_reach_pdf_vector_operators() {
         }
     }
 }
+
+#[test]
+fn repeated_images_fill_the_clipped_pdf_region() {
+    let mut snapshot = snapshot();
+    let image = snapshot.add_image(Arc::new(
+        moli_image::RgbaImage::try_new(2, 1, vec![255, 0, 0, 255, 0, 255, 0, 255]).unwrap(),
+    ));
+    snapshot.push_fragment(PaintFragment::push_clip(PaintRect::new(
+        12.0, 10.0, 32.0, 16.0,
+    )));
+    snapshot.push_fragment(PaintFragment::Image(moli_layout::PaintImage {
+        image,
+        destination: PaintRect::new(8.0, 8.0, 2.0, 1.0),
+        repeat_bounds: Some(PaintRect::new(8.0, 8.0, 40.0, 20.0)),
+        sampling: moli_layout::PaintImageSampling::Nearest,
+        transform: PaintTransform2D::IDENTITY,
+    }));
+    snapshot.push_fragment(PaintFragment::PopLayer);
+    let doc = document(&snapshot, &options());
+    let repeated_images: Vec<_> = doc
+        .objects
+        .values()
+        .filter_map(|object| object.as_stream().ok())
+        .filter(|stream| {
+            stream.dict.get(b"Subtype").and_then(|v| v.as_name()).ok() == Some(b"Image")
+                && stream.dict.get(b"Width").and_then(|v| v.as_i64()).ok() == Some(64)
+                && stream.dict.get(b"Height").and_then(|v| v.as_i64()).ok() == Some(32)
+        })
+        .map(|stream| stream.decompressed_content().expect("PDF image bytes"))
+        .filter(|bytes| bytes.len() == 64 * 32 * 3)
+        .collect();
+    assert_eq!(repeated_images.len(), 1, "one bounded RGB image in the PDF");
+    for (index, pixel) in repeated_images[0].chunks_exact(3).enumerate() {
+        let expected = if ((index % 64) / 2).is_multiple_of(2) {
+            [255, 0, 0]
+        } else {
+            [0, 255, 0]
+        };
+        assert_eq!(pixel, expected, "PDF pattern at pixel {index}");
+    }
+}
+
+#[test]
+fn pdf_rejects_nonfinite_image_repeat_bounds() {
+    let mut snapshot = snapshot();
+    let image = snapshot.add_image(Arc::new(
+        moli_image::RgbaImage::try_new(1, 1, vec![255; 4]).unwrap(),
+    ));
+    snapshot.push_fragment(PaintFragment::Image(moli_layout::PaintImage {
+        image,
+        destination: PaintRect::new(0.0, 0.0, 1.0, 1.0),
+        repeat_bounds: Some(PaintRect::new(0.0, 0.0, f32::NAN, 20.0)),
+        sampling: moli_layout::PaintImageSampling::Nearest,
+        transform: PaintTransform2D::IDENTITY,
+    }));
+    assert!(matches!(
+        pdf_snapshot(&snapshot, &options()),
+        Err(PdfError::Encoding(_))
+    ));
+}

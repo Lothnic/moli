@@ -583,7 +583,12 @@ pub enum PaintImageSampling {
 #[derive(Clone, Debug, PartialEq)]
 pub struct PaintImage {
     pub image: PaintImageId,
+    /// One image tile, before the property transform.
     pub destination: PaintRect,
+    /// When present, repeat the tile continuously on both axes inside these
+    /// finite bounds, in the same coordinate space as `destination`.
+    /// The tile phase and size stay fractional; only the coverage is snapped.
+    pub repeat_bounds: Option<PaintRect>,
     pub sampling: PaintImageSampling,
     pub transform: PaintTransform2D,
 }
