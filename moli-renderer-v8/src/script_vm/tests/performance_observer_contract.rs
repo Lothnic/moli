@@ -1,6 +1,20 @@
 use super::*;
 
 #[test]
+fn performance_observer_delivery_follows_registration_order_after_reobserve() {
+    let mut vm = new_storage_test_vm("https://performance-observer-registration-order.test/");
+    let source = format!(
+        "({}).then(result => globalThis.__registrationOrder = result, error => globalThis.__registrationOrder = {{ error: String(error) }});",
+        include_str!("../../../tests/fixtures/performance-observer-registration-order.js"),
+    );
+    vm.eval(&source).expect("queue registered observers");
+    assert_eq!(
+        vm.eval("JSON.stringify(__registrationOrder)").unwrap(),
+        r#"["second:initial","first:initial","first:reobserved","second:reobserved"]"#,
+    );
+}
+
+#[test]
 fn performance_observer_delivery_preserves_batches_and_reentrant_registration() {
     let mut vm = new_storage_test_vm("https://performance-observer-delivery.test/");
     let source = format!(

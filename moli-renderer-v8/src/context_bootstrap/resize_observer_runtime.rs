@@ -1,6 +1,8 @@
 mod entry;
 use super::*;
-use crate::observer_runtime::ObserverCallbackId;
+use crate::common_runtime::{
+    CallbackRegistrationId, CallbackRegistrationKind, CallbackResidence, CommonRuntimeState,
+};
 use crate::util::{get_private_value, serialize_v8_iter_array, set_private_value};
 use crate::web_api_interfaces;
 use crate::webidl;
@@ -110,10 +112,17 @@ pub(super) fn resize_observer_constructor_callback<'s>(
     let Some(parsed) = webidl::parse_args::<ResizeObserverConstructorArgs>(scope, &args) else {
         return;
     };
-    let host_ptr = context_host_ptr_from_global_bridge(scope)
-        .expect("ResizeObserver constructor must execute in a Window realm");
-    let registered_callback =
-        crate::observer_runtime::register_callback(scope, host_ptr, args.this(), parsed.callback);
+    let common = CommonRuntimeState::from_scope(scope)
+        .expect("ResizeObserver constructor must have a common runtime");
+    let registered_callback = common
+        .callbacks
+        .register(
+            scope,
+            args.this(),
+            parsed.callback,
+            CallbackRegistrationKind::ResizeObserver,
+        )
+        .expect("ResizeObserver callback registration should succeed");
     let (callback_id, callback, relevant_global, incumbent_global) =
         registered_callback.into_parts();
     ResizeObserverObjectDeclaration::new(
@@ -264,12 +273,15 @@ fn resize_observer_flush_callback<'s>(
     let Some(callback_residence) = resize_observer_callback_residence(scope, observer) else {
         return;
     };
-    let Some(host_ptr) = context_host_ptr_from_global_bridge(scope) else {
+    let Some(common) = CommonRuntimeState::from_scope(scope) else {
         return;
     };
-    let Some(callback) =
-        crate::observer_runtime::prepare_callback(scope, host_ptr, callback_residence)
-    else {
+    let Some(callback) = common.callbacks.prepare(
+        scope,
+        observer,
+        CallbackRegistrationKind::ResizeObserver,
+        callback_residence,
+    ) else {
         let pending_targets = v8::Array::new(scope, 0);
         set_resize_observer_pending_targets(scope, observer, pending_targets);
         return;
@@ -630,15 +642,15 @@ fn set_resize_observer_pending_targets(
 fn resize_observer_callback_id<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     observer: v8::Local<'s, v8::Object>,
-) -> Option<ObserverCallbackId> {
+) -> Option<CallbackRegistrationId> {
     let value = resize_observer_slot_value(scope, observer, RESIZE_OBSERVER_CALLBACK_ID_SLOT)?;
-    ObserverCallbackId::from_number(value.number_value(scope)?)
+    CallbackRegistrationId::from_number(value.number_value(scope)?)
 }
 
 fn resize_observer_callback_residence<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     observer: v8::Local<'s, v8::Object>,
-) -> Option<crate::observer_runtime::ObserverCallbackResidence<'s>> {
+) -> Option<CallbackResidence<'s>> {
     let callback_id = resize_observer_callback_id(scope, observer)?;
     let callback = resize_observer_slot_value(scope, observer, RESIZE_OBSERVER_CALLBACK_VALUE_SLOT)
         .and_then(|value| v8::Local::<v8::Object>::try_from(value).ok())?;
@@ -654,14 +666,12 @@ fn resize_observer_callback_residence<'s>(
         RESIZE_OBSERVER_CALLBACK_INCUMBENT_GLOBAL_SLOT,
     )
     .and_then(|value| v8::Local::<v8::Object>::try_from(value).ok())?;
-    Some(
-        crate::observer_runtime::ObserverCallbackResidence::from_parts(
-            callback_id,
-            callback,
-            relevant_global,
-            incumbent_global,
-        ),
-    )
+    Some(CallbackResidence::from_parts(
+        callback_id,
+        callback,
+        relevant_global,
+        incumbent_global,
+    ))
 }
 
 fn resize_observer_scheduled<'s>(
@@ -696,18 +706,22 @@ fn queue_resize_observer_delivery<'s>(
     let Some(callback_id) = resize_observer_callback_id(scope, observer) else {
         return;
     };
-    let Some(host_ptr) = context_host_ptr_from_global_bridge(scope) else {
+    let Some(common) = CommonRuntimeState::from_scope(scope) else {
         return;
     };
-    if !crate::observer_runtime::callback_is_current(host_ptr, callback_id) {
+    if !common.callbacks.is_current(
+        scope,
+        callback_id,
+        observer,
+        CallbackRegistrationKind::ResizeObserver,
+    ) {
         let pending_targets = v8::Array::new(scope, 0);
         set_resize_observer_pending_targets(scope, observer, pending_targets);
         return;
     }
     set_resize_observer_scheduled(scope, observer, true);
     push_object_to_global_queue(scope, RESIZE_OBSERVER_QUEUE_SLOT, observer);
-    let host = unsafe { &mut *host_ptr };
-    schedule_host_callback(scope, host, resize_observer_flush_callback);
+    schedule_scope_callback(scope, resize_observer_flush_callback, None);
 }
 
 pub(crate) fn queue_resize_observer_checks(scope: &mut v8::PinScope<'_, '_>) {

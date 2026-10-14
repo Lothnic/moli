@@ -5,15 +5,9 @@ mod dom_access;
 mod intersection;
 mod schedule;
 
-pub(crate) use callback::ObserverCallbackId;
-#[cfg(test)]
-pub(crate) use dom_access::callback_binding_count_for_test;
 pub(crate) use dom_access::{
-    ObserverCallbackResidence, ObserverStoreAccessToken, activate_performance_observer_callback,
-    active_performance_observer_callbacks, callback_is_current,
-    coalesce_child_list_replacement_records, deactivate_performance_observer_callback,
-    flush_slotchange_microtask, prepare_callback, queue_intersection_checks,
-    queue_mutation_records, register_callback, retire_context_token,
+    ObserverStoreAccessToken, coalesce_child_list_replacement_records, flush_slotchange_microtask,
+    queue_intersection_checks, queue_mutation_records, retire_context_token,
     retire_execution_context_owner,
 };
 
@@ -165,7 +159,6 @@ struct IntersectionObserverEntryPrototypeAccessorsDeclaration {
 
 #[derive(Default)]
 pub(super) struct ObserverStore {
-    callback_registry: callback::ObserverCallbackRegistry,
     next_mutation_observer_id: u32,
     mutation_observers: HashMap<u32, MutationObserverState>,
     mutation_delivery_scheduled: bool,
@@ -812,20 +805,14 @@ impl ObserverStore {
         &mut self,
         owner: crate::native_bridge::WindowExecutionContextOwner,
     ) -> usize {
-        self.callback_registry
-            .retire_execution_context_owner(owner)
-            .saturating_add(self.retain_callbacks(|callback| !callback.is_owned_by(owner)))
+        self.retain_callbacks(|callback| !callback.is_owned_by(owner))
     }
 
     fn retire_context_token(
         &mut self,
         context_token: crate::native_bridge::RuntimeObservableContextToken,
     ) -> usize {
-        self.callback_registry
-            .retire_context_token(context_token)
-            .saturating_add(
-                self.retain_callbacks(|callback| !callback.belongs_to_context_token(context_token)),
-            )
+        self.retain_callbacks(|callback| !callback.belongs_to_context_token(context_token))
     }
 
     fn retain_callbacks(

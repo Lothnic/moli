@@ -1,6 +1,27 @@
 use super::*;
 
 #[tokio::test]
+async fn worker_performance_observer_delivery_follows_registration_order_after_reobserve() {
+    ensure_v8();
+    let source = format!(
+        "({}).then(result => {{ postMessage(result); close(); }}, error => {{ postMessage({{ error: String(error) }}); close(); }});",
+        include_str!("../../../../tests/fixtures/performance-observer-registration-order.js"),
+    );
+    let mut handle = spawn_worker(
+        source,
+        "test://performance-observer-registration-order".into(),
+    );
+    let message = timeout(TIMEOUT, handle.recv())
+        .await
+        .expect("registered observer delivery timed out")
+        .expect("worker closed before reporting registration order");
+    assert_eq!(
+        expect_post_json(message),
+        r#"["second:initial","first:initial","first:reobserved","second:reobserved"]"#,
+    );
+}
+
+#[tokio::test]
 async fn worker_webidl_callback_execution_preserves_api_exception_policies() {
     ensure_v8();
     let source = format!(

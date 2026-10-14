@@ -116,9 +116,6 @@ struct PerformanceObserverConstructorDeclaration {
 #[derive(Default, WebApiObject)]
 #[webapi(fragment)]
 struct PerformanceObserverRuntimeStateDeclaration {
-    #[webapi(slot = PERFORMANCE_OBSERVER_REGISTRY_SLOT, init = "array")]
-    registry: (),
-
     #[webapi(slot = PERFORMANCE_OBSERVER_QUEUE_SLOT, init = "array")]
     queue: (),
 }
