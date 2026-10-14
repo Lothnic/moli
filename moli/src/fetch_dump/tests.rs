@@ -11,7 +11,8 @@ use serde_json::{Value, json};
 use tokio::{net::TcpListener, task::JoinHandle};
 
 use super::{
-    render_page_dump_async, render_page_dump_with_options_async, render_page_output_async,
+    RawDocumentOutputPolicy, render_page_dump_async, render_page_dump_with_options_async,
+    render_page_output_async, render_raw_document_markdown,
 };
 use crate::{
     cli::{DumpFormat, StripOptions},
@@ -52,6 +53,91 @@ fn png_dimensions(bytes: &[u8]) -> (u32, u32) {
         u32::from_be_bytes(bytes[16..20].try_into().unwrap()),
         u32::from_be_bytes(bytes[20..24].try_into().unwrap()),
     )
+}
+
+fn text_pdf(text: &str) -> Result<Vec<u8>> {
+    use lopdf::{Document, Object, Stream, content::Content, content::Operation, dictionary};
+
+    let mut document = Document::with_version("1.5");
+    let pages_id = document.new_object_id();
+    let font_id = document.add_object(dictionary! {
+        "Type" => "Font",
+        "Subtype" => "Type1",
+        "BaseFont" => "Courier",
+    });
+    let resources_id = document.add_object(dictionary! {
+        "Font" => dictionary! { "F1" => font_id },
+    });
+    let content = Content {
+        operations: vec![
+            Operation::new("BT", vec![]),
+            Operation::new("Tf", vec!["F1".into(), 12.into()]),
+            Operation::new("Td", vec![50.into(), 750.into()]),
+            Operation::new("Tj", vec![Object::string_literal(text)]),
+            Operation::new("ET", vec![]),
+        ],
+    };
+    let content_id = document.add_object(Stream::new(dictionary! {}, content.encode()?));
+    let page_id = document.add_object(dictionary! {
+        "Type" => "Page",
+        "Parent" => pages_id,
+        "Contents" => content_id,
+    });
+    document.objects.insert(
+        pages_id,
+        Object::Dictionary(dictionary! {
+            "Type" => "Pages",
+            "Kids" => vec![page_id.into()],
+            "Count" => 1,
+            "Resources" => resources_id,
+            "MediaBox" => vec![0.into(), 0.into(), 595.into(), 842.into()],
+        }),
+    );
+    let catalog_id = document.add_object(dictionary! {
+        "Type" => "Catalog",
+        "Pages" => pages_id,
+    });
+    document.trailer.set("Root", catalog_id);
+    let mut bytes = Vec::new();
+    document.save_to(&mut bytes)?;
+    Ok(bytes)
+}
+
+#[test]
+fn raw_pdf_markdown_extracts_document_text() -> Result<()> {
+    let markdown = render_raw_document_markdown(&text_pdf("Document body 123")?)?;
+    assert_eq!(String::from_utf8(markdown)?, "Document body 123");
+    Ok(())
+}
+
+#[test]
+fn raw_markdown_rejects_unsupported_or_invalid_documents() {
+    let unsupported = render_raw_document_markdown(b"PK\x03\x04docx").unwrap_err();
+    assert!(
+        unsupported
+            .to_string()
+            .contains("native Markdown currently supports raw PDF documents")
+    );
+    let invalid = render_raw_document_markdown(b"%PDF-1.7\nnot a PDF").unwrap_err();
+    assert!(
+        invalid
+            .to_string()
+            .contains("failed to parse raw PDF document")
+    );
+}
+
+#[test]
+fn markdown_output_selects_pdf_only_raw_materialization() {
+    let command = FetchCommandConfig {
+        dump_mode: Some(DumpFormat::Markdown),
+        ..FetchCommandConfig::default()
+    };
+    let output = RawDocumentOutputPolicy::from_command(&command);
+    assert_eq!(output, RawDocumentOutputPolicy::Markdown);
+    assert_eq!(
+        output.fetch_policy(),
+        moli_core::runtime::RawDocumentFetchPolicy::MaterializePdf
+    );
 }
 
 #[tokio::test]

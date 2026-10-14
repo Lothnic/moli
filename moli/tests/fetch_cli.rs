@@ -1264,7 +1264,7 @@ fn cli_dump_markdown_rejects_docx_but_keeps_text_documents_renderable() -> Resul
     assert_single_fetch_failure_reason(
         &clean_output(&docx.stderr),
         &docx_url,
-        "raw download output only supports automatic output or --dump json",
+        "raw download cannot be converted to Markdown; native Markdown currently supports raw PDF documents",
     );
 
     for (path, expected) in [

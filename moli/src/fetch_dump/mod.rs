@@ -7,7 +7,7 @@ mod semantic;
 #[cfg(test)]
 mod tests;
 
-use anyhow::{Result, anyhow, bail};
+use anyhow::{Context, Result, anyhow, bail};
 use moli_core::{
     page::{Page, RendererScreenshotRegion, SubresourceResponseWaitCriteria},
     runtime::{RawDocument, RawDocumentFetchPolicy, RawDocumentPageRequired},
@@ -25,6 +25,7 @@ pub use node_details::summarize_node_details_async;
 pub(crate) enum RawDocumentOutputPolicy {
     Passthrough,
     Json,
+    Markdown,
     RequiresPage(DumpFormat),
 }
 
@@ -33,6 +34,7 @@ impl RawDocumentOutputPolicy {
         match command.dump_mode {
             None => Self::Passthrough,
             Some(DumpFormat::Json) => Self::Json,
+            Some(DumpFormat::Markdown) => Self::Markdown,
             Some(format) => Self::RequiresPage(format),
         }
     }
@@ -40,6 +42,7 @@ impl RawDocumentOutputPolicy {
     pub(crate) const fn fetch_policy(self) -> RawDocumentFetchPolicy {
         match self {
             Self::Passthrough | Self::Json => RawDocumentFetchPolicy::Materialize,
+            Self::Markdown => RawDocumentFetchPolicy::MaterializePdf,
             Self::RequiresPage(_) => RawDocumentFetchPolicy::RequirePage,
         }
     }
@@ -121,10 +124,32 @@ pub(crate) fn render_raw_document_output(
             )?;
             Ok(payload.into_bytes())
         }
+        RawDocumentOutputPolicy::Markdown => render_raw_document_markdown(raw.body_bytes()),
         RawDocumentOutputPolicy::RequiresPage(format) => {
             Err(raw_document_requires_page_error(format))
         }
     }
+}
+
+fn render_raw_document_markdown(body: &[u8]) -> Result<Vec<u8>> {
+    if !body.starts_with(b"%PDF-") {
+        bail!(
+            "raw download cannot be converted to Markdown; native Markdown currently supports raw PDF documents"
+        );
+    }
+    let document = lopdf::Document::load_mem(body).context("failed to parse raw PDF document")?;
+    let pages = document.get_pages().keys().copied().collect::<Vec<_>>();
+    let text = document
+        .extract_text(&pages)
+        .context("failed to extract text from raw PDF document")?
+        .replace("\r\n", "\n")
+        .replace('\r', "\n")
+        .replace('\u{000c}', "\n\n");
+    let text = text.trim();
+    if text.is_empty() {
+        bail!("raw PDF document contains no extractable text");
+    }
+    Ok(text.as_bytes().to_vec())
 }
 
 fn raw_document_requires_page_error(format: DumpFormat) -> anyhow::Error {
@@ -133,8 +158,8 @@ fn raw_document_requires_page_error(format: DumpFormat) -> anyhow::Error {
             anyhow!("--dump html requires a renderable HTML document, not a raw download")
         }
         DumpFormat::Json => unreachable!("JSON output accepts raw documents"),
-        DumpFormat::Markdown
-        | DumpFormat::Screenshot
+        DumpFormat::Markdown => unreachable!("Markdown output accepts supported raw documents"),
+        DumpFormat::Screenshot
         | DumpFormat::ScreenshotFull
         | DumpFormat::Pdf
         | DumpFormat::SemanticTree

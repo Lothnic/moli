@@ -18,6 +18,7 @@ axum = { version = "0.8.6", features = ["ws"] }
 base64 = "0.22.1"
 cidr = "0.3.2"
 clap = { version = "4.5.39", features = ["derive", "env"] }
+lopdf = { version = "0.45.0", default-features = false }
 moli-browser-profile = { path = "../moli-browser-profile" }
 moli-cookie-cache = { path = "../moli-cookie-cache" }
 moli-cookie-import = { path = "../moli-cookie-import" }
@@ -43,7 +44,6 @@ tikv-jemalloc-sys = { version = "0.7.1", optional = true, default-features = fal
 tikv-jemallocator = { version = "0.7.0", optional = true, default-features = false, features = ["override_allocator_on_supported_platforms"] }
 
 [dev-dependencies]
-lopdf = { version = "0.45.0", default-features = false }
 libc = "0.2"
 moli-test-support = { path = "../moli-test-support" }
 strip-ansi-escapes = "0.2.1"

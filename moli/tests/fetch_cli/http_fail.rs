@@ -326,7 +326,11 @@ async fn fail_with_body_reports_http_status_when_raw_output_is_unsupported() -> 
             for (args, reason) in [
                 (
                     vec!["--dump", "markdown"],
-                    "raw download output only supports",
+                    if prefix == "pdf" {
+                        "failed to parse raw PDF document"
+                    } else {
+                        "raw download cannot be converted to Markdown"
+                    },
                 ),
                 (vec!["--dump", "pdf"], "raw download output only supports"),
                 (vec!["--eval", "1"], "does not support --eval"),
@@ -478,10 +482,12 @@ async fn fail_checks_raw_http_status_before_output_format_and_page_options() -> 
             assert_eq!(output.status.code(), Some(1), "{output:?}");
             assert!(output.stdout.is_empty(), "{output:?}");
             let stderr = String::from_utf8_lossy(&output.stderr);
-            assert!(
-                stderr.contains("raw download output only supports"),
-                "{stderr}"
-            );
+            let reason = if prefix == "pdf" {
+                "failed to parse raw PDF document"
+            } else {
+                "raw download cannot be converted to Markdown"
+            };
+            assert!(stderr.contains(reason), "{stderr}");
             assert!(!stderr.contains("HTTP status"), "{stderr}");
         }
     }
@@ -490,14 +496,14 @@ async fn fail_checks_raw_http_status_before_output_format_and_page_options() -> 
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn unsupported_raw_output_cancels_without_waiting_for_the_body() -> Result<()> {
-    for (status, content_type) in [
-        (200, "application/octet-stream"),
-        (403, "application/octet-stream"),
-        (503, "application/pdf"),
+    for (status, content_type, dumps) in [
+        (200, "application/octet-stream", &["html", "markdown"][..]),
+        (403, "application/octet-stream", &["html", "markdown"][..]),
+        (503, "application/pdf", &["html"][..]),
     ] {
         for wait_until in ["done", "networkidle"] {
             for flag in [None, Some("--fail"), Some("--fail-with-body")] {
-                for dump in ["html", "markdown"] {
+                for dump in dumps {
                     let mut server =
                         HttpFailureFixture::spawn_stalled_raw(status, content_type).await?;
                     let mut command = Command::new(env!("CARGO_BIN_EXE_moli"));
@@ -531,10 +537,10 @@ async fn unsupported_raw_output_cancels_without_waiting_for_the_body() -> Result
                         assert!(!stderr.contains("raw download output"), "{stderr}");
                     } else {
                         assert_eq!(output.status.code(), Some(1), "{output:?}");
-                        let reason = if dump == "html" {
+                        let reason = if *dump == "html" {
                             "--dump html requires a renderable HTML document"
                         } else {
-                            "raw download output only supports"
+                            "raw download cannot be converted to Markdown"
                         };
                         assert!(stderr.contains(reason), "{stderr}");
                         assert_eq!(
