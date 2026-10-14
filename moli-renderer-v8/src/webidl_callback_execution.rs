@@ -50,8 +50,8 @@ impl PreparedWebIdlCallbackExecution {
         owner_identity: Option<WindowExecutionContextIdentity>,
         callback_identity: WindowExecutionContextIdentity,
     ) -> Option<Self> {
-        let binding = CommonRuntimeBinding::from_scope(scope)?;
-        if binding.window_host_ptr()? != host_ptr {
+        let (binding, context) = CommonRuntimeBinding::from_scope(scope)?;
+        if !matches!(context, RuntimeExecutionContext::Window(installed) if installed == host_ptr) {
             return None;
         }
         Some(Self {
@@ -69,11 +69,8 @@ impl PreparedWebIdlCallbackExecution {
         callback: PreparedWebIdlCallbackFunction,
         context: v8::Local<'s, v8::Context>,
     ) -> Option<Self> {
-        let binding = CommonRuntimeBinding::from_scope(scope)?;
-        if !matches!(
-            binding.execution_context(scope)?,
-            RuntimeExecutionContext::Worker
-        ) {
+        let (binding, owner) = CommonRuntimeBinding::from_scope(scope)?;
+        if !matches!(owner, RuntimeExecutionContext::Worker) {
             return None;
         }
         Some(Self {
@@ -92,9 +89,9 @@ impl PreparedWebIdlCallbackExecution {
         scope: &mut v8::PinScope<'s, '_>,
         carrier: v8::Local<'s, v8::Object>,
     ) -> Option<Self> {
-        let binding = CommonRuntimeBinding::from_scope(scope)?;
+        let (binding, owner) = CommonRuntimeBinding::from_scope(scope)?;
         let callback = V8TracedWebIdlCallbackFunction::from_object(carrier).prepare(scope);
-        let environment = match binding.execution_context(scope)? {
+        let environment = match owner {
             RuntimeExecutionContext::Window(host_ptr) => {
                 let host = unsafe { &*host_ptr };
                 let context = callback.relevant_context(scope);
@@ -221,17 +218,14 @@ impl PreparedWebIdlCallbackExecution {
 
 impl CallbackExecutionEnvironment {
     fn can_invoke(&self, scope: &mut v8::PinScope<'_, '_>, binding: &CommonRuntimeBinding) -> bool {
-        if binding.execution_context(scope).is_none() {
-            return false;
-        }
-        match self {
-            Self::Window {
-                owner_identity,
-                callback_identity,
-            } => {
-                let Some(host_ptr) = binding.window_host_ptr() else {
-                    return false;
-                };
+        match (self, binding.callback_execution_context(scope)) {
+            (
+                Self::Window {
+                    owner_identity,
+                    callback_identity,
+                },
+                Some(RuntimeExecutionContext::Window(host_ptr)),
+            ) => {
                 let host = unsafe { &*host_ptr };
                 let current = owner_identity.is_none_or(|identity| {
                     host.window_execution_context_identity_is_current(identity)
@@ -242,14 +236,14 @@ impl CallbackExecutionEnvironment {
                 }
                 current
             }
-            Self::Worker { context } => {
+            (Self::Worker { context }, Some(RuntimeExecutionContext::Worker)) => {
                 scope.get_current_context() == v8::Local::new(scope, context)
                     // `close()` stops future task delivery, but synchronous
                     // APIs and already queued V8 microtasks may still run.
                     // API/task owners enforce their own closing policy.
-                    && binding.worker_can_invoke()
                     && !scope.is_execution_terminating()
             }
+            _ => false,
         }
     }
 

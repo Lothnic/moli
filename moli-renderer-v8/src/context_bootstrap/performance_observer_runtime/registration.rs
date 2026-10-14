@@ -36,8 +36,8 @@ pub(super) fn register_performance_observer_callback<'s>(
     v8::Local<'s, v8::Object>,
     v8::Local<'s, v8::Object>,
 )> {
-    let binding = CommonRuntimeBinding::from_scope(scope)?;
-    if let RuntimeExecutionContext::Window(host_ptr) = binding.execution_context(scope)? {
+    let (_, owner) = CommonRuntimeBinding::from_scope(scope)?;
+    if let RuntimeExecutionContext::Window(host_ptr) = owner {
         let (id, callback, relevant, incumbent) =
             crate::observer_runtime::register_callback(scope, host_ptr, observer, callback)
                 .into_parts();
@@ -58,8 +58,8 @@ impl<'s> PerformanceObserverRegistration<'s> {
     ) -> Option<Self> {
         let id = get_private_value(scope, observer, PERFORMANCE_OBSERVER_CALLBACK_ID_SLOT)?
             .number_value(scope)?;
-        let binding = CommonRuntimeBinding::from_scope(scope)?;
-        let environment = match binding.execution_context(scope)? {
+        let (binding, owner) = CommonRuntimeBinding::from_scope(scope)?;
+        let environment = match owner {
             RuntimeExecutionContext::Window(host_ptr) => RegistrationEnvironment::Window {
                 host_ptr,
                 callback_id: ObserverCallbackId::from_number(id)?,
@@ -204,10 +204,10 @@ pub(super) fn performance_observer_callback_is_current<'s>(
 pub(super) fn active_performance_observers<'s>(
     scope: &mut v8::PinScope<'s, '_>,
 ) -> Vec<v8::Local<'s, v8::Object>> {
-    let Some(binding) = CommonRuntimeBinding::from_scope(scope) else {
+    let Some((_, owner)) = CommonRuntimeBinding::from_scope(scope) else {
         return Vec::new();
     };
-    if let Some(RuntimeExecutionContext::Window(host_ptr)) = binding.execution_context(scope) {
+    if let RuntimeExecutionContext::Window(host_ptr) = owner {
         return crate::observer_runtime::active_performance_observer_callbacks(scope, host_ptr);
     }
     let Some(registry) = global_queue_array(scope, PERFORMANCE_OBSERVER_REGISTRY_SLOT) else {
