@@ -402,8 +402,15 @@ fn append_resource_performance_entry<'s>(
 ) {
     let start_time = entry.start_unix_millis.unwrap_or_else(unix_epoch_millis)
         - performance_slot_number(scope, performance, PERFORMANCE_TIME_ORIGIN_SLOT).unwrap_or(0.0);
-    let resource =
-        entries::create_performance_entry(scope, "resource", &entry.name, start_time, 0.0, None);
+    let resource = entries::create_performance_entry(
+        scope,
+        performance,
+        "resource",
+        &entry.name,
+        start_time,
+        0.0,
+        None,
+    );
     initialize_resource_timing_slots(
         scope,
         resource,

@@ -41,7 +41,12 @@ impl CommonRuntimeState {
     /// host. Retained backing state and callback execution permission remain
     /// separate: asynchronous callbacks must still revalidate their identities.
     pub(crate) fn from_scope(scope: &mut v8::PinScope<'_, '_>) -> Option<Rc<Self>> {
-        let context = scope.get_current_context();
+        Self::from_context(scope.get_current_context())
+    }
+
+    /// Native components for an explicit target Realm. Borrowed methods must
+    /// resolve the receiver's owner rather than the method's current Context.
+    pub(crate) fn from_context(context: v8::Local<'_, v8::Context>) -> Option<Rc<Self>> {
         let binding = context.get_slot::<CommonRuntimeBinding>()?;
         let (runtime, _) = binding.resolve_owner(context)?;
         Some(runtime)
@@ -278,9 +283,14 @@ mod tests {
             let scope = &mut v8::ContextScope::new(scope, other);
             let (binding, _) = CommonRuntimeBinding::from_scope(scope).unwrap();
             assert!(!Rc::ptr_eq(&binding.runtime().unwrap(), &common));
+            assert!(Rc::ptr_eq(
+                &CommonRuntimeState::from_context(first).unwrap(),
+                &common
+            ));
             other_lifecycle.set(ContextHostLifecycle::Destroyed);
             assert!(CommonRuntimeBinding::from_scope(scope).is_none());
             assert!(CommonRuntimeState::from_scope(scope).is_none());
+            assert!(CommonRuntimeState::from_context(other).is_none());
             // A previously resolved owner is not a cached execution permit.
             assert!(binding.callback_execution_context(scope).is_none());
         }

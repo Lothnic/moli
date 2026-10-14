@@ -65,13 +65,9 @@ fn performance_observer_flush_callback<'s>(
 
 pub(super) fn enqueue_buffered_performance_entries<'s>(
     scope: &mut v8::PinScope<'s, '_>,
+    performance: v8::Local<'s, v8::Object>,
     observer: v8::Local<'s, v8::Object>,
 ) {
-    let Some(performance) =
-        super::super::performance_runtime::ensure_current_performance_for_api(scope)
-    else {
-        return;
-    };
     let Some(entries) = performance_slot_array(scope, performance, PERFORMANCE_ENTRIES_SLOT) else {
         return;
     };
@@ -94,10 +90,15 @@ pub(super) fn enqueue_buffered_performance_entries<'s>(
 
 pub(in crate::context_bootstrap) fn queue_matching_performance_observers<'s>(
     scope: &mut v8::PinScope<'s, '_>,
+    performance: v8::Local<'s, v8::Object>,
     entry: v8::Local<'s, v8::Object>,
     entry_type: &str,
 ) {
-    for observer in active_performance_observers(scope) {
+    let Some(timeline_context) = performance.get_creation_context(scope) else {
+        return;
+    };
+    let scope = &mut v8::ContextScope::new(scope, timeline_context);
+    for observer in active_performance_observers(scope, timeline_context) {
         if !performance_observer_callback_is_current(scope, observer) {
             let pending = v8::Array::new(scope, 0);
             set_performance_observer_pending(scope, observer, pending);
@@ -121,6 +122,13 @@ pub(super) fn queue_performance_observer_delivery<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     observer: v8::Local<'s, v8::Object>,
 ) {
+    let Some(context) = observer.get_creation_context(scope) else {
+        return;
+    };
+    // The queue and native flush trampoline belong to the observer's global,
+    // even when observe() was borrowed from another Realm. Callback Realm
+    // entry remains the shared Web IDL execution layer's responsibility.
+    let scope = &mut v8::ContextScope::new(scope, context);
     if performance_observer_scheduled(scope, observer) {
         return;
     }

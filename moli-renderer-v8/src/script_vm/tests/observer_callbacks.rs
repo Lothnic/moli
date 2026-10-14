@@ -21,6 +21,74 @@ fn observer_callback_test_vm(url: &str) -> StandaloneScriptVmHarness {
 }
 
 #[test]
+fn borrowed_performance_methods_use_receiver_timeline_and_entry_realms() {
+    let mut vm = observer_callback_test_vm("https://performance-borrowed-method-realms.test/");
+    let source = format!(
+        "({})(window, __observerCallbackFrame.contentWindow).then(result => globalThis.__borrowedTimeline = result, error => globalThis.__borrowedTimeline = {{ error: String(error) }});",
+        include_str!("performance_timeline_borrowed_methods.js"),
+    );
+    vm.eval(&source)
+        .expect("queue borrowed mark and measure deliveries");
+    assert_eq!(
+        vm.eval("JSON.stringify(__borrowedTimeline)").unwrap(),
+        r#"{"received":{"parent":["parent-mark","parent-measure"],"child":["child-mark","child-measure"]},"failures":[]}"#,
+    );
+}
+
+#[test]
+fn borrowed_performance_observe_reads_and_delivers_the_observers_own_buffer() {
+    let mut vm = observer_callback_test_vm("https://performance-borrowed-buffered-observe.test/");
+    vm.eval(
+        r#"
+(() => {
+  const child = __observerCallbackFrame.contentWindow;
+  globalThis.__borrowedBuffered = { parent: [], child: [] };
+  performance.mark('parent-buffered');
+  child.performance.mark('child-buffered');
+  const parentObserver = new PerformanceObserver(list => {
+    __borrowedBuffered.parent.push(...list.getEntries().map(entry => entry.name));
+  });
+  const childObserver = new child.PerformanceObserver(list => {
+    __borrowedBuffered.child.push(...list.getEntries().map(entry => entry.name));
+  });
+  child.PerformanceObserver.prototype.observe.call(parentObserver, { type: 'mark', buffered: true });
+  PerformanceObserver.prototype.observe.call(childObserver, { type: 'mark', buffered: true });
+})()
+"#,
+    )
+    .expect("subscribe to buffers using the other Realm's observe method");
+    assert_eq!(
+        vm.eval("JSON.stringify(__borrowedBuffered)").unwrap(),
+        r#"{"parent":["parent-buffered"],"child":["child-buffered"]}"#,
+    );
+}
+
+#[test]
+fn borrowed_performance_delivery_survives_retirement_of_the_method_realm() {
+    let mut vm = observer_callback_test_vm("https://performance-method-realm-retirement.test/");
+    vm.eval(
+        r#"
+(() => {
+  const child = __observerCallbackFrame.contentWindow;
+  globalThis.__survivingTimeline = [];
+  new PerformanceObserver(list => {
+    __survivingTimeline.push(...list.getEntries().map(entry => entry.name));
+  }).observe({ type: 'mark' });
+  const mark = child.Performance.prototype.mark;
+  mark.call(performance, 'before-method-realm-retirement');
+  __observerCallbackFrame.remove();
+  mark.call(performance, 'after-method-realm-retirement');
+})()
+"#,
+    )
+    .expect("retire the method Realm after queuing to the surviving timeline");
+    assert_eq!(
+        vm.eval("JSON.stringify(__survivingTimeline)").unwrap(),
+        r#"["before-method-realm-retirement","after-method-realm-retirement"]"#,
+    );
+}
+
+#[test]
 fn common_callback_registry_keeps_active_observers_until_owner_teardown() {
     let mut vm = new_storage_test_vm("https://performance-observer-active-root.test/");
     let common = std::rc::Rc::clone(&vm._context_host.borrow().common);

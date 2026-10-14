@@ -49,10 +49,11 @@ impl<'s> PerformanceObserverRegistration<'s> {
     ) -> Option<Self> {
         let id = get_private_value(scope, observer, PERFORMANCE_OBSERVER_CALLBACK_ID_SLOT)?
             .number_value(scope)?;
+        let context = observer.get_creation_context(scope)?;
         Some(Self {
             observer,
             id: CallbackRegistrationId::from_number(id)?,
-            common: CommonRuntimeState::from_scope(scope)?,
+            common: CommonRuntimeState::from_context(context)?,
         })
     }
 
@@ -108,8 +109,13 @@ pub(super) fn performance_observer_callback_is_current<'s>(
 
 pub(super) fn active_performance_observers<'s>(
     scope: &mut v8::PinScope<'s, '_>,
+    timeline_context: v8::Local<'s, v8::Context>,
 ) -> Vec<v8::Local<'s, v8::Object>> {
-    CommonRuntimeState::from_scope(scope)
-        .map(|common| common.callbacks.active_performance_observers(scope))
+    CommonRuntimeState::from_context(timeline_context)
+        .map(|common| {
+            common
+                .callbacks
+                .active_performance_observers(scope, timeline_context)
+        })
         .unwrap_or_default()
 }

@@ -785,12 +785,17 @@ pub(super) fn find_latest_performance_mark_start<'s>(
 
 pub(super) fn create_performance_entry<'s>(
     scope: &mut v8::PinScope<'s, '_>,
+    performance: v8::Local<'s, v8::Object>,
     entry_type: &str,
     name: &str,
     start_time: f64,
     duration: f64,
     detail: Option<v8::Local<'s, v8::Value>>,
 ) -> v8::Local<'s, v8::Object> {
+    let context = performance
+        .get_creation_context(scope)
+        .expect("native Performance must retain its relevant Realm");
+    let scope = &mut v8::ContextScope::new(scope, context);
     let detail = detail.unwrap_or_else(|| v8::null(scope).into());
     let entry = PerformanceEntryObjectDeclaration {
         id: 0.0,
@@ -848,6 +853,10 @@ pub(super) fn push_performance_entry<'s>(
     performance: v8::Local<'s, v8::Object>,
     entry: v8::Local<'s, v8::Object>,
 ) {
+    let Some(context) = performance.get_creation_context(scope) else {
+        return;
+    };
+    let scope = &mut v8::ContextScope::new(scope, context);
     if super::install::is_window_performance(scope, performance) {
         super::install::ensure_navigation_performance_entry(scope, performance);
     }
@@ -855,12 +864,12 @@ pub(super) fn push_performance_entry<'s>(
     let entry_type = performance_entry_slot_string(scope, entry, PERFORMANCE_ENTRY_TYPE_SLOT)
         .unwrap_or_default();
     if entry_type == "resource" {
-        queue_matching_performance_observers(scope, entry, &entry_type);
+        queue_matching_performance_observers(scope, performance, entry, &entry_type);
         super::resource_buffer::add_resource_timing_entry(scope, performance, entry);
         return;
     }
     append_performance_entry(scope, performance, entry);
-    queue_matching_performance_observers(scope, entry, &entry_type);
+    queue_matching_performance_observers(scope, performance, entry, &entry_type);
 }
 
 pub(super) fn assign_navigation_performance_entry_identity<'s>(

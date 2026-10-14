@@ -199,6 +199,12 @@ pub(in crate::context_bootstrap) fn performance_observer_observe_callback<'s>(
         rv.set_undefined();
         return;
     }
+    let Some(context) = args.this().get_creation_context(scope) else {
+        return;
+    };
+    // Web IDL conversion and option validation above use the method Realm.
+    // Registration, buffered records and delivery use the observer's global.
+    let scope = &mut v8::ContextScope::new(scope, context);
     let performance = super::super::performance_runtime::ensure_current_performance_for_api(scope);
     let observes_navigation = (0..observed_entry_types.length()).any(|index| {
         observed_entry_types
@@ -212,15 +218,13 @@ pub(in crate::context_bootstrap) fn performance_observer_observe_callback<'s>(
             performance,
         );
     }
-    set_performance_observer_type(
-        scope,
-        args.this(),
-        init.observed_type
-            .as_deref()
-            .and_then(|value| v8_string(scope, value))
-            .map(|value| value.into())
-            .unwrap_or_else(|| v8::null(scope).into()),
-    );
+    let observed_type = init
+        .observed_type
+        .as_deref()
+        .and_then(|value| v8_string(scope, value))
+        .map(|value| value.into())
+        .unwrap_or_else(|| v8::null(scope).into());
+    set_performance_observer_type(scope, args.this(), observed_type);
     set_performance_observer_entry_types(scope, args.this(), observed_entry_types);
     let activated = PerformanceObserverRegistration::from_observer(scope, args.this())
         .is_some_and(|registration| registration.activate(scope));
@@ -233,7 +237,9 @@ pub(in crate::context_bootstrap) fn performance_observer_observe_callback<'s>(
     }
     set_performance_observer_active(scope, args.this(), true);
     if init.buffered.unwrap_or(false) && has_type_member {
-        enqueue_buffered_performance_entries(scope, args.this());
+        if let Some(performance) = performance {
+            enqueue_buffered_performance_entries(scope, performance, args.this());
+        }
         queue_performance_observer_delivery(scope, args.this());
     }
     rv.set_undefined();

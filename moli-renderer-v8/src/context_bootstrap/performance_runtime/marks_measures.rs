@@ -3,7 +3,7 @@ use super::entries::{
     initialize_performance_entry_slots,
 };
 use super::*;
-use crate::context_bootstrap::structured_clone_value;
+use crate::context_bootstrap::{structured_deserialize_value, structured_serialize_value};
 use crate::util::serialize_v8_iter_array;
 use crate::webidl;
 
@@ -95,7 +95,15 @@ pub(in crate::context_bootstrap) fn performance_mark_callback<'s>(
     else {
         return;
     };
-    let entry = create_performance_entry(scope, "mark", &parsed.name, start_time, 0.0, detail);
+    let entry = create_performance_entry(
+        scope,
+        performance,
+        "mark",
+        &parsed.name,
+        start_time,
+        0.0,
+        detail,
+    );
     push_performance_entry(scope, performance, entry);
     rv.set(entry.into());
 }
@@ -196,7 +204,7 @@ fn prepare_performance_mark<'s>(
         );
         return None;
     }
-    clone_user_timing_detail(scope, options.detail).map(|detail| (start_time, detail))
+    clone_user_timing_detail(scope, performance, options.detail).map(|detail| (start_time, detail))
 }
 
 pub(in crate::context_bootstrap) fn performance_clear_marks_callback<'s>(
@@ -275,12 +283,13 @@ pub(in crate::context_bootstrap) fn performance_measure_callback<'s>(
         Some(duration) => (start, start + duration),
         None => (start, end),
     };
-    let detail = match clone_user_timing_detail(scope, parsed_measure.detail) {
+    let detail = match clone_user_timing_detail(scope, performance, parsed_measure.detail) {
         Some(detail) => detail,
         None => return,
     };
     let entry = create_performance_entry(
         scope,
+        performance,
         "measure",
         &parsed.name,
         start_time,
@@ -571,10 +580,19 @@ fn resolve_named_measure_boundary<'s>(
 
 fn clone_user_timing_detail<'s>(
     scope: &mut v8::PinScope<'s, '_>,
+    performance: v8::Local<'s, v8::Object>,
     detail: Option<v8::Local<'s, v8::Value>>,
 ) -> Option<Option<v8::Local<'s, v8::Value>>> {
     match detail {
-        Some(detail) => structured_clone_value(scope, detail).map(Some),
+        Some(detail) => {
+            // Serialization can invoke getters or throw DataCloneError. Keep
+            // those exceptions in the method Realm; only the clone's native
+            // objects and prototypes are created in the receiver's Realm.
+            let payload = structured_serialize_value(scope, detail)?;
+            let context = performance.get_creation_context(scope)?;
+            let scope = &mut v8::ContextScope::new(scope, context);
+            structured_deserialize_value(scope, &payload).map(Some)
+        }
         None => Some(None),
     }
 }

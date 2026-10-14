@@ -354,13 +354,13 @@ impl CallbackRegistry {
     pub(crate) fn active_performance_observers<'s>(
         &self,
         scope: &mut v8::PinScope<'s, '_>,
+        timeline_context: v8::Local<'s, v8::Context>,
     ) -> Vec<v8::Local<'s, v8::Object>> {
         let roots: Vec<_> = self.state.borrow().active.values().map(Rc::clone).collect();
-        let context = scope.get_current_context();
         roots
             .iter()
             .map(|root| v8::Local::new(scope, root.as_ref()))
-            .filter(|observer| observer.get_creation_context(scope) == Some(context))
+            .filter(|observer| observer.get_creation_context(scope) == Some(timeline_context))
             .collect()
     }
 

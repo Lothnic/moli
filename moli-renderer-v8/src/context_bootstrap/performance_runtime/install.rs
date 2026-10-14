@@ -685,10 +685,11 @@ fn performance_navigation_entry_name<'s>(
 
 fn create_navigation_performance_entry<'s>(
     scope: &mut v8::PinScope<'s, '_>,
+    performance: v8::Local<'s, v8::Object>,
     navigation_type: &str,
     name: &str,
 ) -> v8::Local<'s, v8::Object> {
-    let entry = create_performance_entry(scope, "navigation", name, 0.0, 0.0, None);
+    let entry = create_performance_entry(scope, performance, "navigation", name, 0.0, 0.0, None);
     super::entries::initialize_resource_timing_slots(
         scope,
         entry,
@@ -829,7 +830,7 @@ fn apply_load_end<'s>(
         // PerformanceNavigationTiming.duration is loadEventEnd relative to timeOrigin.
         set_performance_entry_slot_number(scope, entry, PERFORMANCE_ENTRY_DURATION_SLOT, timestamp);
         if notify_observers {
-            queue_matching_performance_observers(scope, entry, "navigation");
+            queue_matching_performance_observers(scope, performance, entry, "navigation");
         }
     }
 }
@@ -896,7 +897,7 @@ pub(super) fn ensure_navigation_performance_entry<'s>(
         .and_then(|value| value.to_string(scope))
         .map(|value| value.to_rust_string_lossy(scope))
         .unwrap_or_else(|| "document".to_owned());
-    let entry = create_navigation_performance_entry(scope, &navigation_type, &name);
+    let entry = create_navigation_performance_entry(scope, performance, &navigation_type, &name);
     super::entries::assign_navigation_performance_entry_identity(scope, performance, entry);
     set_private_value(
         scope,
