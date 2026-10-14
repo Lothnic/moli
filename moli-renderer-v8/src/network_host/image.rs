@@ -107,6 +107,7 @@ pub(crate) fn start_scanned_image_preload(
                 std::sync::Arc::new(Err(error.to_string())),
                 None,
                 false,
+                false,
             );
             return ScannedImagePreloadStart::Admitted;
         }
@@ -148,11 +149,15 @@ pub(crate) fn start_scanned_image_preload(
                 )
                 .is_ok()
         });
+        let origin_clean = result.as_ref().is_ok_and(|response| image_response_origin_clean(
+            response, &request_origin, RequestMode::NoCors, RequestCredentialsMode::Include, None,
+        ));
         load.finish_network_result(
             decode_runner,
             std::sync::Arc::new(result),
             encoded,
             response_is_decode_eligible,
+            origin_clean,
         );
     });
     ScannedImagePreloadStart::Admitted
@@ -230,7 +235,14 @@ pub(crate) fn start_image_element_resource_fetch(
             },
         );
         let encoded = manager.from_frozen_bytes(response.take_body_bytes());
-        let descriptor = image_response_descriptor_from_parkable(&response, &encoded);
+        let origin_clean = image_response_origin_clean(
+            &response,
+            &request_origin,
+            request_mode,
+            credentials_mode,
+            None,
+        );
+        let descriptor = image_response_descriptor_from_parkable(&response, &encoded, origin_clean);
         let result = Ok(response);
         host.record_get_subresource_network_result_with_body_and_initiator(
             frame_id,
@@ -441,9 +453,32 @@ pub(crate) fn start_image_element_resource_fetch(
 pub(crate) fn image_response_descriptor_from_parkable(
     response: &crate::protocol_types::NavigationResponse,
     encoded: &moli_parkable_image::ParkableImage,
+    origin_clean: bool,
 ) -> Option<crate::native_bridge::ImageResponseDescriptor> {
     let snapshot = encoded.snapshot().ok()?;
-    image_response_descriptor_from_bytes(response.status, &response.headers, &snapshot)
+    Some(
+        image_response_descriptor_from_bytes(response.status, &response.headers, &snapshot)?
+            .with_origin_clean(origin_clean),
+    )
+}
+
+pub(crate) fn image_response_origin_clean(
+    response: &crate::protocol_types::NavigationResponse,
+    request_origin: &moli_url::WebOrigin,
+    mode: RequestMode,
+    credentials: RequestCredentialsMode,
+    response_filter: Option<&crate::types::AsyncSubresourceFetchResponseFilter>,
+) -> bool {
+    match response_filter {
+        Some(filter) => filter.is_readable(),
+        None => FetchResponseRequest {
+            method: "GET",
+            mode,
+            redirect_mode: RequestRedirectMode::Follow,
+        }
+        .network_response_filter(request_origin, &response.head(), credentials)
+        .is_readable(),
+    }
 }
 
 fn image_response_descriptor_from_bytes(
@@ -488,5 +523,69 @@ fn image_cross_origin_request_modes(
         None => (RequestMode::NoCors, RequestCredentialsMode::Include),
         Some("use-credentials") => (RequestMode::Cors, RequestCredentialsMode::Include),
         Some(_) => (RequestMode::Cors, RequestCredentialsMode::SameOrigin),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn canvas_image_taint_retains_fetch_filters_and_redirect_history() {
+        let document = url::Url::parse("https://document.test/").unwrap();
+        let origin = moli_url::WebOrigin::from_url(&document);
+        let response = |url: &str| {
+            crate::protocol_types::NavigationResponse::from_text_body(
+                url::Url::parse(url).unwrap(),
+                200,
+                Vec::new(),
+                String::new(),
+            )
+        };
+        let same = response("https://document.test/image.png");
+        let cross = response("https://images.test/image.png");
+        let readable = |response: &crate::protocol_types::NavigationResponse, mode, filter| {
+            image_response_origin_clean(
+                response,
+                &origin,
+                mode,
+                RequestCredentialsMode::Include,
+                filter,
+            )
+        };
+        assert!(readable(&same, RequestMode::NoCors, None));
+        assert!(!readable(&cross, RequestMode::NoCors, None));
+        assert!(readable(&cross, RequestMode::Cors, None));
+        assert!(readable(
+            &response("data:image/png;base64,AA=="),
+            RequestMode::NoCors,
+            None
+        ));
+        let opaque = crate::types::AsyncSubresourceFetchResponseFilter::Opaque;
+        let basic = crate::types::AsyncSubresourceFetchResponseFilter::Basic;
+        assert!(!readable(&same, RequestMode::NoCors, Some(&opaque)));
+        assert!(readable(&cross, RequestMode::NoCors, Some(&basic)));
+        let mut returned = same.clone();
+        let redirect = |from_url: url::Url, to_url: url::Url| crate::types::NavigationRedirect {
+            source: moli_fetch::RedirectSource::Network,
+            from_url,
+            to_url,
+            status: 302,
+            headers: Vec::new(),
+            network_extra_info_available: true,
+            request_extra_info: None,
+            response_extra_info: None,
+            redirect_has_extra_info: true,
+            request_cookie_report: None,
+            cookie_set_reports: Vec::new(),
+            from_cache: false,
+            negotiated_http_version: None,
+        };
+        returned.redirected = true;
+        returned.redirect_chain = vec![
+            redirect(same.head().final_url, cross.head().final_url),
+            redirect(cross.head().final_url, same.head().final_url),
+        ];
+        assert!(!readable(&returned, RequestMode::NoCors, None));
     }
 }
