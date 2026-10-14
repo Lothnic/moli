@@ -502,3 +502,6 @@ pub(in crate::context_bootstrap) use message::message_event_init_callback;
 pub(in crate::context_bootstrap) use wrappers::event_value_attribute_getter;
 
 pub(crate) use subclasses::construct_original_error_event;
+
+mod ui_properties;
+pub(in crate::context_bootstrap) use ui_properties::ui_event_which_getter_function;
