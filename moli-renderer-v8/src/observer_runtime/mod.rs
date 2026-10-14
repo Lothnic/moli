@@ -904,8 +904,16 @@ fn invoke_intersection_deliveries<'s>(
         if !delivery.callback.is_current(unsafe { &*host_ptr }) {
             continue;
         }
-        let entries =
-            build_intersection_entries_array(scope, host_ptr, &delivery.options, &delivery.entries);
+        let Some(callback_context) = delivery.callback.relevant_context(scope) else {
+            continue;
+        };
+        // Web IDL argument conversion uses the callback's relevant Realm,
+        // which can differ from the observer's creation Realm. Enter it before
+        // projecting native targets and binding the entry/rect/array wrappers.
+        let entries = {
+            let scope = &mut v8::ContextScope::new(scope, callback_context);
+            build_intersection_entries_array(scope, host_ptr, &delivery.options, &delivery.entries)
+        };
         let observer_value: v8::Local<'_, v8::Value> = delivery.observer.into();
         match delivery.callback.invoke(
             scope,
