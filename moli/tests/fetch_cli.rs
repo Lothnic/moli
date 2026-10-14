@@ -340,7 +340,7 @@ struct CacheableFixtureServer {
 
 const PDF_FIXTURE_BODY: &[u8] =
     b"%PDF-1.7\n% moli raw document fixture\n1 0 obj\n<<>>\nendobj\n%%EOF\n";
-const DOCX_FIXTURE_BODY_BASE64: &str = "UEsDBBQAAAAIAIBLTl3GEnoHrAAAAPEAAAATAAAAW0NvbnRlbnRfVHlwZXNdLnhtbF2Puw7CMAxFf6XKihoXBgaUlIEdGPgBK3HbiOahJBT4exKQOjBax/dcWxxfdm4Wisl4J9mWd+zYi9s7UGoKcUmyKedwAEhqIouJ+0CukMFHi7mMcYSA6o4jwa7r9qC8y+Rym6uD9eJS5NFoaq4Y8xktSQZPHzVorx62bPJiY83pF6vNkmEIs1GYy02wOP3X2fphMIrWfLWF6BWlZNxoZ74Si8Ztqh56Ad+n+g9QSwMEFAAAAAgAgEtOXZAlWGOLAAAAtwAAABEAAAB3b3JkL2RvY3VtZW50LnhtbEWOuw7CMAxFfyXKB9SBgSHqY4AZVtbQhDZSE0dOaODvqcvAciz76F65Hd5hEauj7DF28tAoOfRt1RbHV3CxiE3HrGsn51KSBsjj7ILJDSYXN/dECqZsK01QkWwiHF3OPk5hgaNSJwjGR8mVD7QfnolBjNJfTfGrE5fb+S7Yt8BXJu1MO39J+H/VfwFQSwECFAMUAAAACACAS05dxhJ6B6wAAADxAAAAEwAAAAAAAAAAAAAAgAEAAAAAW0NvbnRlbnRfVHlwZXNdLnhtbFBLAQIUAxQAAAAIAIBLTl2QJVhjiwAAALcAAAARAAAAAAAAAAAAAACAAd0AAAB3b3JkL2RvY3VtZW50LnhtbFBLBQYAAAAAAgACAIAAAACXAQAAAAA=";
+const DOCX_FIXTURE_BODY: &[u8] = b"PK\x03\x04moli-docx-fixture";
 const VIDEO_FIXTURE_BODY: &[u8] = b"\0\0\0\x18ftypmp42\xff\0moli-video-fixture";
 const PNG_FIXTURE_BODY: &[u8] = &[
     0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
@@ -593,7 +593,7 @@ impl BinaryDocumentFixtureServer {
                     "content-type",
                     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                 )],
-                BASE64_STANDARD.decode(DOCX_FIXTURE_BODY_BASE64).unwrap(),
+                DOCX_FIXTURE_BODY.to_vec(),
             )
         }
 
@@ -1253,18 +1253,19 @@ fn cli_fetch_without_dump_writes_pdf_verbatim() -> Result<()> {
 }
 
 #[test]
-fn cli_dump_markdown_extracts_docx_and_keeps_text_documents_renderable() -> Result<()> {
+fn cli_dump_markdown_rejects_docx_but_keeps_text_documents_renderable() -> Result<()> {
     let runtime = tokio::runtime::Runtime::new()?;
     let server = runtime.block_on(BinaryDocumentFixtureServer::spawn())?;
 
     let docx_url = server.url("/inline.docx");
     let docx = run_fetch_cli_with_dump_and_args(&docx_url, "markdown", &[])?;
-    assert!(
-        docx.status.success(),
-        "stderr={}",
-        clean_output(&docx.stderr)
+    assert!(!docx.status.success(), "stdout={:?}", docx.stdout);
+    assert!(docx.stdout.is_empty(), "stdout={:?}", docx.stdout);
+    assert_single_fetch_failure_reason(
+        &clean_output(&docx.stderr),
+        &docx_url,
+        "raw download output only supports automatic output or --dump json",
     );
-    assert_eq!(clean_output(&docx.stdout), "Native DOCX body");
 
     for (path, expected) in [
         ("/page.html", "HTML body remains renderable"),

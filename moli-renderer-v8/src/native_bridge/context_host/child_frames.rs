@@ -528,13 +528,6 @@ impl ChildBrowsingContextEntry {
         self.completed_document_network.clone()
     }
 
-    pub(in crate::native_bridge::context_host) fn completed_document_network_snapshot(
-        &self,
-    ) -> Option<ChildFrameDocumentNetworkSnapshot> {
-        self.completed_document_network()
-            .map(|network| network.snapshot)
-    }
-
     fn completed_document_network_for_refresh(
         &self,
         attribute_bootstrap_changed: bool,
@@ -559,14 +552,14 @@ impl ChildBrowsingContextEntry {
         self.completed_document_network = None;
     }
 
-    pub(super) fn completed_document_network_for_owner(
-        &self,
+    pub(super) fn take_completed_document_network_for_owner(
+        &mut self,
         owner: FrameDocumentTaskOwner,
     ) -> Option<ChildFrameDocumentNetworkSnapshot> {
         self.completed_document_network
-            .as_ref()
+            .take()
             .filter(|network| network.owner == owner)
-            .map(|network| network.snapshot.clone())
+            .map(|network| network.snapshot)
     }
 
     fn completed_frame_owner_resource_timing_for_refresh(

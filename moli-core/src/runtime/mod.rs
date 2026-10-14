@@ -22,7 +22,7 @@ use moli_renderer_v8::network::{
     BrowserResourceRuntime, BrowserResourceRuntimeOwner, PageNetworkPolicy,
 };
 use moli_url::is_about_blank as is_about_blank_url;
-use moli_web_mime::{extract_response_mime_essence, response_headers_indicate_raw_document};
+use moli_web_mime::response_headers_indicate_raw_document;
 use std::fmt;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
@@ -66,8 +66,6 @@ pub enum RawDocumentFetchPolicy {
     /// Read the body only for statuses below the threshold. Otherwise return
     /// response metadata with an empty body and cancel the download.
     MaterializeBelowStatus(u16),
-    /// Read PDF and DOCX bodies for native text extraction and cancel other raw downloads.
-    MaterializeMarkdownDocument,
     /// Require a renderable Page, rejecting raw responses from their headers.
     RequirePage,
 }
@@ -85,18 +83,11 @@ impl fmt::Display for RawDocumentPageRequired {
 impl std::error::Error for RawDocumentPageRequired {}
 
 impl RawDocumentFetchPolicy {
-    fn should_materialize_body(self, status: u16, headers: &[(String, Vec<u8>)]) -> Result<bool> {
+    fn should_materialize_body(self, status: u16) -> Result<bool> {
         match self {
             Self::Materialize => Ok(true),
             Self::MetadataOnly => Ok(false),
             Self::MaterializeBelowStatus(threshold) => Ok(status < threshold),
-            Self::MaterializeMarkdownDocument => Ok(matches!(
-                extract_response_mime_essence(headers).as_deref(),
-                Some("application/pdf")
-                    | Some(
-                        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                    )
-            )),
             Self::RequirePage => Err(anyhow::Error::new(RawDocumentPageRequired)),
         }
     }
@@ -583,9 +574,7 @@ impl Browser {
         if let Some(response) = response {
             navigation_loader.note_service_worker_response_ready()?;
             if response_headers_indicate_raw_document(&response.headers) {
-                let body = if raw_document_policy
-                    .should_materialize_body(response.status, &response.headers)?
-                {
+                let body = if raw_document_policy.should_materialize_body(response.status)? {
                     response.clone_body_bytes()
                 } else {
                     Vec::new()
@@ -634,7 +623,7 @@ impl Browser {
             )
             .await?;
         if response_headers_indicate_raw_document(&response.headers) {
-            if !raw_document_policy.should_materialize_body(response.status, &response.headers)? {
+            if !raw_document_policy.should_materialize_body(response.status)? {
                 let raw_response = RawResponse::from_head_and_body(response.head(), Vec::new());
                 return Ok(FetchedDocument::Raw(Box::new(RawDocument::from_response(
                     raw_response,

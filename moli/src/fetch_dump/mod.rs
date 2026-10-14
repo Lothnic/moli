@@ -1,4 +1,3 @@
-mod document;
 mod dom;
 mod node_details;
 mod pdf;
@@ -26,7 +25,6 @@ pub use node_details::summarize_node_details_async;
 pub(crate) enum RawDocumentOutputPolicy {
     Passthrough,
     Json,
-    Markdown,
     RequiresPage(DumpFormat),
 }
 
@@ -35,7 +33,6 @@ impl RawDocumentOutputPolicy {
         match command.dump_mode {
             None => Self::Passthrough,
             Some(DumpFormat::Json) => Self::Json,
-            Some(DumpFormat::Markdown) => Self::Markdown,
             Some(format) => Self::RequiresPage(format),
         }
     }
@@ -43,7 +40,6 @@ impl RawDocumentOutputPolicy {
     pub(crate) const fn fetch_policy(self) -> RawDocumentFetchPolicy {
         match self {
             Self::Passthrough | Self::Json => RawDocumentFetchPolicy::Materialize,
-            Self::Markdown => RawDocumentFetchPolicy::MaterializeMarkdownDocument,
             Self::RequiresPage(_) => RawDocumentFetchPolicy::RequirePage,
         }
     }
@@ -125,15 +121,10 @@ pub(crate) fn render_raw_document_output(
             )?;
             Ok(payload.into_bytes())
         }
-        RawDocumentOutputPolicy::Markdown => render_raw_document_markdown(raw.body_bytes()),
         RawDocumentOutputPolicy::RequiresPage(format) => {
             Err(raw_document_requires_page_error(format))
         }
     }
-}
-
-fn render_raw_document_markdown(body: &[u8]) -> Result<Vec<u8>> {
-    document::render_document_markdown(body)
 }
 
 fn raw_document_requires_page_error(format: DumpFormat) -> anyhow::Error {
@@ -142,8 +133,8 @@ fn raw_document_requires_page_error(format: DumpFormat) -> anyhow::Error {
             anyhow!("--dump html requires a renderable HTML document, not a raw download")
         }
         DumpFormat::Json => unreachable!("JSON output accepts raw documents"),
-        DumpFormat::Markdown => unreachable!("Markdown output accepts supported raw documents"),
-        DumpFormat::Screenshot
+        DumpFormat::Markdown
+        | DumpFormat::Screenshot
         | DumpFormat::ScreenshotFull
         | DumpFormat::Pdf
         | DumpFormat::SemanticTree

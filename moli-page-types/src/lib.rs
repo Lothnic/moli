@@ -3234,8 +3234,6 @@ pub struct ChildFrameTreeSnapshot {
     #[serde(default)]
     pub security_origin_opaque: bool,
     #[serde(default)]
-    pub document_network: Option<ChildFrameDocumentNetworkSnapshot>,
-    #[serde(default)]
     pub child_frames: Vec<ChildFrameTreeSnapshot>,
 }
 

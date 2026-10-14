@@ -302,7 +302,6 @@ impl JsContextHost {
             storage_key,
             security_origin_inherited,
             security_origin_opaque,
-            document_network: None,
             child_frames,
         }
     }

@@ -1,8 +1,8 @@
 use anyhow::Result;
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
 use moli_core::page::{
-    ChildFrameTreeSnapshot, Page, RendererPageDumpFormat, RendererPageDumpOptions,
-    RendererPageDumpStripOptions, SubresourceResponseWaitCriteria,
+    Page, RendererPageDumpFormat, RendererPageDumpOptions, RendererPageDumpStripOptions,
+    SubresourceResponseWaitCriteria,
 };
 use serde_json::{Map, Value, json};
 
@@ -160,97 +160,13 @@ pub(super) async fn render_markdown(
     strip: StripOptions,
     with_frames: bool,
 ) -> Result<String> {
-    // Markdown represents the rendered document, including DOM populated by
-    // layout observers. Publish current geometry before taking the live DOM
-    // snapshot so queued ResizeObserver work can settle first.
-    page.publish_layout_async().await?;
-    let mut markdown = page
-        .render_page_dump_async(RendererPageDumpOptions {
-            format: RendererPageDumpFormat::Markdown,
-            strip: renderer_strip_options(strip),
-            with_base: false,
-            with_frames,
-        })
-        .await?;
-    if with_frames {
-        append_embedded_pdf_markdown(page, &mut markdown).await?;
-    }
-    Ok(markdown)
-}
-
-async fn append_embedded_pdf_markdown(page: &mut Page, markdown: &mut String) -> Result<()> {
-    const EMBEDDED_PDF_URLS: &str = r#"JSON.stringify([...document.querySelectorAll('embed[src],object[data],iframe[src]')].map(node => { const raw = node.getAttribute(node.localName === 'object' ? 'data' : 'src'); if (!raw) return null; let url; try { url = new URL(raw, node.baseURI || document.baseURI); } catch { return null; } const declaredPdf = (node.getAttribute('type') || '').split(';', 1)[0].trim().toLowerCase() === 'application/pdf'; return declaredPdf || /\.pdf$/i.test(url.pathname) ? url.href : null; }).filter((url, index, urls) => url && urls.indexOf(url) === index))"#;
-    let value = page
-        .evaluate_runtime_expression_async(EMBEDDED_PDF_URLS)
-        .await?;
-    let Some(value) = value.get("value").and_then(Value::as_str) else {
-        return Ok(());
-    };
-    let urls: Vec<String> = serde_json::from_str(value)?;
-    let frames = page.child_frame_tree_snapshot_async().await?;
-    let mut appended_urls = Vec::new();
-    for url in urls {
-        if appended_urls
-            .iter()
-            .any(|appended| same_resource_url(appended, &url))
-        {
-            continue;
-        }
-        let Some(network) = find_loaded_child_document(&frames, &url) else {
-            continue;
-        };
-        if !(200..400).contains(&network.status) {
-            continue;
-        }
-        let Some(body) = network.response_body.as_ref() else {
-            continue;
-        };
-        let Ok(body) = body.try_bytes() else {
-            continue;
-        };
-        if !body.starts_with(b"%PDF-") {
-            continue;
-        }
-        let Ok(text) = super::render_raw_document_markdown(&body) else {
-            continue;
-        };
-        let text = String::from_utf8(text)?;
-        markdown.push_str("\n\n## Embedded document\n\n");
-        markdown.push_str(text.trim());
-        appended_urls.push(url);
-    }
-    Ok(())
-}
-
-fn find_loaded_child_document<'a>(
-    frames: &'a [ChildFrameTreeSnapshot],
-    url: &str,
-) -> Option<&'a moli_core::page::ChildFrameDocumentNetworkSnapshot> {
-    for frame in frames {
-        if let Some(network) = frame.document_network.as_ref()
-            && (same_resource_url(&frame.url, url)
-                || same_resource_url(&network.request_url, url)
-                || same_resource_url(&network.final_url, url))
-        {
-            return Some(network);
-        }
-        if let Some(network) = find_loaded_child_document(&frame.child_frames, url) {
-            return Some(network);
-        }
-    }
-    None
-}
-
-fn same_resource_url(left: &str, right: &str) -> bool {
-    if left == right {
-        return true;
-    }
-    let (Ok(mut left), Ok(mut right)) = (url::Url::parse(left), url::Url::parse(right)) else {
-        return false;
-    };
-    left.set_fragment(None);
-    right.set_fragment(None);
-    left == right
+    page.render_page_dump_async(RendererPageDumpOptions {
+        format: RendererPageDumpFormat::Markdown,
+        strip: renderer_strip_options(strip),
+        with_base: false,
+        with_frames,
+    })
+    .await
 }
 
 fn renderer_strip_options(strip: StripOptions) -> RendererPageDumpStripOptions {
