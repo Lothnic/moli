@@ -3,7 +3,7 @@ use std::pin::pin;
 
 use moli_webapi_declare::WebApiObject;
 
-use super::{WORKER_LISTENERS_SLOT, WORKER_ONERROR_SLOT};
+use super::WORKER_ONERROR_SLOT;
 use crate::context_bootstrap::{
     dispatch_simple_event_target_event,
     events::{clear_event_dispatch_fields, construct_original_event, set_event_dispatch_fields},
@@ -175,16 +175,14 @@ fn dispatch_worker_message_event<'s>(
     ports: v8::Local<'s, v8::Array>,
 ) {
     let event = new_message_event(scope, event_type, data, ports);
-    let _ =
-        dispatch_simple_event_target_event(scope, worker, WORKER_LISTENERS_SLOT, event_type, event);
+    let _ = dispatch_simple_event_target_event(scope, worker, event_type, event);
 }
 
 pub(crate) fn worker_has_message_listener<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     worker: v8::Local<'s, v8::Object>,
 ) -> bool {
-    !simple_object_event_listeners_snapshot(scope, worker, WORKER_LISTENERS_SLOT, "message")
-        .is_empty()
+    !simple_object_event_listeners_snapshot(scope, worker, "message").is_empty()
 }
 
 pub(crate) fn worker_has_message_delivery_listener<'s>(
@@ -192,13 +190,7 @@ pub(crate) fn worker_has_message_delivery_listener<'s>(
     worker: v8::Local<'s, v8::Object>,
 ) -> bool {
     worker_has_message_listener(scope, worker)
-        || !simple_object_event_listeners_snapshot(
-            scope,
-            worker,
-            WORKER_LISTENERS_SLOT,
-            "messageerror",
-        )
-        .is_empty()
+        || !simple_object_event_listeners_snapshot(scope, worker, "messageerror").is_empty()
 }
 
 pub(crate) fn flush_pending_worker_messages_for_listener<'s>(
@@ -229,12 +221,9 @@ pub(crate) fn dispatch_worker_error_event_with_kind<'s>(
     crate::context_bootstrap::mark_event_trusted(scope, event);
     set_event_dispatch_fields(scope, worker, event);
 
-    let listeners =
-        simple_object_event_listeners_snapshot(scope, worker, WORKER_LISTENERS_SLOT, "error");
+    let listeners = simple_object_event_listeners_snapshot(scope, worker, "error");
     for listener in listeners {
-        let Some(listener) =
-            listener.prepare_for_invocation(scope, worker, WORKER_LISTENERS_SLOT, "error")
-        else {
+        let Some(listener) = listener.prepare_for_invocation(scope, worker, "error") else {
             continue;
         };
         let callback_result = invoke_simple_event_listener(

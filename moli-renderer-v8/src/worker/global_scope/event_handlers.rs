@@ -2,8 +2,6 @@
 
 use super::*;
 
-pub(in crate::worker) const WORKER_GLOBAL_LISTENERS_SLOT: &str = "__moliWorkerGlobalListeners";
-
 const WORKER_GLOBAL_ONMESSAGE_SLOT: &str = "__moliWorkerGlobalOnMessage";
 
 const WORKER_GLOBAL_ONMESSAGEERROR_SLOT: &str = "__moliWorkerGlobalOnMessageError";
@@ -266,14 +264,7 @@ fn set_worker_global_event_handler<'s>(
     slot_name: &'static str,
     event_type: &str,
 ) {
-    simple_object_event_set_handler(
-        scope,
-        global,
-        WORKER_GLOBAL_LISTENERS_SLOT,
-        event_type,
-        slot_name,
-        value,
-    );
+    simple_object_event_set_handler(scope, global, event_type, slot_name, value);
 }
 
 fn worker_global_onmessage_getter<'s>(
@@ -696,12 +687,7 @@ pub(in crate::worker) fn service_worker_fetch_handler_type<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     global: v8::Local<'s, v8::Object>,
 ) -> WorkerFetchHandlerType {
-    let listeners = simple_object_event_listeners_snapshot(
-        scope,
-        global,
-        WORKER_GLOBAL_LISTENERS_SLOT,
-        "fetch",
-    );
+    let listeners = simple_object_event_listeners_snapshot(scope, global, "fetch");
     if listeners.is_empty() {
         return WorkerFetchHandlerType::NoHandler;
     }

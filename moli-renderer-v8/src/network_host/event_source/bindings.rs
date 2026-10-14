@@ -39,8 +39,8 @@ struct EventSourceObjectDeclaration<'scope> {
     #[webapi(slot = EVENT_SOURCE_ONERROR_SLOT, init = "null")]
     onerror: (),
 
-    #[webapi(slot = SIMPLE_EVENT_TARGET_SLOT, value = EVENT_SOURCE_LISTENERS_SLOT)]
-    event_target_slot: (),
+    #[webapi(slot = SIMPLE_EVENT_TARGET_LISTENERS_SLOT, init = "null_object")]
+    event_listeners: (),
 }
 
 #[derive(WebApiFunctionTemplate)]
@@ -342,13 +342,7 @@ pub(crate) fn dispatch_event_source_message<'s>(
         return;
     };
     mark_event_trusted(scope, event);
-    let _ = dispatch_simple_event_target_event(
-        scope,
-        event_source,
-        EVENT_SOURCE_LISTENERS_SLOT,
-        &message.event_name,
-        event,
-    );
+    let _ = dispatch_simple_event_target_event(scope, event_source, &message.event_name, event);
 }
 
 pub(crate) fn schedule_event_source_connect<'s>(
@@ -541,7 +535,6 @@ fn event_source_event_handler_setter<'s>(
     simple_object_event_set_handler(
         scope,
         args.this(),
-        EVENT_SOURCE_LISTENERS_SLOT,
         handler.event_type,
         handler.slot_name,
         args.get(0),
@@ -567,13 +560,7 @@ fn dispatch_event_source_named_event<'s>(
         return;
     };
     mark_event_trusted(scope, event);
-    let _ = dispatch_simple_event_target_event(
-        scope,
-        event_source,
-        EVENT_SOURCE_LISTENERS_SLOT,
-        event_type,
-        event,
-    );
+    let _ = dispatch_simple_event_target_event(scope, event_source, event_type, event);
 }
 
 fn event_source_is_branded<'s>(

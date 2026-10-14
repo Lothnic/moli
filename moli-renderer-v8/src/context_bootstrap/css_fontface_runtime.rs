@@ -32,7 +32,6 @@ pub(super) const FONT_FACE_SET_CONNECTED_FACES_SLOT: &str = "__moliFontFaceSetCo
 pub(super) const FONT_FACE_SET_STATUS_SLOT: &str = "__moliFontFaceSetStatus";
 pub(super) const FONT_FACE_SET_SIZE_SLOT: &str = "__moliFontFaceSetSize";
 const FONT_FACE_SET_READY_SLOT: &str = "__moliFontFaceSetReady";
-const FONT_FACE_SET_LISTENERS_SLOT: &str = "__moliFontFaceSetListeners";
 
 mod events;
 mod font_face;

@@ -22,7 +22,6 @@ pub(in crate::context_bootstrap::media_queries::events::simple_event_target) fn 
 >(
     scope: &mut v8::PinScope<'s, '_>,
     args: &v8::FunctionCallbackArguments<'s>,
-    slot_name: &str,
     rv: &mut v8::ReturnValue<'s, v8::Value>,
 ) {
     let Some((event, event_type)) =
@@ -36,22 +35,18 @@ pub(in crate::context_bootstrap::media_queries::events::simple_event_target) fn 
     };
 
     let target = args.this();
-    let dispatch_result =
-        dispatch_simple_event_target_event(scope, target, slot_name, &event_type, event);
+    let dispatch_result = dispatch_simple_event_target_event(scope, target, &event_type, event);
     rv.set(v8::Boolean::new(scope, dispatch_result).into());
 }
 
 pub(crate) fn dispatch_simple_event_target_event<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     target: v8::Local<'s, v8::Object>,
-    slot_name: &str,
     event_type: &str,
     event: v8::Local<'s, v8::Object>,
 ) -> bool {
-    dispatch_simple_event_target_event_collecting_errors(
-        scope, target, slot_name, event_type, event, None,
-    )
-    .uncanceled
+    dispatch_simple_event_target_event_collecting_errors(scope, target, event_type, event, None)
+        .uncanceled
 }
 
 pub(crate) struct SimpleEventDispatchResult {
@@ -62,7 +57,6 @@ pub(crate) struct SimpleEventDispatchResult {
 pub(crate) fn dispatch_simple_event_target_event_collecting_errors<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     target: v8::Local<'s, v8::Object>,
-    slot_name: &str,
     event_type: &str,
     event: v8::Local<'s, v8::Object>,
     mut callback_errors: Option<&mut Vec<crate::exception_reporting::V8ExceptionReport>>,
@@ -83,14 +77,12 @@ pub(crate) fn dispatch_simple_event_target_event_collecting_errors<'s>(
         'phases: for capture_phase in [true, false] {
             // DOM clones the listener list for each invocation phase. A listener
             // added during capture can participate in the subsequent bubble phase.
-            let listeners =
-                simple_object_event_listeners_snapshot(scope, target, slot_name, event_type);
+            let listeners = simple_object_event_listeners_snapshot(scope, target, event_type);
             for listener in listeners
                 .iter()
                 .filter(|listener| listener.capture == capture_phase)
             {
-                let Some(listener) =
-                    listener.prepare_for_invocation(scope, target, slot_name, event_type)
+                let Some(listener) = listener.prepare_for_invocation(scope, target, event_type)
                 else {
                     continue;
                 };

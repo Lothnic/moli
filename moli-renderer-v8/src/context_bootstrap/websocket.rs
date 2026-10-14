@@ -4,8 +4,9 @@ use super::media_queries::{
     simple_event_target_remove_event_listener_callback, simple_object_event_set_handler,
 };
 use super::shared::{
-    READABLE_STREAM_HWM_SLOT, READABLE_STREAM_PENDING_READS_SLOT, SIMPLE_EVENT_TARGET_SLOT,
-    WRITABLE_STREAM_SINK_SLOT, define_non_enumerable_string_property, global_constructor_prototype,
+    READABLE_STREAM_HWM_SLOT, READABLE_STREAM_PENDING_READS_SLOT,
+    SIMPLE_EVENT_TARGET_LISTENERS_SLOT, WRITABLE_STREAM_SINK_SLOT,
+    define_non_enumerable_string_property, global_constructor_prototype,
     new_uint8_array_from_bytes,
 };
 use super::stream_adapter::{
@@ -21,7 +22,6 @@ use crate::{
 };
 use moli_websocket::Event as WebSocketEvent;
 
-const WEBSOCKET_LISTENERS_SLOT: &str = "__moliWebSocketListeners";
 const WEBSOCKET_ID_SLOT: &str = "__moliWebSocketId";
 const WEBSOCKET_URL_SLOT: &str = "__moliWebSocketUrl";
 const WEBSOCKET_READY_STATE_SLOT: &str = "__moliWebSocketReadyState";

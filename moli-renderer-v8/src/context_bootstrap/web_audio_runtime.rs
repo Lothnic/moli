@@ -19,7 +19,6 @@ mod node;
 
 use audio_param::{audio_param, detune_param};
 
-const AUDIO_CONTEXT_LISTENERS_SLOT: &str = "__moliAudioContextListeners";
 const AUDIO_CONTEXT_MODULES_SLOT: &str = "__moliAudioContextModules";
 const AUDIO_CONTEXT_MODULE_LIST_SLOT: &str = "__moliAudioContextModuleList";
 const AUDIO_CONTEXT_PROCESSORS_SLOT: &str = "__moliAudioContextProcessors";
@@ -52,8 +51,8 @@ struct AudioContextObjectDeclaration<'scope> {
     state: &'static str,
     #[webapi(data_property)]
     destination: v8::Local<'scope, v8::Object>,
-    #[webapi(slot = SIMPLE_EVENT_TARGET_SLOT, value = AUDIO_CONTEXT_LISTENERS_SLOT)]
-    event_target_slot: (),
+    #[webapi(slot = SIMPLE_EVENT_TARGET_LISTENERS_SLOT, init = "null_object")]
+    event_listeners: (),
     #[webapi(slot = AUDIO_CONTEXT_MODULES_SLOT)]
     modules: v8::Local<'scope, v8::Object>,
     #[webapi(slot = AUDIO_CONTEXT_MODULE_LIST_SLOT)]
@@ -140,8 +139,8 @@ struct OfflineAudioContextObjectDeclaration<'scope> {
     channel_count: f64,
     #[webapi(slot = OFFLINE_AUDIO_COMPRESSORS_SLOT)]
     compressors: v8::Local<'scope, v8::Array>,
-    #[webapi(slot = SIMPLE_EVENT_TARGET_SLOT)]
-    event_target_slot: &'static str,
+    #[webapi(slot = SIMPLE_EVENT_TARGET_LISTENERS_SLOT, init = "null_object")]
+    event_listeners: (),
     #[webapi(data_property)]
     state: &'static str,
     #[webapi(data_property)]
@@ -1330,7 +1329,6 @@ pub(in crate::context_bootstrap) fn offline_audio_context_constructor_callback<'
         sample_rate,
         channel_count,
         compressors,
-        OFFLINE_AUDIO_LISTENERS_SLOT,
         "suspended",
         destination,
     )
@@ -1491,13 +1489,7 @@ fn offline_audio_context_complete_microtask_callback<'s>(
     else {
         return;
     };
-    let _ = dispatch_simple_event_target_event(
-        scope,
-        context,
-        OFFLINE_AUDIO_LISTENERS_SLOT,
-        "complete",
-        event,
-    );
+    let _ = dispatch_simple_event_target_event(scope, context, "complete", event);
 }
 
 fn remember_context_compressor<'s>(

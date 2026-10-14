@@ -32,8 +32,8 @@ use moli_fetch::{
 };
 
 use super::{
-    PendingWorkerCspReport, WORKER_GLOBAL_LISTENERS_SLOT, WorkerGlobalState, get_worker_state,
-    next_fetch_id, record_worker_subresource_failure_with_handle, request_body_text,
+    PendingWorkerCspReport, WorkerGlobalState, get_worker_state, next_fetch_id,
+    record_worker_subresource_failure_with_handle, request_body_text,
 };
 
 pub(super) fn dispatch_worker_content_security_policy_violation_event<'s>(
@@ -54,13 +54,7 @@ pub(super) fn dispatch_worker_content_security_policy_violation_event<'s>(
         &violation.report_uri_endpoints,
         &violation.report_to_endpoints,
     );
-    dispatch_simple_event_target_event(
-        scope,
-        global,
-        WORKER_GLOBAL_LISTENERS_SLOT,
-        "securitypolicyviolation",
-        event,
-    );
+    dispatch_simple_event_target_event(scope, global, "securitypolicyviolation", event);
 }
 
 pub(super) fn dispatch_worker_content_security_policy_violation_event_for_state<'s>(
@@ -74,13 +68,7 @@ pub(super) fn dispatch_worker_content_security_policy_violation_event_for_state<
         return;
     };
     send_worker_content_security_policy_reports_for_state(state, violation);
-    dispatch_simple_event_target_event(
-        scope,
-        global,
-        WORKER_GLOBAL_LISTENERS_SLOT,
-        "securitypolicyviolation",
-        event,
-    );
+    dispatch_simple_event_target_event(scope, global, "securitypolicyviolation", event);
 }
 
 pub(super) fn dispatch_worker_trusted_types_sink_violation_event_for_state<'s>(

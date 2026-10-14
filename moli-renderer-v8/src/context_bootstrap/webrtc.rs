@@ -32,7 +32,6 @@ const RTC_PEER_CONNECTION_CURRENT_LOCAL_DESCRIPTION_SLOT: &str =
 const RTC_PEER_CONNECTION_PENDING_LOCAL_DESCRIPTION_SLOT: &str =
     "__moliRtcPeerConnectionPendingLocalDescription";
 const RTC_PEER_CONNECTION_HAS_DATA_CHANNEL_SLOT: &str = "__moliRtcPeerConnectionHasDataChannel";
-const RTC_PEER_CONNECTION_LISTENERS_SLOT: &str = "__moliRtcPeerConnectionListeners";
 
 const RTC_DATA_CHANNEL_LABEL_SLOT: &str = "__moliRtcDataChannelLabel";
 const RTC_DATA_CHANNEL_ORDERED_SLOT: &str = "__moliRtcDataChannelOrdered";
@@ -44,7 +43,6 @@ const RTC_DATA_CHANNEL_ID_SLOT: &str = "__moliRtcDataChannelId";
 const RTC_DATA_CHANNEL_READY_STATE_SLOT: &str = "__moliRtcDataChannelReadyState";
 const RTC_DATA_CHANNEL_BUFFERED_AMOUNT_SLOT: &str = "__moliRtcDataChannelBufferedAmount";
 const RTC_DATA_CHANNEL_BINARY_TYPE_SLOT: &str = "__moliRtcDataChannelBinaryType";
-const RTC_DATA_CHANNEL_LISTENERS_SLOT: &str = "__moliRtcDataChannelListeners";
 
 const RTC_PEER_CONNECTION_STATE_SLOTS: &[&str] = &[
     RTC_PEER_CONNECTION_SIGNALING_STATE_SLOT,
@@ -93,8 +91,8 @@ struct RtcPeerConnectionObjectDeclaration<'scope> {
     pending_local_description: (),
     #[webapi(slot = RTC_PEER_CONNECTION_HAS_DATA_CHANNEL_SLOT, init = false)]
     has_data_channel: (),
-    #[webapi(slot = SIMPLE_EVENT_TARGET_SLOT, value = RTC_PEER_CONNECTION_LISTENERS_SLOT)]
-    event_target_slot: (),
+    #[webapi(slot = SIMPLE_EVENT_TARGET_LISTENERS_SLOT, init = "null_object")]
+    event_listeners: (),
 }
 
 #[derive(WebApiObject)]
@@ -120,8 +118,8 @@ struct RtcDataChannelObjectDeclaration<'scope> {
     buffered_amount: (),
     #[webapi(slot = RTC_DATA_CHANNEL_BINARY_TYPE_SLOT, init = string("arraybuffer"))]
     binary_type: (),
-    #[webapi(slot = SIMPLE_EVENT_TARGET_SLOT, value = RTC_DATA_CHANNEL_LISTENERS_SLOT)]
-    event_target_slot: (),
+    #[webapi(slot = SIMPLE_EVENT_TARGET_LISTENERS_SLOT, init = "null_object")]
+    event_listeners: (),
 }
 
 #[derive(WebApiObject)]
@@ -255,7 +253,7 @@ pub(in crate::context_bootstrap) fn rtc_peer_connection_constructor_callback<'s>
         current_local_description: (),
         pending_local_description: (),
         has_data_channel: (),
-        event_target_slot: (),
+        event_listeners: (),
     };
     if declaration.initialize(scope, args.this()).is_err() {
         rv.set_undefined();

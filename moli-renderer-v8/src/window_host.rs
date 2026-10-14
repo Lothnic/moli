@@ -8,12 +8,12 @@ use super::{
     context_bootstrap::event_is_dispatching,
     context_bootstrap::event_is_mouse_event,
     context_bootstrap::increment_performance_event_count,
+    context_bootstrap::is_simple_event_target,
     context_bootstrap::mark_event_trusted,
     context_bootstrap::performance_slot_number,
     context_bootstrap::simple_event_target_add_event_listener_callback,
     context_bootstrap::simple_event_target_dispatch_event_callback,
     context_bootstrap::simple_event_target_remove_event_listener_callback,
-    context_bootstrap::simple_event_target_slot_name,
     context_bootstrap::trusted_script_string_or_type_error,
     document_runtime::{DocumentContentSecurityPolicyViolation, DomHandle, EventTargetHandle},
     native_bridge::{
@@ -145,7 +145,7 @@ pub(super) fn event_target_add_event_listener_callback<'s>(
     args: v8::FunctionCallbackArguments<'s>,
     rv: v8::ReturnValue<'s, v8::Value>,
 ) {
-    if simple_event_target_slot_name(scope, args.this()).is_some() {
+    if is_simple_event_target(scope, args.this()) {
         simple_event_target_add_event_listener_callback(scope, args, rv);
         return;
     }
@@ -267,7 +267,7 @@ pub(super) fn event_target_remove_event_listener_callback<'s>(
     args: v8::FunctionCallbackArguments<'s>,
     rv: v8::ReturnValue<'s, v8::Value>,
 ) {
-    if simple_event_target_slot_name(scope, args.this()).is_some() {
+    if is_simple_event_target(scope, args.this()) {
         simple_event_target_remove_event_listener_callback(scope, args, rv);
         return;
     }
@@ -307,7 +307,7 @@ pub(super) fn event_target_dispatch_event_callback<'s>(
     args: v8::FunctionCallbackArguments<'s>,
     mut rv: v8::ReturnValue<'s, v8::Value>,
 ) {
-    if simple_event_target_slot_name(scope, args.this()).is_some() {
+    if is_simple_event_target(scope, args.this()) {
         simple_event_target_dispatch_event_callback(scope, args, rv);
         return;
     }

@@ -10,8 +10,8 @@ const FILE_READER_ERROR_SLOT: &str = "__lmFileReaderError";
 #[derive(Default, WebApiObject)]
 #[webapi(interface = web_api_interfaces::FileReader)]
 struct FileReaderObjectDeclaration {
-    #[webapi(slot = SIMPLE_EVENT_TARGET_SLOT, value = FILE_READER_LISTENERS_SLOT)]
-    event_target_slot: (),
+    #[webapi(slot = SIMPLE_EVENT_TARGET_LISTENERS_SLOT, init = "null_object")]
+    event_listeners: (),
 
     #[webapi(slot = FILE_READER_READY_STATE_SLOT, init = 0)]
     ready_state: (),
@@ -21,9 +21,6 @@ struct FileReaderObjectDeclaration {
 
     #[webapi(slot = FILE_READER_ERROR_SLOT, init = "null")]
     error: (),
-
-    #[webapi(slot = FILE_READER_LISTENERS_SLOT, init = "null_object")]
-    listeners: (),
 
     #[webapi(slot = FILE_READER_SCHEDULED_SLOT, init = false)]
     scheduled: (),

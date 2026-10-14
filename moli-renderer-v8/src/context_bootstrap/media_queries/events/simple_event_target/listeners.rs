@@ -4,9 +4,7 @@ use crate::callback_invocation::CallbackInvocation;
 use crate::event_listener_args::{
     AddEventListenerArgs, RemoveEventListenerArgs, parse_listener_args,
 };
-use crate::util::{
-    get_private_object, get_private_value, new_null_prototype_object, set_private_value, v8_string,
-};
+use crate::util::{get_private_value, set_private_value, v8_string};
 use crate::webidl;
 use moli_webapi_declare::WebApiObject;
 
@@ -35,8 +33,6 @@ struct SimpleObjectAbortListenerDataDeclaration<'scope> {
     target: v8::Local<'scope, v8::Object>,
     #[webapi(data_property, enumerable)]
     entry: v8::Local<'scope, v8::Object>,
-    #[webapi(data_property, enumerable)]
-    slot: v8::Local<'scope, v8::String>,
     #[webapi(data_property, enumerable)]
     r#type: v8::Local<'scope, v8::String>,
     #[webapi(data_property, enumerable)]
@@ -121,14 +117,11 @@ impl<'s> SimpleObjectEventListenerSnapshot<'s> {
         &self,
         scope: &mut v8::PinScope<'s, '_>,
         target: v8::Local<'s, v8::Object>,
-        slot_name: &str,
         event_type: &str,
     ) -> Option<Self> {
         // Removing and re-adding the same callback creates a different entry.
         // The removed entry must stay inactive in an existing dispatch snapshot.
-        if !simple_object_event_listener_entry_registered(
-            scope, target, slot_name, event_type, self.entry,
-        ) {
+        if !simple_object_event_listener_entry_registered(scope, target, event_type, self.entry) {
             return None;
         }
         let listener = if self.handler_slot.is_some() {
@@ -142,7 +135,6 @@ impl<'s> SimpleObjectEventListenerSnapshot<'s> {
             simple_object_event_remove_listener_value_for_type(
                 scope,
                 target,
-                slot_name,
                 event_type,
                 listener.original,
                 listener.capture,
@@ -187,7 +179,6 @@ impl<'s> SimpleObjectEventListenerSnapshot<'s> {
 pub(crate) fn simple_object_event_target_add_listener<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     args: &v8::FunctionCallbackArguments<'s>,
-    slot_name: &str,
 ) {
     let Some(call) = parse_listener_args::<AddEventListenerArgs>(scope, args, "addEventListener")
     else {
@@ -201,7 +192,6 @@ pub(crate) fn simple_object_event_target_add_listener<'s>(
     simple_object_event_target_register_resolved_listener(
         scope,
         target,
-        slot_name,
         call.event_type,
         listener,
         call.options.options,
@@ -220,22 +210,19 @@ pub(crate) fn simple_object_event_target_add_listener<'s>(
 pub(crate) fn simple_object_event_target_register_webidl_listener<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     target: v8::Local<'s, v8::Object>,
-    slot_name: &str,
     event_type: String,
     listener: webidl::WebIdlCallbackInterface,
     options: webidl::EventListenerOptions,
 ) {
     let listener = simple_object_event_listener_parts(scope, listener);
     simple_object_event_target_register_resolved_listener(
-        scope, target, slot_name, event_type, listener, options, None,
+        scope, target, event_type, listener, options, None,
     );
 }
 
-#[allow(clippy::too_many_arguments)]
 fn simple_object_event_target_register_resolved_listener<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     target: v8::Local<'s, v8::Object>,
-    slot_name: &str,
     event_type: String,
     listener: SimpleObjectResolvedEventListener<'s>,
     options: webidl::EventListenerOptions,
@@ -244,8 +231,7 @@ fn simple_object_event_target_register_resolved_listener<'s>(
     if signal.is_some_and(|signal| signal.is_aborted(scope)) {
         return;
     }
-    let Some(listeners) =
-        simple_object_event_listener_array(scope, target, slot_name, &event_type, true)
+    let Some(listeners) = simple_object_event_listener_array(scope, target, &event_type, true)
     else {
         return;
     };
@@ -273,7 +259,7 @@ fn simple_object_event_target_register_resolved_listener<'s>(
         None
     };
     if added_entry.is_some() {
-        ensure_simple_object_event_type_order(scope, target, slot_name, &event_type);
+        ensure_simple_object_event_type_order(scope, target, &event_type);
     }
     if let (Some(entry), Some(signal)) = (added_entry, signal)
         && !register_simple_object_abort_listener(
@@ -281,7 +267,6 @@ fn simple_object_event_target_register_resolved_listener<'s>(
             signal,
             target,
             entry,
-            slot_name,
             &event_type,
             listener.original,
             options.capture,
@@ -290,7 +275,6 @@ fn simple_object_event_target_register_resolved_listener<'s>(
         simple_object_event_remove_listener_value_for_type(
             scope,
             target,
-            slot_name,
             &event_type,
             listener.original,
             options.capture,
@@ -304,7 +288,6 @@ fn simple_object_event_target_register_resolved_listener<'s>(
 pub(crate) fn simple_object_event_target_remove_listener<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     args: &v8::FunctionCallbackArguments<'s>,
-    slot_name: &str,
 ) {
     let Some(call) =
         parse_listener_args::<RemoveEventListenerArgs>(scope, args, "removeEventListener")
@@ -319,7 +302,6 @@ pub(crate) fn simple_object_event_target_remove_listener<'s>(
     simple_object_event_remove_listener_value_for_type(
         scope,
         target,
-        slot_name,
         &call.event_type,
         listener,
         call.options.capture,
@@ -337,13 +319,6 @@ fn simple_object_abort_remove_listener_callback<'s>(
     let Some(target) = data
         .get(scope, v8str(scope, "target").into())
         .and_then(|value| v8::Local::<v8::Object>::try_from(value).ok())
-    else {
-        return;
-    };
-    let Some(slot_name) = data
-        .get(scope, v8str(scope, "slot").into())
-        .and_then(|value| value.to_string(scope))
-        .map(|value| value.to_rust_string_lossy(scope))
     else {
         return;
     };
@@ -366,14 +341,12 @@ fn simple_object_abort_remove_listener_callback<'s>(
     let capture = data
         .get(scope, v8str(scope, "capture").into())
         .is_some_and(|value| value.boolean_value(scope));
-    if !simple_object_event_listener_entry_registered(scope, target, &slot_name, &event_type, entry)
-    {
+    if !simple_object_event_listener_entry_registered(scope, target, &event_type, entry) {
         return;
     }
     simple_object_event_remove_listener_value_for_type(
         scope,
         target,
-        &slot_name,
         &event_type,
         listener,
         capture,
@@ -385,21 +358,16 @@ fn register_simple_object_abort_listener<'s>(
     signal: ResolvedAbortSignal<'s>,
     target: v8::Local<'s, v8::Object>,
     entry: v8::Local<'s, v8::Object>,
-    slot_name: &str,
     event_type: &str,
     listener: v8::Local<'s, v8::Value>,
     capture: bool,
 ) -> bool {
-    let Some(slot_value) = v8_string(scope, slot_name) else {
-        return false;
-    };
     let Some(event_type_value) = v8_string(scope, event_type) else {
         return false;
     };
     let data = SimpleObjectAbortListenerDataDeclaration::new(
         target,
         entry,
-        slot_value,
         event_type_value,
         listener,
         capture,
@@ -430,36 +398,15 @@ fn register_simple_object_abort_listener<'s>(
     true
 }
 
-fn simple_object_event_listener_registry<'s>(
-    scope: &mut v8::PinScope<'s, '_>,
-    target: v8::Local<'s, v8::Object>,
-    slot_name: &str,
-    create: bool,
-) -> Option<v8::Local<'s, v8::Object>> {
-    let target = crate::context_bootstrap::shared_event_targets::shared_target_owner(scope, target);
-    if let Some(registry) = get_private_object(scope, target, slot_name) {
-        return Some(registry);
-    }
-    if !create {
-        return None;
-    }
-    // Internal listener registry keyed by page-provided event type strings.
-    // It is not a Web API instance, so null-prototype is intentional.
-    let registry = new_null_prototype_object(scope);
-    set_private_value(scope, target, slot_name, registry.into());
-    Some(registry)
-}
-
 pub(in crate::context_bootstrap::media_queries::events::simple_event_target) fn simple_object_event_listener_array<
     's,
 >(
     scope: &mut v8::PinScope<'s, '_>,
     target: v8::Local<'s, v8::Object>,
-    slot_name: &str,
     event_type: &str,
     create: bool,
 ) -> Option<v8::Local<'s, v8::Array>> {
-    let registry = simple_object_event_listener_registry(scope, target, slot_name, create)?;
+    let registry = simple_object_event_listener_registry(scope, target)?;
     if let Some(listeners) = object_property_as_array(scope, registry, event_type) {
         return Some(listeners);
     }
@@ -478,11 +425,9 @@ pub(in crate::context_bootstrap::media_queries::events::simple_event_target) fn 
 pub(crate) fn simple_object_event_listeners_snapshot<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     target: v8::Local<'s, v8::Object>,
-    slot_name: &str,
     event_type: &str,
 ) -> Vec<SimpleObjectEventListenerSnapshot<'s>> {
-    let Some(listeners) =
-        simple_object_event_listener_array(scope, target, slot_name, event_type, false)
+    let Some(listeners) = simple_object_event_listener_array(scope, target, event_type, false)
     else {
         return Vec::new();
     };
@@ -502,10 +447,8 @@ pub(crate) fn simple_object_event_listeners_snapshot<'s>(
 pub(crate) fn simple_object_has_event_listeners<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     target: v8::Local<'s, v8::Object>,
-    slot_name: &str,
 ) -> bool {
-    let Some(registry) = simple_object_event_listener_registry(scope, target, slot_name, false)
-    else {
+    let Some(registry) = simple_object_event_listener_registry(scope, target) else {
         return false;
     };
     let Some(event_types) = simple_object_event_type_order(scope, registry, false) else {
@@ -519,8 +462,7 @@ pub(crate) fn simple_object_has_event_listeners<'s>(
         else {
             continue;
         };
-        if !simple_object_event_listeners_snapshot(scope, target, slot_name, &event_type).is_empty()
-        {
+        if !simple_object_event_listeners_snapshot(scope, target, &event_type).is_empty() {
             return true;
         }
     }
@@ -531,11 +473,7 @@ pub(crate) fn simple_event_target_inspector_listener_snapshots<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     target: v8::Local<'s, v8::Object>,
 ) -> Vec<SimpleObjectEventListenerInspectorSnapshot<'s>> {
-    let Some(slot_name) = super::state::simple_event_target_slot_name(scope, target) else {
-        return Vec::new();
-    };
-    let Some(registry) = simple_object_event_listener_registry(scope, target, &slot_name, false)
-    else {
+    let Some(registry) = simple_object_event_listener_registry(scope, target) else {
         return Vec::new();
     };
     let Some(event_types) = simple_object_event_type_order(scope, registry, false) else {
@@ -550,9 +488,7 @@ pub(crate) fn simple_event_target_inspector_listener_snapshots<'s>(
         else {
             continue;
         };
-        for listener in
-            simple_object_event_listeners_snapshot(scope, target, &slot_name, &event_type)
-        {
+        for listener in simple_object_event_listeners_snapshot(scope, target, &event_type) {
             let original = if listener.handler_slot.is_some() {
                 listener.callback.into()
             } else {
@@ -578,7 +514,6 @@ pub(crate) fn simple_event_target_inspector_listener_snapshots<'s>(
 pub(crate) fn simple_object_event_set_handler<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     target: v8::Local<'s, v8::Object>,
-    slot_name: &str,
     event_type: &str,
     handler_slot_name: &str,
     value: v8::Local<'s, v8::Value>,
@@ -593,8 +528,7 @@ pub(crate) fn simple_object_event_set_handler<'s>(
         handler_slot_name,
         callback.map_or_else(|| v8::null(scope).into(), |callback| callback.into()),
     );
-    let Some(listeners) =
-        simple_object_event_listener_array(scope, target, slot_name, event_type, active)
+    let Some(listeners) = simple_object_event_listener_array(scope, target, event_type, active)
     else {
         return;
     };
@@ -636,7 +570,7 @@ pub(crate) fn simple_object_event_set_handler<'s>(
                         incumbent_context_anchor.into(),
                     );
                 }
-                ensure_simple_object_event_type_order(scope, target, slot_name, event_type);
+                ensure_simple_object_event_type_order(scope, target, event_type);
                 return;
             }
         }
@@ -649,7 +583,7 @@ pub(crate) fn simple_object_event_set_handler<'s>(
         );
         set_private_value(scope, entry, HANDLER_TARGET_SLOT, target.into());
         let _ = listeners.set_index(scope, listeners.length(), entry.into());
-        ensure_simple_object_event_type_order(scope, target, slot_name, event_type);
+        ensure_simple_object_event_type_order(scope, target, event_type);
         return;
     }
 
@@ -666,7 +600,7 @@ pub(crate) fn simple_object_event_set_handler<'s>(
         }
         let _ = next.set_index(scope, next.length(), candidate);
     }
-    if let Some(registry) = simple_object_event_listener_registry(scope, target, slot_name, false)
+    if let Some(registry) = simple_object_event_listener_registry(scope, target)
         && let Some(key) = v8_string(scope, event_type)
     {
         let _ = registry.set(scope, key.into(), next.into());
@@ -690,13 +624,11 @@ fn handler_belongs_to_target<'s>(
 pub(crate) fn simple_object_event_remove_listener_value_for_type<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     target: v8::Local<'s, v8::Object>,
-    slot_name: &str,
     event_type: &str,
     listener: v8::Local<'s, v8::Value>,
     capture: bool,
 ) {
-    let Some(registry) = simple_object_event_listener_registry(scope, target, slot_name, false)
-    else {
+    let Some(registry) = simple_object_event_listener_registry(scope, target) else {
         return;
     };
     let Some(current) = object_property_as_array(scope, registry, event_type) else {
@@ -789,11 +721,9 @@ fn simple_object_event_type_order<'s>(
 fn ensure_simple_object_event_type_order<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     target: v8::Local<'s, v8::Object>,
-    slot_name: &str,
     event_type: &str,
 ) {
-    let Some(registry) = simple_object_event_listener_registry(scope, target, slot_name, false)
-    else {
+    let Some(registry) = simple_object_event_listener_registry(scope, target) else {
         return;
     };
     let Some(order) = simple_object_event_type_order(scope, registry, true) else {
@@ -976,12 +906,10 @@ fn simple_object_event_listener_array_contains_entry(
 fn simple_object_event_listener_entry_registered<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     target: v8::Local<'s, v8::Object>,
-    slot_name: &str,
     event_type: &str,
     entry: v8::Local<'s, v8::Object>,
 ) -> bool {
-    let Some(listeners) =
-        simple_object_event_listener_array(scope, target, slot_name, event_type, false)
+    let Some(listeners) = simple_object_event_listener_array(scope, target, event_type, false)
     else {
         return false;
     };

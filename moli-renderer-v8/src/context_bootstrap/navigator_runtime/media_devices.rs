@@ -6,14 +6,13 @@ use moli_webapi_declare::{WebApiFunctionTemplate, WebApiObject};
 
 mod info;
 
-const MEDIA_DEVICES_LISTENERS_SLOT: &str = "__moliMediaDevicesListeners";
 const MEDIA_DEVICES_ONDEVICECHANGE_SLOT: &str = "__moliMediaDevicesOndevicechange";
 
 #[derive(Default, WebApiObject)]
 #[webapi(interface = web_api_interfaces::MediaDevices)]
 struct MediaDevicesObjectDeclaration {
-    #[webapi(slot = SIMPLE_EVENT_TARGET_SLOT, value = MEDIA_DEVICES_LISTENERS_SLOT)]
-    event_target_slot: (),
+    #[webapi(slot = SIMPLE_EVENT_TARGET_LISTENERS_SLOT, init = "null_object")]
+    event_listeners: (),
 
     #[webapi(slot = MEDIA_DEVICES_ONDEVICECHANGE_SLOT, init = "null")]
     ondevicechange: (),
@@ -126,7 +125,6 @@ fn ondevicechange_setter<'s>(
     simple_object_event_set_handler(
         scope,
         args.this(),
-        MEDIA_DEVICES_LISTENERS_SLOT,
         "devicechange",
         MEDIA_DEVICES_ONDEVICECHANGE_SLOT,
         args.get(0),

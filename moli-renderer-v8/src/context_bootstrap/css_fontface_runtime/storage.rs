@@ -16,7 +16,7 @@ struct FontFaceSetObjectDeclaration {
     manual_faces: (),
     #[webapi(slot = FONT_FACE_SET_CONNECTED_FACES_SLOT, init = "array")]
     connected_faces: (),
-    #[webapi(slot = FONT_FACE_SET_LISTENERS_SLOT, init = "null_object")]
+    #[webapi(slot = crate::context_bootstrap::SIMPLE_EVENT_TARGET_LISTENERS_SLOT, init = "null_object")]
     listeners: (),
     #[webapi(slot = FONT_FACE_SET_STATUS_SLOT, init = string("loaded"))]
     status: (),

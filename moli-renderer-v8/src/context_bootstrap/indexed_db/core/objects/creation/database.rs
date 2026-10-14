@@ -1,6 +1,6 @@
 use super::*;
 use crate::context_bootstrap::{
-    SIMPLE_EVENT_TARGET_SLOT, simple_event_target_handler_getter_callback,
+    SIMPLE_EVENT_TARGET_LISTENERS_SLOT, simple_event_target_handler_getter_callback,
     simple_event_target_handler_setter_callback,
 };
 use crate::web_api_interfaces;
@@ -15,9 +15,7 @@ use moli_webapi_declare::WebApiObject;
     enumerable
 )]
 struct IdbDatabaseObjectDeclaration<'scope, 'value> {
-    #[webapi(slot = SIMPLE_EVENT_TARGET_SLOT, value = INDEXED_DB_EVENT_LISTENERS_SLOT)]
-    event_target_slot: (),
-    #[webapi(slot = INDEXED_DB_EVENT_LISTENERS_SLOT, init = "null_object")]
+    #[webapi(slot = SIMPLE_EVENT_TARGET_LISTENERS_SLOT, init = "null_object")]
     event_listeners: (),
 
     name: &'value str,

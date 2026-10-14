@@ -140,15 +140,5 @@ fn handler_setter<'s>(
         return;
     };
     let target = args.this();
-    let Some(listeners) = media_queries::simple_event_target_slot_name(scope, target) else {
-        return;
-    };
-    media_queries::simple_object_event_set_handler(
-        scope,
-        target,
-        &listeners,
-        event_type,
-        slot,
-        args.get(0),
-    );
+    media_queries::simple_object_event_set_handler(scope, target, event_type, slot, args.get(0));
 }

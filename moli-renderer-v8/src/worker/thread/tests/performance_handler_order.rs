@@ -20,6 +20,16 @@ async fn worker_simple_event_handlers_share_dispatch_and_mutation_semantics() {
               checkUnregisteredHandler(target);
             }}
             checkUnregisteredHandler(new EventTarget());
+            const first = new XMLHttpRequest(), second = new XMLHttpRequest();
+            const channel = new MessageChannel();
+            try {{
+              checkListenerIsolation([
+                self, performance, new EventTarget(), new EventTarget(),
+                new FileReader(), new FileReader(), first, second, first.upload, second.upload,
+                new AbortController().signal, new AbortController().signal,
+                channel.port1, channel.port2,
+              ]);
+            }} finally {{ channel.port1.close(); channel.port2.close(); }}
             postMessage(true);
             close();"#
         );

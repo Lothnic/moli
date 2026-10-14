@@ -20,8 +20,8 @@ struct ModelContextObject<'s> {
     prototype: v8::Local<'s, v8::Object>,
     #[webapi(slot = DOCUMENT_SLOT)]
     document: v8::Local<'s, v8::Object>,
-    #[webapi(slot = crate::context_bootstrap::SIMPLE_EVENT_TARGET_SLOT, value = events::LISTENERS_SLOT)]
-    event_target: (),
+    #[webapi(slot = crate::context_bootstrap::SIMPLE_EVENT_TARGET_LISTENERS_SLOT, init = "null_object")]
+    event_listeners: (),
 }
 
 #[derive(WebApiFunctionTemplate)]
@@ -106,7 +106,7 @@ pub(super) fn model_context_for_document<'s>(
     let Ok(target) = ModelContextObject {
         prototype,
         document,
-        event_target: (),
+        event_listeners: (),
     }
     .bind(scope) else {
         return None;

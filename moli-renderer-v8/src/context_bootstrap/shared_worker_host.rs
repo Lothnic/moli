@@ -7,7 +7,7 @@ use super::{
         current_document_content_security_policies, current_document_referrer_policy,
         document_referrer_policy_for_native_document,
     },
-    shared::SIMPLE_EVENT_TARGET_SLOT,
+    shared::SIMPLE_EVENT_TARGET_LISTENERS_SLOT,
     simple_event_target_add_event_listener_callback, simple_event_target_dispatch_event_callback,
     simple_event_target_remove_event_listener_callback, simple_object_event_listeners_snapshot,
     simple_object_event_set_handler,
@@ -46,15 +46,14 @@ use moli_storage_key::MoliStorageKey;
 use moli_webapi_declare::WebApiObject;
 use url::Url;
 
-const SHARED_WORKER_LISTENERS_SLOT: &str = "__moliSharedWorkerListeners";
 const SHARED_WORKER_CLIENT_ID_SLOT: &str = "__moliSharedWorkerClientId";
 const SHARED_WORKER_ONERROR_SLOT: &str = "__moliSharedWorkerOnError";
 
 #[derive(WebApiObject)]
 #[webapi(interface = web_api_interfaces::SharedWorker)]
 struct SharedWorkerObjectDeclaration<'scope> {
-    #[webapi(slot = SIMPLE_EVENT_TARGET_SLOT, value = SHARED_WORKER_LISTENERS_SLOT)]
-    event_target_slot: (),
+    #[webapi(slot = SIMPLE_EVENT_TARGET_LISTENERS_SLOT, init = "null_object")]
+    event_listeners: (),
 
     #[webapi(slot = SHARED_WORKER_ONERROR_SLOT, init = "null")]
     onerror_slot: (),
@@ -176,7 +175,6 @@ fn shared_worker_onerror_setter<'s>(
     simple_object_event_set_handler(
         scope,
         args.this(),
-        SHARED_WORKER_LISTENERS_SLOT,
         "error",
         SHARED_WORKER_ONERROR_SLOT,
         args.get(0),
@@ -758,17 +756,10 @@ fn dispatch_shared_worker_error_event<'s>(
     crate::context_bootstrap::mark_event_trusted(scope, event);
     set_event_dispatch_fields(scope, worker, event);
 
-    let listeners = simple_object_event_listeners_snapshot(
-        scope,
-        worker,
-        SHARED_WORKER_LISTENERS_SLOT,
-        "error",
-    );
+    let listeners = simple_object_event_listeners_snapshot(scope, worker, "error");
     let mut dispatched = false;
     for listener in listeners {
-        let Some(listener) =
-            listener.prepare_for_invocation(scope, worker, SHARED_WORKER_LISTENERS_SLOT, "error")
-        else {
+        let Some(listener) = listener.prepare_for_invocation(scope, worker, "error") else {
             continue;
         };
         dispatched = true;

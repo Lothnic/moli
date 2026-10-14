@@ -2,7 +2,6 @@ use super::*;
 use crate::context_bootstrap::exposed_interfaces::build_intrinsic_interface_instance;
 use crate::util::{get_private_object, get_private_value, set_private_value};
 use crate::web_api_interfaces;
-use moli_webapi_declare::WebApiObject;
 use std::rc::Rc;
 
 const INDEXED_DB_RUNTIME_STATE_SLOT: &str = "moli.IndexedDb.runtimeState";
@@ -13,13 +12,6 @@ const INDEXED_DB_OPEN_DATABASES_FIELD: &str = "moli.IndexedDb.runtime.openDataba
 const INDEXED_DB_BLOCKED_OPEN_QUEUE_FIELD: &str = "moli.IndexedDb.runtime.blockedOpenQueue";
 const INDEXED_DB_READWRITE_TRANSACTION_QUEUE_FIELD: &str =
     "moli.IndexedDb.runtime.readwriteTransactionQueue";
-
-#[derive(Default, WebApiObject)]
-#[webapi(interface = web_api_interfaces::IDBFactory)]
-struct IndexedDbFactoryRuntimeDeclaration {
-    #[webapi(slot = INDEXED_DB_EVENT_LISTENERS_SLOT, init = "null_object")]
-    event_listeners: (),
-}
 
 struct IndexedDbWorkerTaskWake {
     tx: tokio::sync::mpsc::UnboundedSender<()>,
@@ -240,17 +232,6 @@ fn ensure_runtime_factory_field<'s>(
         return Some(factory);
     }
     let _ = factory.set_prototype(scope, factory_proto.into());
-    if object_property_as_object(scope, factory, INDEXED_DB_EVENT_LISTENERS_SLOT).is_none() {
-        // Listener maps use event type strings as dictionary keys, so they must
-        // not inherit attacker-controlled Object.prototype properties.
-        let listeners = new_null_prototype_object(scope);
-        set_indexed_db_slot_value(
-            scope,
-            factory,
-            INDEXED_DB_EVENT_LISTENERS_SLOT,
-            listeners.into(),
-        );
-    }
     define_non_enumerable_bool_property(scope, state, INDEXED_DB_FACTORY_INITIALIZED_FIELD, true);
     Some(factory)
 }
@@ -310,16 +291,9 @@ fn build_indexed_db_factory_object<'s>(
     // Materialize the realm's intrinsic before constructing the factory, without
     // reading an author-replaced public IDBFactory binding on first use.
     let factory = build_intrinsic_interface_instance(scope, "IDBFactory").ok()?;
-    IndexedDbFactoryRuntimeDeclaration::default()
+    web_api_interfaces::IDBFactory::DESCRIPTOR
         .initialize(scope, factory)
         .ok()?;
-    let listeners = new_null_prototype_object(scope);
-    set_indexed_db_slot_value(
-        scope,
-        factory,
-        INDEXED_DB_EVENT_LISTENERS_SLOT,
-        listeners.into(),
-    );
     let owner = indexed_db_execution_owner_for_object(scope, factory);
     let storage_scope = owner
         .execution_context()

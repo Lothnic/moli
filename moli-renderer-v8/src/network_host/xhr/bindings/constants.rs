@@ -444,14 +444,7 @@ fn xhr_value_setter<'s>(
     };
     set_xhr_state_value(scope, xhr, key, stored);
     if let Some(event_type) = xhr_event_type_for_handler_slot(key) {
-        simple_object_event_set_handler(
-            scope,
-            xhr,
-            XHR_SIMPLE_EVENT_TARGET_LISTENERS_SLOT,
-            event_type,
-            key,
-            stored,
-        );
+        simple_object_event_set_handler(scope, xhr, event_type, key, stored);
     } else {
         set_private_value(scope, xhr, key, stored);
     }

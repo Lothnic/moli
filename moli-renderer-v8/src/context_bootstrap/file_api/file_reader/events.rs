@@ -24,7 +24,7 @@ pub(in crate::context_bootstrap) fn file_reader_add_event_listener_callback<'s>(
     args: v8::FunctionCallbackArguments<'s>,
     mut rv: v8::ReturnValue<'_, v8::Value>,
 ) {
-    simple_object_event_target_add_listener(scope, &args, FILE_READER_LISTENERS_SLOT);
+    simple_object_event_target_add_listener(scope, &args);
     rv.set_undefined();
 }
 
@@ -33,7 +33,7 @@ pub(in crate::context_bootstrap) fn file_reader_remove_event_listener_callback<'
     args: v8::FunctionCallbackArguments<'s>,
     mut rv: v8::ReturnValue<'_, v8::Value>,
 ) {
-    simple_object_event_target_remove_listener(scope, &args, FILE_READER_LISTENERS_SLOT);
+    simple_object_event_target_remove_listener(scope, &args);
     rv.set_undefined();
 }
 
@@ -55,11 +55,5 @@ pub(in crate::context_bootstrap::file_api::file_reader) fn dispatch_file_reader_
     }
     .bind(scope)
     .expect("FileReader event fallback declaration should bind");
-    let _ = dispatch_simple_event_target_event(
-        scope,
-        reader,
-        FILE_READER_LISTENERS_SLOT,
-        event_type,
-        event,
-    );
+    let _ = dispatch_simple_event_target_event(scope, reader, event_type, event);
 }

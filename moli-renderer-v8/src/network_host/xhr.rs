@@ -7,9 +7,8 @@ mod response_type;
 mod send;
 
 use super::*;
-use crate::context_bootstrap::SIMPLE_EVENT_TARGET_SLOT;
 use crate::native_bridge::throw_dom_exception;
-use crate::util::{get_private_value, private_key};
+use crate::util::get_private_value;
 use crate::web_api_interfaces;
 use crate::worker::WORKER_STATE_SLOT;
 use moli_webapi_declare::WebApiFunctionTemplate;
@@ -43,7 +42,6 @@ const XHR_PENDING_BODY_BYTES_SLOT: &str = "__lmXhrPendingBodyBytes";
 const XHR_PENDING_BODY_LENGTH_SLOT: &str = "__lmXhrPendingBodyLength";
 const XHR_PENDING_HEADERS_SLOT: &str = "__lmXhrPendingHeadersJson";
 pub(crate) const XHR_ACTIVE_INTERNAL_ID_SLOT: &str = "__lmXhrActiveInternalId";
-pub(crate) const XHR_SIMPLE_EVENT_TARGET_LISTENERS_SLOT: &str = "__moliXhrEventTargetListeners";
 
 pub(crate) use self::bindings::{
     install_window_xml_http_request_template_bindings, install_xml_http_request_bindings,
@@ -92,23 +90,6 @@ pub(crate) fn install_progress_event_template_bindings<'s>(
             template.prototype_template(scope),
         );
     }
-}
-
-pub(crate) fn finalize_xml_http_request_event_target_realm_bindings<'s>(
-    scope: &mut v8::PinScope<'s, '_>,
-    event_target_prototype: v8::Local<'s, v8::Object>,
-) -> anyhow::Result<()> {
-    let slot = SIMPLE_EVENT_TARGET_SLOT;
-    let key = private_key(scope, slot).ok_or_else(|| {
-        anyhow::anyhow!("failed to allocate XMLHttpRequestEventTarget slot `{slot}`")
-    })?;
-    let value = v8str(scope, XHR_SIMPLE_EVENT_TARGET_LISTENERS_SLOT).into();
-    if event_target_prototype.set_private(scope, key, value) != Some(true) {
-        return Err(anyhow::anyhow!(
-            "failed to finalize XMLHttpRequestEventTarget slot `{slot}`"
-        ));
-    }
-    Ok(())
 }
 
 pub(crate) fn xhr_throw_invalid_state(scope: &mut v8::PinScope<'_, '_>, message: &'static str) {

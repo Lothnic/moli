@@ -15,7 +15,6 @@ use crate::worker::WorkerScriptKind;
 use moli_webapi_declare::{ObjectLiteralDeclaration, WebApiObject, WebApiObjectDeclaration};
 
 const SERVICE_WORKER_REGISTRATION_SCOPE_SLOT: &str = "__moliServiceWorkerRegistrationScope";
-const SERVICE_WORKER_REGISTRATION_EVENTS_SLOT: &str = "__moliServiceWorkerRegistrationEvents";
 const SERVICE_WORKER_REGISTRATION_WORKER_SLOT: &str = "__moliServiceWorkerRegistrationWorker";
 const SERVICE_WORKER_REGISTRATION_WORKERS_SLOT: &str = "__moliServiceWorkerRegistrationWorkers";
 const SERVICE_WORKER_SYNC_MANAGER_SCOPE_SLOT: &str = "__moliServiceWorkerSyncManagerScope";
@@ -26,7 +25,6 @@ const SERVICE_WORKER_PUSH_SUBSCRIPTION_SCOPE_SLOT: &str =
     "__moliServiceWorkerPushSubscriptionScope";
 const SERVICE_WORKER_NAVIGATION_PRELOAD_MANAGER_SCOPE_SLOT: &str =
     "__moliServiceWorkerNavigationPreloadManagerScope";
-const SERVICE_WORKER_WORKER_EVENTS_SLOT: &str = "__moliServiceWorkerEvents";
 const SERVICE_WORKER_WORKER_REGISTRATION_SLOT: &str = "__moliServiceWorkerWorkerRegistration";
 const SERVICE_WORKER_WORKER_VERSION_ID_SLOT: &str = "__moliServiceWorkerVersionId";
 const SERVICE_WORKER_CONTAINER_ONMESSAGE_SLOT: &str = "__moliServiceWorkerContainerOnmessage";
@@ -34,7 +32,6 @@ const SERVICE_WORKER_CONTAINER_ONMESSAGEERROR_SLOT: &str =
     "__moliServiceWorkerContainerOnmessageerror";
 const SERVICE_WORKER_CONTAINER_ONCONTROLLERCHANGE_SLOT: &str =
     "__moliServiceWorkerContainerOncontrollerchange";
-const SERVICE_WORKER_CONTAINER_LISTENERS_SLOT: &str = "__moliServiceWorkerContainerEvents";
 const SERVICE_WORKER_CONTAINER_REGISTRATIONS_SLOT: &str =
     "__moliServiceWorkerContainerRegistrations";
 const SERVICE_WORKER_CONTAINER_CONTROLLER_SLOT: &str = "__moliServiceWorkerContainerController";
@@ -653,7 +650,6 @@ pub(crate) fn dispatch_service_worker_lifecycle_notification(
                     callback_effect = callback_effect.merge(dispatch_service_worker_simple_event(
                         scope,
                         registration,
-                        SERVICE_WORKER_REGISTRATION_EVENTS_SLOT,
                         "updatefound",
                     ));
                 }
@@ -667,13 +663,9 @@ pub(crate) fn dispatch_service_worker_lifecycle_notification(
                         *version_id,
                     ) {
                         service_worker_worker_set_state(scope, worker, state);
-                        callback_effect =
-                            callback_effect.merge(dispatch_service_worker_simple_event(
-                                scope,
-                                worker,
-                                SERVICE_WORKER_WORKER_EVENTS_SLOT,
-                                "statechange",
-                            ));
+                        callback_effect = callback_effect.merge(
+                            dispatch_service_worker_simple_event(scope, worker, "statechange"),
+                        );
                     }
                 }
             }
@@ -799,13 +791,7 @@ fn dispatch_service_worker_client_message_in_owner_scope<'s>(
     if let Some(event) = event {
         let callback_effect =
             service_worker_client_message_callback_dispatch_effect(scope, container, "message");
-        let _ = dispatch_simple_event_target_event(
-            scope,
-            container,
-            SERVICE_WORKER_CONTAINER_LISTENERS_SLOT,
-            "message",
-            event,
-        );
+        let _ = dispatch_simple_event_target_event(scope, container, "message", event);
         return ServiceWorkerClientMessageDispatchEffect::MessageDispatched { callback_effect };
     }
     ServiceWorkerClientMessageDispatchEffect::CurrentTargetProducedNoDispatchableEvent
@@ -832,13 +818,7 @@ fn dispatch_service_worker_client_messageerror<'s>(
             container,
             "messageerror",
         );
-        let _ = dispatch_simple_event_target_event(
-            scope,
-            container,
-            SERVICE_WORKER_CONTAINER_LISTENERS_SLOT,
-            "messageerror",
-            event,
-        );
+        let _ = dispatch_simple_event_target_event(scope, container, "messageerror", event);
         return Some(callback_effect);
     }
     None
@@ -850,10 +830,7 @@ fn service_worker_client_message_callback_dispatch_effect<'s>(
     event_type: &str,
 ) -> ServiceWorkerClientMessageCallbackDispatchEffect {
     if crate::context_bootstrap::simple_object_event_listeners_snapshot(
-        scope,
-        container,
-        SERVICE_WORKER_CONTAINER_LISTENERS_SLOT,
-        event_type,
+        scope, container, event_type,
     )
     .is_empty()
     {
@@ -872,12 +849,8 @@ pub(crate) fn dispatch_service_worker_controller_change(
         owner.restore(scope, previous_owner_context);
         return ServiceWorkerInternalEventCallbackDispatchEffect::NoCallbackBodyDispatched;
     };
-    let callback_effect = dispatch_service_worker_simple_event(
-        scope,
-        container,
-        SERVICE_WORKER_CONTAINER_LISTENERS_SLOT,
-        "controllerchange",
-    );
+    let callback_effect =
+        dispatch_service_worker_simple_event(scope, container, "controllerchange");
     owner.defer_restore(scope, previous_owner_context);
     callback_effect
 }
@@ -1026,7 +999,6 @@ pub(in crate::context_bootstrap) fn navigator_service_worker_message_handler_set
     simple_object_event_set_handler(
         scope,
         args.this(),
-        SERVICE_WORKER_CONTAINER_LISTENERS_SLOT,
         "message",
         SERVICE_WORKER_CONTAINER_ONMESSAGE_SLOT,
         args.get(0),
@@ -1059,7 +1031,6 @@ pub(in crate::context_bootstrap) fn navigator_service_worker_messageerror_handle
     simple_object_event_set_handler(
         scope,
         args.this(),
-        SERVICE_WORKER_CONTAINER_LISTENERS_SLOT,
         "messageerror",
         SERVICE_WORKER_CONTAINER_ONMESSAGEERROR_SLOT,
         args.get(0),
@@ -1092,7 +1063,6 @@ pub(in crate::context_bootstrap) fn navigator_service_worker_controllerchange_ha
     simple_object_event_set_handler(
         scope,
         args.this(),
-        SERVICE_WORKER_CONTAINER_LISTENERS_SLOT,
         "controllerchange",
         SERVICE_WORKER_CONTAINER_ONCONTROLLERCHANGE_SLOT,
         args.get(0),
@@ -2056,12 +2026,7 @@ pub(crate) fn settle_service_worker_unregister_completion<'s>(
         }
         if let Some(active_worker) = active_worker {
             service_worker_worker_set_state(scope, active_worker, "redundant");
-            dispatch_service_worker_simple_event(
-                scope,
-                active_worker,
-                SERVICE_WORKER_WORKER_EVENTS_SLOT,
-                "statechange",
-            );
+            dispatch_service_worker_simple_event(scope, active_worker, "statechange");
         }
     }
     let _ = resolver.resolve(scope, v8::Boolean::new(scope, removed).into());
@@ -2876,14 +2841,14 @@ fn mark_service_worker_registration_event_target<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     registration: v8::Local<'s, v8::Object>,
 ) {
-    mark_simple_event_target_slot(scope, registration, SERVICE_WORKER_REGISTRATION_EVENTS_SLOT);
+    initialize_simple_event_target(scope, registration);
 }
 
 fn mark_service_worker_worker_event_target<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     worker: v8::Local<'s, v8::Object>,
 ) {
-    mark_simple_event_target_slot(scope, worker, SERVICE_WORKER_WORKER_EVENTS_SLOT);
+    initialize_simple_event_target(scope, worker);
 }
 
 fn service_worker_registration_add_event_listener_callback<'s>(
@@ -3148,11 +3113,10 @@ fn set_service_worker_registration_worker_values<'s>(
 fn dispatch_service_worker_simple_event<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     target: v8::Local<'s, v8::Object>,
-    slot_name: &str,
     event_type: &'static str,
 ) -> ServiceWorkerInternalEventCallbackDispatchEffect {
     let callback_effect = if crate::context_bootstrap::simple_object_event_listeners_snapshot(
-        scope, target, slot_name, event_type,
+        scope, target, event_type,
     )
     .is_empty()
     {
@@ -3163,7 +3127,7 @@ fn dispatch_service_worker_simple_event<'s>(
     let event = v8::Object::new(scope);
     let _ =
         ServiceWorkerSimpleEventDeclaration::new(v8str(scope, event_type)).initialize(scope, event);
-    dispatch_simple_event_target_event(scope, target, slot_name, event_type, event);
+    dispatch_simple_event_target_event(scope, target, event_type, event);
     callback_effect
 }
 

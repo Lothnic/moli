@@ -102,7 +102,7 @@ pub(super) fn initialize_font_face_set_event_target<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     object: v8::Local<'s, v8::Object>,
 ) {
-    mark_simple_event_target_slot(scope, object, FONT_FACE_SET_LISTENERS_SLOT);
+    initialize_simple_event_target(scope, object);
     for handler in FONT_FACE_SET_EVENT_HANDLERS {
         set_private_value(scope, object, handler.slot_name, v8::null(scope).into());
     }
@@ -144,7 +144,6 @@ fn font_face_set_event_handler_setter<'s>(
     simple_object_event_set_handler(
         scope,
         args.this(),
-        FONT_FACE_SET_LISTENERS_SLOT,
         handler.event_type,
         handler.slot_name,
         args.get(0),
@@ -263,13 +262,7 @@ pub(super) fn dispatch_font_face_set_event<'s>(
     fontfaces: Option<v8::Local<'s, v8::Array>>,
 ) -> bool {
     let event = dispatched_font_face_set_load_event(scope, event_type, fontfaces);
-    dispatch_simple_event_target_event(
-        scope,
-        object,
-        FONT_FACE_SET_LISTENERS_SLOT,
-        event_type,
-        event,
-    )
+    dispatch_simple_event_target_event(scope, object, event_type, event)
 }
 
 pub(super) fn notify_font_face_set_owners_of_load<'s>(

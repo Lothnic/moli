@@ -1,5 +1,5 @@
 use super::{
-    SIMPLE_EVENT_TARGET_SLOT, global_constructor_object,
+    SIMPLE_EVENT_TARGET_LISTENERS_SLOT, global_constructor_object,
     simple_event_target_add_event_listener_callback, simple_event_target_dispatch_event_callback,
     simple_event_target_handler_getter_callback, simple_event_target_handler_setter_callback,
     simple_event_target_remove_event_listener_callback, structured_clone_value_for_storage,
@@ -38,7 +38,6 @@ const NOTIFICATION_REQUIRE_INTERACTION_SLOT: &str = "__lmNotificationRequireInte
 const NOTIFICATION_ACTIONS_SLOT: &str = "__lmNotificationActions";
 const NOTIFICATION_RECORD_ID_SLOT: &str = "__lmNotificationRecordId";
 const NOTIFICATION_RECORD_REGISTRATION_ID_SLOT: &str = "__lmNotificationRecordRegistrationId";
-const NOTIFICATION_LISTENERS_SLOT: &str = "__lmNotificationListeners";
 const NOTIFICATION_MAX_ACTIONS: usize = 2;
 
 pub(crate) struct NotificationOptionsPayload {
@@ -96,8 +95,8 @@ struct NotificationObjectDeclaration<'scope> {
     #[webapi(slot = NOTIFICATION_ACTIONS_SLOT)]
     actions: v8::Local<'scope, v8::Value>,
 
-    #[webapi(slot = SIMPLE_EVENT_TARGET_SLOT, value = NOTIFICATION_LISTENERS_SLOT)]
-    event_target_slot: (),
+    #[webapi(slot = SIMPLE_EVENT_TARGET_LISTENERS_SLOT, init = "null_object")]
+    event_listeners: (),
 
     #[webapi(
         method,
@@ -953,7 +952,7 @@ fn initialize_notification_object<'s>(
         silent,
         require_interaction: metadata.require_interaction,
         actions: action_array,
-        event_target_slot: (),
+        event_listeners: (),
 
         add_event_listener: (),
         remove_event_listener: (),

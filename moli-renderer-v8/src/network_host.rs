@@ -189,7 +189,6 @@ pub(crate) use self::xhr::{
     apply_xhr_streaming_response_body_source, apply_xhr_streaming_response_chunk,
     apply_xhr_streaming_response_head, apply_xhr_timeout, convert_xhr_send_body_from_args,
     dispatch_xhr_loadstart, dispatch_xhr_upload_abort_if_in_progress, dispatch_xhr_upload_complete,
-    finalize_xml_http_request_event_target_realm_bindings,
     install_progress_event_template_bindings, install_window_xml_http_request_template_bindings,
     install_xml_http_request_bindings, install_xml_http_request_event_target_bindings,
     progress_event_constructor_callback, reset_xhr_response_for_request_error, set_xhr_state_bool,

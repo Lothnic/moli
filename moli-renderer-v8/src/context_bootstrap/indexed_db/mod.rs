@@ -92,9 +92,7 @@ fn indexed_db_private_slot_fallback_allowed(slot: &str) -> bool {
     }
     matches!(
         slot,
-        INDEXED_DB_TYPED_STATE_ID_SLOT
-            | INDEXED_DB_TYPED_TASK_ID_SLOT
-            | INDEXED_DB_EVENT_LISTENERS_SLOT
+        INDEXED_DB_TYPED_STATE_ID_SLOT | INDEXED_DB_TYPED_TASK_ID_SLOT
     )
 }
 

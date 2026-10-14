@@ -37,13 +37,7 @@ pub(in crate::context_bootstrap::indexed_db) fn dispatch_idb_event_object<'s>(
     };
     let owner_scope = idb_event_target_owner_scope(scope, target);
     let previous_owner = owner_scope.enter(scope);
-    let uncanceled = dispatch_simple_event_target_event(
-        scope,
-        target,
-        INDEXED_DB_EVENT_LISTENERS_SLOT,
-        &event_type,
-        event,
-    );
+    let uncanceled = dispatch_simple_event_target_event(scope, target, &event_type, event);
 
     owner_scope.defer_restore(scope, previous_owner);
     uncanceled

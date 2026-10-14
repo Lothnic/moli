@@ -1,5 +1,4 @@
 use super::*;
-use crate::util::set_private_value;
 use crate::web_api_interfaces;
 use moli_webapi_declare::WebApiObject;
 
@@ -26,23 +25,9 @@ struct SimpleEventTargetMethodsDeclaration {
 pub(crate) fn install_simple_event_target_methods<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     target: v8::Local<'s, v8::Object>,
-    slot_name: &'static str,
 ) {
-    mark_simple_event_target_slot(scope, target, slot_name);
+    initialize_simple_event_target(scope, target);
     SimpleEventTargetMethodsDeclaration::new()
         .initialize(scope, target)
         .expect("simple event target declaration should initialize");
-}
-
-pub(crate) fn mark_simple_event_target_slot<'s>(
-    scope: &mut v8::PinScope<'s, '_>,
-    target: v8::Local<'s, v8::Object>,
-    slot_name: &'static str,
-) {
-    set_private_value(
-        scope,
-        target,
-        SIMPLE_EVENT_TARGET_SLOT,
-        v8str(scope, slot_name).into(),
-    );
 }

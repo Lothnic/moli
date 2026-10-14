@@ -9,7 +9,7 @@ pub(crate) fn simple_event_target_handler_getter_callback<'s>(
     args: v8::FunctionCallbackArguments<'s>,
     mut rv: v8::ReturnValue<'_, v8::Value>,
 ) {
-    let Some((property, _)) = handler_callback_data(scope, &args) else {
+    let Some(property) = handler_callback_data(scope, &args) else {
         return;
     };
     rv.set(
@@ -22,13 +22,12 @@ pub(crate) fn simple_event_target_handler_setter_callback<'s>(
     args: v8::FunctionCallbackArguments<'s>,
     _rv: v8::ReturnValue<'_, v8::Value>,
 ) {
-    let Some((property, slot)) = handler_callback_data(scope, &args) else {
+    let Some(property) = handler_callback_data(scope, &args) else {
         return;
     };
     simple_object_event_set_handler(
         scope,
         args.this(),
-        &slot,
         property.strip_prefix("on").expect("event handler property"),
         &property,
         args.get(0),
@@ -38,14 +37,14 @@ pub(crate) fn simple_event_target_handler_setter_callback<'s>(
 fn handler_callback_data<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     args: &v8::FunctionCallbackArguments<'s>,
-) -> Option<(String, String)> {
-    let Some(slot) = simple_event_target_slot_name(scope, args.this()) else {
+) -> Option<String> {
+    if !is_simple_event_target(scope, args.this()) {
         throw_type_error(scope, "Illegal invocation");
         return None;
-    };
+    }
     v8::Local::<v8::String>::try_from(args.data())
         .ok()
-        .map(|property| (property.to_rust_string_lossy(scope), slot))
+        .map(|property| property.to_rust_string_lossy(scope))
 }
 
 /// Install explicit EventHandler accessors on object-backed Window surfaces.

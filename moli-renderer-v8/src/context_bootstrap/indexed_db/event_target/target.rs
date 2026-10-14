@@ -11,7 +11,7 @@ pub(in crate::context_bootstrap::indexed_db) fn idb_event_target_add_event_liste
     if !require_idb_event_target(scope, args.this()) {
         return;
     }
-    simple_object_event_target_add_listener(scope, &args, INDEXED_DB_EVENT_LISTENERS_SLOT);
+    simple_object_event_target_add_listener(scope, &args);
 }
 
 pub(in crate::context_bootstrap::indexed_db) fn idb_event_target_remove_event_listener_callback<
@@ -24,7 +24,7 @@ pub(in crate::context_bootstrap::indexed_db) fn idb_event_target_remove_event_li
     if !require_idb_event_target(scope, args.this()) {
         return;
     }
-    simple_object_event_target_remove_listener(scope, &args, INDEXED_DB_EVENT_LISTENERS_SLOT);
+    simple_object_event_target_remove_listener(scope, &args);
 }
 
 pub(in crate::context_bootstrap::indexed_db) fn idb_event_target_dispatch_event_callback<'s>(

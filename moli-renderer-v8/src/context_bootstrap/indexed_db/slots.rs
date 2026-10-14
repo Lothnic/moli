@@ -1,6 +1,5 @@
 pub(super) const INDEXED_DB_TYPED_STATE_ID_SLOT: &str = "moli.IndexedDb.typedStateId";
 pub(super) const INDEXED_DB_TYPED_TASK_ID_SLOT: &str = "moli.IndexedDb.typedTaskId";
-pub(super) const INDEXED_DB_EVENT_LISTENERS_SLOT: &str = "moli.IndexedDb.eventListeners";
 pub(super) const INDEXED_DB_PENDING_RESULT_SLOT: &str = "moli.IndexedDb.pendingResult";
 pub(super) const INDEXED_DB_PENDING_ERROR_SLOT: &str = "moli.IndexedDb.pendingError";
 pub(super) const INDEXED_DB_PENDING_CURSOR_SLOT: &str = "moli.IndexedDb.pendingCursor";

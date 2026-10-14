@@ -179,7 +179,7 @@ pub(crate) use content_security_policy::{
     worker_trusted_types_for_script_requirements,
 };
 use event_handlers::install_worker_global_event_handler_accessors;
-pub(super) use event_handlers::{WORKER_GLOBAL_LISTENERS_SLOT, service_worker_fetch_handler_type};
+pub(super) use event_handlers::service_worker_fetch_handler_type;
 use extendable_events::install_service_worker_extendable_event_constructors;
 pub(super) use extendable_events::{
     PendingServiceWorkerFetchEvent, PendingServiceWorkerLifecycleEvent,

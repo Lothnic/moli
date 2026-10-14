@@ -3,6 +3,39 @@ use super::*;
 const PROBE: &str = include_str!("simple_event_target_handlers.js");
 
 #[test]
+fn simple_event_target_listener_storage_is_private_and_separate_for_each_instance() {
+    let mut vm = new_parsed_test_vm(
+        "https://simple-event-target-storage.test/",
+        "<body><iframe id=child></iframe></body>",
+    );
+    vm.exec(PROBE, None).unwrap();
+    assert_eq!(
+        vm.eval(
+            r#"(() => {
+      for (const w of [window, document.getElementById('child').contentWindow]) {
+        const first = new w.XMLHttpRequest(), second = new w.XMLHttpRequest();
+        const channel = new w.MessageChannel();
+        const targets = [
+          new w.EventTarget(), new w.EventTarget(),
+          new w.FileReader(), new w.FileReader(),
+          first, second, first.upload, second.upload,
+          new w.AbortController().signal, new w.AbortController().signal,
+          channel.port1, channel.port2,
+          new w.VTTCue(0, 1, ''), new w.VTTCue(0, 1, ''),
+          w.performance, w.screen.orientation, w.visualViewport,
+        ];
+        try { checkListenerIsolation(targets, w); }
+        finally { channel.port1.close(); channel.port2.close(); }
+      }
+      return true;
+    })()"#
+        )
+        .unwrap(),
+        "true"
+    );
+}
+
+#[test]
 fn indexed_db_handlers_share_synthetic_and_native_listener_order() {
     let mut vm = new_storage_page_task_executor_test_vm("https://idb-handler-order.test/");
     vm.exec(PROBE, None).unwrap();
@@ -22,6 +55,7 @@ fn indexed_db_handlers_share_synthetic_and_native_listener_order() {
             const db = open.result;
             const tx = db.transaction('values');
             const request = tx.objectStore('values').get('missing');
+            checkListenerIsolation([db, tx, request, open]);
             for (const [target, types] of [
               [db, ['abort', 'close', 'error', 'versionchange']],
               [tx, ['abort', 'complete', 'error']],
@@ -92,6 +126,7 @@ fn simple_window_handlers_share_dispatch_and_mutation_semantics() {
                   checkHandlerDispatch(target, 'message');
                   checkUnregisteredHandler(target);
                 }
+                checkListenerIsolation([popup, frame.contentWindow]);
                 return true;
               } finally { popup.close(); }
             })()"#,

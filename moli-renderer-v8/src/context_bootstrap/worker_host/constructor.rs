@@ -49,8 +49,8 @@ const WORKER_EVENT_HANDLERS: &[WorkerEventHandler] = &[
 #[derive(WebApiObject)]
 #[webapi(interface = web_api_interfaces::Worker)]
 struct WorkerObjectDeclaration {
-    #[webapi(slot = SIMPLE_EVENT_TARGET_SLOT, value = WORKER_LISTENERS_SLOT)]
-    event_target_slot: (),
+    #[webapi(slot = SIMPLE_EVENT_TARGET_LISTENERS_SLOT, init = "null_object")]
+    event_listeners: (),
 
     #[webapi(slot = WORKER_ONMESSAGE_SLOT, init = "null")]
     onmessage_slot: (),
@@ -695,7 +695,6 @@ fn worker_event_handler_setter<'s>(
     simple_object_event_set_handler(
         scope,
         args.this(),
-        WORKER_LISTENERS_SLOT,
         handler.event_type,
         handler.slot_name,
         args.get(0),

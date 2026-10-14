@@ -97,7 +97,6 @@ pub(in crate::context_bootstrap) const STORAGE_BUCKET_MANAGER_CHILD_HANDLE_SLOT:
     "__moliStorageBucketManagerChildHandle";
 pub(in crate::context_bootstrap) const STORAGE_BUCKET_MANAGER_POPUP_ID_SLOT: &str =
     "__moliStorageBucketManagerPopupId";
-const SERVICE_WORKER_CONTAINER_LISTENERS_SLOT: &str = "__moliServiceWorkerContainerEvents";
 const SERVICE_WORKER_CONTAINER_ONMESSAGE_SLOT: &str = "__moliServiceWorkerContainerOnmessage";
 const SERVICE_WORKER_CONTAINER_ONMESSAGEERROR_SLOT: &str =
     "__moliServiceWorkerContainerOnmessageerror";
@@ -403,8 +402,8 @@ struct NavigatorUaDataPrototypeMethodsDeclaration {
 #[derive(Default, WebApiObject)]
 #[webapi(interface = web_api_interfaces::ServiceWorkerContainer, prototype = "Object")]
 struct ServiceWorkerContainerDeclaration {
-    #[webapi(slot = SIMPLE_EVENT_TARGET_SLOT, value = SERVICE_WORKER_CONTAINER_LISTENERS_SLOT)]
-    event_target_slot: (),
+    #[webapi(slot = SIMPLE_EVENT_TARGET_LISTENERS_SLOT, init = "null_object")]
+    event_listeners: (),
 
     #[webapi(slot = SERVICE_WORKER_CONTAINER_ONMESSAGE_SLOT, init = "null")]
     _onmessage: (),

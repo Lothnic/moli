@@ -275,7 +275,6 @@ fn websocket_event_handler_setter_function<'s>(
     simple_object_event_set_handler(
         scope,
         args.this(),
-        WEBSOCKET_LISTENERS_SLOT,
         handler.event_type,
         handler.slot_name,
         args.get(0),

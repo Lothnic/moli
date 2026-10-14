@@ -150,6 +150,7 @@ pub(crate) fn initialize_xml_http_request_instance(
     execution_context: Option<&crate::native_bridge::WindowExecutionContextBinding>,
 ) {
     let xhr = local_object_in_scope(scope, xhr);
+    crate::context_bootstrap::initialize_simple_event_target(scope, xhr);
     let state = XmlHttpRequestStateDeclaration::default()
         .bind(scope)
         .expect("XMLHttpRequest state declaration should bind");
@@ -161,6 +162,7 @@ pub(crate) fn initialize_xml_http_request_instance(
     ))
     .bind(scope)
     .expect("XMLHttpRequestUpload declaration should bind");
+    crate::context_bootstrap::initialize_simple_event_target(scope, upload);
     let _ = xhr.set_internal_field(XHR_UPLOAD_FIELD_INDEX, upload.into());
 
     if let Some(execution_context) = execution_context {
@@ -396,11 +398,7 @@ pub(crate) fn xhr_has_upload_listeners(
     xhr: v8::Local<'_, v8::Object>,
 ) -> bool {
     xhr_upload_object(scope, xhr).is_some_and(|upload| {
-        crate::context_bootstrap::simple_object_has_event_listeners(
-            scope,
-            upload,
-            super::XHR_SIMPLE_EVENT_TARGET_LISTENERS_SLOT,
-        )
+        crate::context_bootstrap::simple_object_has_event_listeners(scope, upload)
     })
 }
 

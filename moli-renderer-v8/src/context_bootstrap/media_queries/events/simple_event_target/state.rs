@@ -1,37 +1,36 @@
 use super::*;
-use crate::util::get_private_value;
+use crate::context_bootstrap::shared_event_targets::shared_target_owner;
+use crate::util::{get_private_object, new_null_prototype_object, set_private_value};
 
-pub(crate) fn simple_event_target_slot_name<'s>(
+pub(crate) fn initialize_simple_event_target<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     target: v8::Local<'s, v8::Object>,
-) -> Option<String> {
-    let value = simple_event_target_private_value(scope, target, SIMPLE_EVENT_TARGET_SLOT)?;
-    if value.is_null_or_undefined() {
-        return None;
+) {
+    let target = shared_target_owner(scope, target);
+    if get_private_object(scope, target, SIMPLE_EVENT_TARGET_LISTENERS_SLOT).is_none() {
+        let registry = new_null_prototype_object(scope);
+        set_private_value(
+            scope,
+            target,
+            SIMPLE_EVENT_TARGET_LISTENERS_SLOT,
+            registry.into(),
+        );
     }
-    value
-        .to_string(scope)
-        .map(|value| value.to_rust_string_lossy(scope))
 }
 
-pub(in crate::context_bootstrap::media_queries::events::simple_event_target) fn simple_event_target_private_value<
-    's,
->(
+pub(crate) fn is_simple_event_target<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     target: v8::Local<'s, v8::Object>,
-    slot: &str,
-) -> Option<v8::Local<'s, v8::Value>> {
-    let mut current = Some(target);
-    for _ in 0..64 {
-        let object = current?;
-        if let Some(value) = get_private_value(scope, object, slot) {
-            return Some(value);
-        }
-        let prototype = object.get_prototype(scope)?;
-        if prototype.is_null_or_undefined() {
-            return None;
-        }
-        current = v8::Local::<v8::Object>::try_from(prototype).ok();
-    }
-    None
+) -> bool {
+    simple_object_event_listener_registry(scope, target).is_some()
+}
+
+pub(super) fn simple_object_event_listener_registry<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    target: v8::Local<'s, v8::Object>,
+) -> Option<v8::Local<'s, v8::Object>> {
+    let target = shared_target_owner(scope, target);
+    // Read only the target's own private state. Looking through prototypes would
+    // let instances inherit another target's listener list and receiver identity.
+    get_private_object(scope, target, SIMPLE_EVENT_TARGET_LISTENERS_SLOT)
 }

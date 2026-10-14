@@ -10,7 +10,6 @@ mod resource_buffer;
 mod window_state;
 
 const DEFAULT_RESOURCE_TIMING_BUFFER_SIZE: u32 = 250;
-const PERFORMANCE_EVENT_LISTENERS_SLOT: &str = "__moliPerformanceEventListeners";
 const PERFORMANCE_RESOURCE_TIMING_BUFFER_ID_SLOT: &str = "__moliPerformanceResourceTimingBufferId";
 const PERFORMANCE_ON_RESOURCE_TIMING_BUFFER_FULL_SLOT: &str =
     "__moliPerformanceOnResourceTimingBufferFull";

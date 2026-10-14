@@ -1,4 +1,4 @@
-use super::{SIMPLE_EVENT_TARGET_SLOT, simple_object_event_set_handler};
+use super::{SIMPLE_EVENT_TARGET_LISTENERS_SLOT, simple_object_event_set_handler};
 use crate::util::{
     callback_data_index_value, callback_data_item, get_private_value, set_private_value,
     throw_type_error,
@@ -10,7 +10,6 @@ use moli_webapi_declare::{WebApiFunctionTemplate, WebApiObject, v8};
 const SPEECH_SYNTHESIS_PENDING_SLOT: &str = "__lmSpeechSynthesisPending";
 const SPEECH_SYNTHESIS_SPEAKING_SLOT: &str = "__lmSpeechSynthesisSpeaking";
 const SPEECH_SYNTHESIS_PAUSED_SLOT: &str = "__lmSpeechSynthesisPaused";
-const SPEECH_SYNTHESIS_LISTENERS_SLOT: &str = "__lmSpeechSynthesisListeners";
 const SPEECH_SYNTHESIS_ONVOICESCHANGED_SLOT: &str = "__lmSpeechSynthesisOnvoiceschanged";
 
 const SPEECH_UTTERANCE_TEXT_SLOT: &str = "__lmSpeechSynthesisUtteranceText";
@@ -19,7 +18,6 @@ const SPEECH_UTTERANCE_VOICE_SLOT: &str = "__lmSpeechSynthesisUtteranceVoice";
 const SPEECH_UTTERANCE_VOLUME_SLOT: &str = "__lmSpeechSynthesisUtteranceVolume";
 const SPEECH_UTTERANCE_RATE_SLOT: &str = "__lmSpeechSynthesisUtteranceRate";
 const SPEECH_UTTERANCE_PITCH_SLOT: &str = "__lmSpeechSynthesisUtterancePitch";
-const SPEECH_UTTERANCE_LISTENERS_SLOT: &str = "__lmSpeechSynthesisUtteranceListeners";
 const SPEECH_UTTERANCE_ONSTART_SLOT: &str = "__lmSpeechSynthesisUtteranceOnstart";
 const SPEECH_UTTERANCE_ONEND_SLOT: &str = "__lmSpeechSynthesisUtteranceOnend";
 const SPEECH_UTTERANCE_ONERROR_SLOT: &str = "__lmSpeechSynthesisUtteranceOnerror";
@@ -49,8 +47,8 @@ struct SpeechSynthesisObjectDeclaration {
     #[webapi(slot = SPEECH_SYNTHESIS_ONVOICESCHANGED_SLOT, init = "null")]
     onvoiceschanged: (),
 
-    #[webapi(slot = SIMPLE_EVENT_TARGET_SLOT, value = SPEECH_SYNTHESIS_LISTENERS_SLOT)]
-    event_target_slot: (),
+    #[webapi(slot = SIMPLE_EVENT_TARGET_LISTENERS_SLOT, init = "null_object")]
+    event_listeners: (),
 }
 
 #[derive(Default, WebApiFunctionTemplate)]
@@ -142,8 +140,8 @@ struct SpeechSynthesisUtteranceObjectDeclaration<'scope> {
     #[webapi(slot = SPEECH_UTTERANCE_ONBOUNDARY_SLOT, init = "null")]
     onboundary: (),
 
-    #[webapi(slot = SIMPLE_EVENT_TARGET_SLOT, value = SPEECH_UTTERANCE_LISTENERS_SLOT)]
-    event_target_slot: (),
+    #[webapi(slot = SIMPLE_EVENT_TARGET_LISTENERS_SLOT, init = "null_object")]
+    event_listeners: (),
 }
 
 #[derive(Default, WebApiFunctionTemplate)]
@@ -388,7 +386,7 @@ pub(in crate::context_bootstrap) fn speech_synthesis_utterance_constructor_callb
         onresume: (),
         onmark: (),
         onboundary: (),
-        event_target_slot: (),
+        event_listeners: (),
     };
     if declaration.initialize(scope, utterance).is_err() {
         rv.set_undefined();
@@ -524,7 +522,6 @@ fn speech_synthesis_onvoiceschanged_setter<'s>(
     simple_object_event_set_handler(
         scope,
         args.this(),
-        SPEECH_SYNTHESIS_LISTENERS_SLOT,
         "voiceschanged",
         SPEECH_SYNTHESIS_ONVOICESCHANGED_SLOT,
         args.get(0),
@@ -721,7 +718,6 @@ fn speech_utterance_event_handler_setter<'s>(
     simple_object_event_set_handler(
         scope,
         args.this(),
-        SPEECH_UTTERANCE_LISTENERS_SLOT,
         handler.event_type,
         handler.slot,
         args.get(0),

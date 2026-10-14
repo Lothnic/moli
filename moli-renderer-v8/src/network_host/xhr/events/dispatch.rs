@@ -29,13 +29,7 @@ pub(in crate::network_host::xhr) fn xhr_fire_readystatechange(
     let event = XhrReadyStateChangeEventDeclaration::new("readystatechange", xhr, xhr)
         .bind(scope)
         .expect("XHR readystatechange event declaration should bind");
-    let _ = dispatch_simple_event_target_event(
-        scope,
-        xhr,
-        XHR_SIMPLE_EVENT_TARGET_LISTENERS_SLOT,
-        "readystatechange",
-        event,
-    );
+    let _ = dispatch_simple_event_target_event(scope, xhr, "readystatechange", event);
 }
 
 fn xhr_dispatch_event(
@@ -46,13 +40,7 @@ fn xhr_dispatch_event(
 ) {
     let xhr = local_object_in_scope(scope, xhr);
     let event = local_object_in_scope(scope, event);
-    let _ = dispatch_simple_event_target_event(
-        scope,
-        xhr,
-        XHR_SIMPLE_EVENT_TARGET_LISTENERS_SLOT,
-        event_type,
-        event,
-    );
+    let _ = dispatch_simple_event_target_event(scope, xhr, event_type, event);
 }
 
 pub(crate) fn xhr_dispatch_progress_event(
@@ -138,11 +126,5 @@ fn xhr_has_event_observers<'s>(
     xhr: v8::Local<'s, v8::Object>,
     event_type: &str,
 ) -> bool {
-    !simple_object_event_listeners_snapshot(
-        scope,
-        xhr,
-        XHR_SIMPLE_EVENT_TARGET_LISTENERS_SLOT,
-        event_type,
-    )
-    .is_empty()
+    !simple_object_event_listeners_snapshot(scope, xhr, event_type).is_empty()
 }

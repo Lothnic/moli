@@ -338,15 +338,15 @@ pub(crate) use self::media_queries::{
     SimpleObjectEventListenerInspectorSnapshot, SimpleObjectEventListenerSnapshot,
     dispatch_media_query_list_change_events, dispatch_simple_event_target_event,
     dispatch_simple_event_target_event_collecting_errors,
-    evaluate_match_media_query_list_with_viewport, install_simple_event_target_handlers,
-    install_simple_event_target_methods, invoke_simple_event_listener,
-    mark_simple_event_target_slot, simple_event_target_add_event_listener_callback,
-    simple_event_target_dispatch_event_callback, simple_event_target_handler_getter_callback,
-    simple_event_target_handler_setter_callback, simple_event_target_inspector_listener_snapshots,
-    simple_event_target_remove_event_listener_callback, simple_event_target_slot_name,
-    simple_object_event_listeners_snapshot, simple_object_event_set_handler,
-    simple_object_event_target_add_listener, simple_object_event_target_remove_listener,
-    simple_object_has_event_listeners,
+    evaluate_match_media_query_list_with_viewport, initialize_simple_event_target,
+    install_simple_event_target_handlers, install_simple_event_target_methods,
+    invoke_simple_event_listener, is_simple_event_target,
+    simple_event_target_add_event_listener_callback, simple_event_target_dispatch_event_callback,
+    simple_event_target_handler_getter_callback, simple_event_target_handler_setter_callback,
+    simple_event_target_inspector_listener_snapshots,
+    simple_event_target_remove_event_listener_callback, simple_object_event_listeners_snapshot,
+    simple_object_event_set_handler, simple_object_event_target_add_listener,
+    simple_object_event_target_remove_listener, simple_object_has_event_listeners,
 };
 pub(crate) use self::message_ports::{
     MessagePortDeliveryRunResult, MessagePortRealmBinding, detach_message_port_owner_for_transfer,
@@ -409,7 +409,7 @@ pub(crate) use self::runtime_state::{
     ORIGINAL_WEBASSEMBLY_GLOBAL_VALUE_GETTER_SLOT, ORIGINAL_WEBASSEMBLY_INSTANCE_CONSTRUCTOR_SLOT,
     ORIGINAL_WEBASSEMBLY_LINK_ERROR_CONSTRUCTOR_SLOT,
 };
-pub(crate) use self::shared::SIMPLE_EVENT_TARGET_SLOT;
+pub(crate) use self::shared::SIMPLE_EVENT_TARGET_LISTENERS_SLOT;
 #[cfg(test)]
 pub(crate) use self::shared::structured_deserialize_value;
 #[cfg(test)]

@@ -71,3 +71,32 @@ function checkUnregisteredHandler(target, realm = globalThis) {
   target.dispatchEvent(new realm.Event('unregistered'));
   delete target.onunregistered;
 }
+
+function checkListenerIsolation(targets, realm = globalThis) {
+  const type = 'registry-isolation';
+  const trace = [];
+  function listener() { trace.push(targets.indexOf(this)); }
+  for (const target of targets) {
+    // Ordinary properties cannot select or replace private listener storage.
+    target.__moliEventTargetSlot = 'page-owned-slot';
+    target.__moliEventTargetListeners = {};
+    target.addEventListener(type, listener);
+  }
+  for (let index = 0; index < targets.length; index++) {
+    targets[index].dispatchEvent(new realm.Event(type));
+    if (JSON.stringify(trace.splice(0)) !== JSON.stringify([index])) {
+      throw new Error('listener registry leaked across targets at ' + index);
+    }
+  }
+  targets[0].removeEventListener(type, listener);
+  for (let index = 0; index < targets.length; index++) {
+    targets[index].dispatchEvent(new realm.Event(type));
+    const expected = index === 0 ? [] : [index];
+    if (JSON.stringify(trace.splice(0)) !== JSON.stringify(expected)) {
+      throw new Error('removing a listener changed another target at ' + index);
+    }
+    targets[index].removeEventListener(type, listener);
+    delete targets[index].__moliEventTargetSlot;
+    delete targets[index].__moliEventTargetListeners;
+  }
+}

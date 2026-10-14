@@ -1,4 +1,4 @@
-use super::super::SIMPLE_EVENT_TARGET_SLOT;
+use super::super::SIMPLE_EVENT_TARGET_LISTENERS_SLOT;
 use crate::web_api_interfaces;
 use crate::{
     blob,
@@ -9,8 +9,6 @@ use crate::{
 use anyhow::{Result, anyhow};
 use moli_webapi_declare::{WebApiFunctionTemplate, WebApiObject};
 
-const CLIPBOARD_EVENT_LISTENERS_SLOT: &str = "__moliClipboardEventListeners";
-
 const CLIPBOARD_ITEM_DATA_SLOT: &str = "__moliClipboardItemData";
 const CLIPBOARD_ITEM_RAW_DATA_SLOT: &str = "__moliClipboardItemRawData";
 const CLIPBOARD_ITEM_TYPES_SLOT: &str = "__moliClipboardItemTypes";
@@ -19,8 +17,8 @@ const CLIPBOARD_ITEM_PRESENTATION_STYLE_SLOT: &str = "__moliClipboardItemPresent
 #[derive(Default, WebApiObject)]
 #[webapi(interface = web_api_interfaces::Clipboard)]
 struct ClipboardObjectDeclaration {
-    #[webapi(slot = SIMPLE_EVENT_TARGET_SLOT, value = CLIPBOARD_EVENT_LISTENERS_SLOT)]
-    event_target_slot: (),
+    #[webapi(slot = SIMPLE_EVENT_TARGET_LISTENERS_SLOT, init = "null_object")]
+    event_listeners: (),
 }
 
 #[derive(Default, WebApiFunctionTemplate)]

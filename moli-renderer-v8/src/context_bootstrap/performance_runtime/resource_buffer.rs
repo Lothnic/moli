@@ -143,7 +143,6 @@ fn on_resource_timing_buffer_full_setter<'s>(
     simple_object_event_set_handler(
         scope,
         performance,
-        PERFORMANCE_EVENT_LISTENERS_SLOT,
         RESOURCE_TIMING_BUFFER_FULL_EVENT,
         PERFORMANCE_ON_RESOURCE_TIMING_BUFFER_FULL_SLOT,
         args.get(0),
@@ -274,7 +273,6 @@ fn dispatch_resource_timing_buffer_full_event<'s>(
     let _ = dispatch_simple_event_target_event(
         scope,
         performance,
-        PERFORMANCE_EVENT_LISTENERS_SLOT,
         RESOURCE_TIMING_BUFFER_FULL_EVENT,
         event,
     );

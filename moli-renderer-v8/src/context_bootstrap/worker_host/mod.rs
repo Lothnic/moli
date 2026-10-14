@@ -2,7 +2,7 @@ use super::media_queries::{
     simple_event_target_add_event_listener_callback, simple_event_target_dispatch_event_callback,
     simple_event_target_remove_event_listener_callback, simple_object_event_set_handler,
 };
-use super::shared::SIMPLE_EVENT_TARGET_SLOT;
+use super::shared::SIMPLE_EVENT_TARGET_LISTENERS_SLOT;
 use crate::{
     util::context_host_ptr_from_global_bridge,
     util::{
@@ -17,7 +17,6 @@ use crate::{
 
 const WORKER_HANDLE_SLOT: &str = "__moliWorkerHandle";
 const WORKER_ID_SLOT: &str = "__moliWorkerId";
-const WORKER_LISTENERS_SLOT: &str = "__moliWorkerListeners";
 const WORKER_ONMESSAGE_SLOT: &str = "__moliWorkerOnMessage";
 const WORKER_ONMESSAGEERROR_SLOT: &str = "__moliWorkerOnMessageError";
 const WORKER_ONERROR_SLOT: &str = "__moliWorkerOnError";

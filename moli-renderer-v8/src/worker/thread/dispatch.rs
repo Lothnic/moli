@@ -62,8 +62,8 @@ use super::super::global_scope::{
     PendingServiceWorkerMessageEvent, PendingServiceWorkerNavigationPreload,
     PendingServiceWorkerNotificationEvent, PendingServiceWorkerPeriodicSyncEvent,
     PendingServiceWorkerPushEvent, PendingServiceWorkerSyncEvent, WORKER_EXCEPTION_COLUMN_SLOT,
-    WORKER_EXCEPTION_LINE_SLOT, WORKER_EXCEPTION_SOURCE_SLOT, WORKER_GLOBAL_LISTENERS_SLOT,
-    get_worker_state, register_shared_worker_connection_port, worker_exception_report_target,
+    WORKER_EXCEPTION_LINE_SLOT, WORKER_EXCEPTION_SOURCE_SLOT, get_worker_state,
+    register_shared_worker_connection_port, worker_exception_report_target,
 };
 use super::super::handle::{
     WorkerErrorPhase, WorkerErrorSource, WorkerMessage, WorkerParentErrorEventKind,
@@ -760,12 +760,7 @@ fn dispatch_worker_promise_rejection_event<'s>(
     let event = new_worker_promise_rejection_event(scope, event_type, promise, reason);
     set_event_dispatch_fields(scope, global, event);
 
-    let listeners = simple_object_event_listeners_snapshot(
-        scope,
-        global,
-        WORKER_GLOBAL_LISTENERS_SLOT,
-        event_type,
-    );
+    let listeners = simple_object_event_listeners_snapshot(scope, global, event_type);
     for listener in &listeners {
         if let Err(error) = invoke_worker_listener(
             scope,
@@ -907,9 +902,7 @@ fn invoke_worker_listener<'s>(
     if event_stop_immediate_propagation(scope, event) {
         return Ok(());
     }
-    let Some(listener) =
-        listener.prepare_for_invocation(scope, target, WORKER_GLOBAL_LISTENERS_SLOT, event_type)
-    else {
+    let Some(listener) = listener.prepare_for_invocation(scope, target, event_type) else {
         return Ok(());
     };
     let arguments = [event.into()];
@@ -961,13 +954,7 @@ pub(super) fn dispatch_worker_error_event<'s>(
     };
     let event = new_worker_error_event(scope, report, script_url, exception);
     mark_event_trusted(scope, event);
-    !crate::context_bootstrap::dispatch_simple_event_target_event(
-        scope,
-        global,
-        WORKER_GLOBAL_LISTENERS_SLOT,
-        "error",
-        event,
-    )
+    !crate::context_bootstrap::dispatch_simple_event_target_event(scope, global, "error", event)
 }
 
 pub(super) fn dispatch_service_worker_lifecycle_event(
@@ -1174,12 +1161,7 @@ fn dispatch_service_worker_lifecycle_event_in_context<'s>(
     }
 
     let event_type = event.kind.as_str();
-    let listeners = simple_object_event_listeners_snapshot(
-        scope,
-        global,
-        WORKER_GLOBAL_LISTENERS_SLOT,
-        event_type,
-    );
+    let listeners = simple_object_event_listeners_snapshot(scope, global, event_type);
     for listener in &listeners {
         if let Err(error) = invoke_worker_listener(
             scope,
@@ -1291,12 +1273,7 @@ fn dispatch_service_worker_fetch_event_in_context<'s>(
             .insert(event.event_id, pending);
     }
 
-    let listeners = simple_object_event_listeners_snapshot(
-        scope,
-        global,
-        WORKER_GLOBAL_LISTENERS_SLOT,
-        "fetch",
-    );
+    let listeners = simple_object_event_listeners_snapshot(scope, global, "fetch");
     for listener in &listeners {
         if let Err(error) = invoke_worker_listener(
             scope,
@@ -1373,12 +1350,7 @@ fn dispatch_service_worker_message_event_in_context<'s>(
         }
     }
 
-    let listeners = simple_object_event_listeners_snapshot(
-        scope,
-        global,
-        WORKER_GLOBAL_LISTENERS_SLOT,
-        event_type,
-    );
+    let listeners = simple_object_event_listeners_snapshot(scope, global, event_type);
     for listener in &listeners {
         if let Err(error) = invoke_worker_listener(
             scope,
@@ -1451,12 +1423,7 @@ fn dispatch_service_worker_notification_event_in_context<'s>(
     }
 
     let event_type = event.kind.as_str();
-    let listeners = simple_object_event_listeners_snapshot(
-        scope,
-        global,
-        WORKER_GLOBAL_LISTENERS_SLOT,
-        event_type,
-    );
+    let listeners = simple_object_event_listeners_snapshot(scope, global, event_type);
     for listener in &listeners {
         if let Err(error) = invoke_worker_listener(
             scope,
@@ -1521,8 +1488,7 @@ fn dispatch_service_worker_push_event_in_context<'s>(
         );
     }
 
-    let listeners =
-        simple_object_event_listeners_snapshot(scope, global, WORKER_GLOBAL_LISTENERS_SLOT, "push");
+    let listeners = simple_object_event_listeners_snapshot(scope, global, "push");
     for listener in &listeners {
         if let Err(error) = invoke_worker_listener(
             scope,
@@ -1591,8 +1557,7 @@ fn dispatch_service_worker_sync_event_in_context<'s>(
         );
     }
 
-    let listeners =
-        simple_object_event_listeners_snapshot(scope, global, WORKER_GLOBAL_LISTENERS_SLOT, "sync");
+    let listeners = simple_object_event_listeners_snapshot(scope, global, "sync");
     for listener in &listeners {
         if let Err(error) = invoke_worker_listener(
             scope,
@@ -1661,12 +1626,7 @@ fn dispatch_service_worker_periodic_sync_event_in_context<'s>(
         );
     }
 
-    let listeners = simple_object_event_listeners_snapshot(
-        scope,
-        global,
-        WORKER_GLOBAL_LISTENERS_SLOT,
-        "periodicsync",
-    );
+    let listeners = simple_object_event_listeners_snapshot(scope, global, "periodicsync");
     for listener in &listeners {
         if let Err(error) = invoke_worker_listener(
             scope,
@@ -4198,12 +4158,7 @@ fn dispatch_worker_global_message_event<'s>(
     let event = new_worker_message_event(scope, event_type, data, None, ports);
     set_event_dispatch_fields(scope, global, event);
 
-    let listeners = simple_object_event_listeners_snapshot(
-        scope,
-        global,
-        WORKER_GLOBAL_LISTENERS_SLOT,
-        event_type,
-    );
+    let listeners = simple_object_event_listeners_snapshot(scope, global, event_type);
     for listener in &listeners {
         if let Err(error) = invoke_worker_listener(
             scope,
@@ -4306,12 +4261,7 @@ pub(super) fn dispatch_shared_worker_connect_event(
     let event = new_worker_message_event(scope, "connect", data, source, ports);
     set_event_dispatch_fields(scope, global, event);
 
-    let listeners = simple_object_event_listeners_snapshot(
-        scope,
-        global,
-        WORKER_GLOBAL_LISTENERS_SLOT,
-        "connect",
-    );
+    let listeners = simple_object_event_listeners_snapshot(scope, global, "connect");
     for listener in &listeners {
         if let Err(error) = invoke_worker_listener(
             scope,

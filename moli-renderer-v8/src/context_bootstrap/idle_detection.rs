@@ -1,6 +1,7 @@
 use super::{
-    SIMPLE_EVENT_TARGET_SLOT, dispatch_simple_event_target_event, global_constructor_object,
-    simple_event_target_handler_getter_callback, simple_event_target_handler_setter_callback,
+    SIMPLE_EVENT_TARGET_LISTENERS_SLOT, dispatch_simple_event_target_event,
+    global_constructor_object, simple_event_target_handler_getter_callback,
+    simple_event_target_handler_setter_callback,
 };
 use crate::web_api_interfaces;
 use crate::{
@@ -16,7 +17,6 @@ use moli_webapi_declare::{WebApiFunctionTemplate, WebApiObject};
 const IDLE_DETECTOR_STARTED_SLOT: &str = "__lmIdleDetectorStarted";
 const IDLE_DETECTOR_USER_ACTIVE_SLOT: &str = "__lmIdleDetectorUserActive";
 const IDLE_DETECTOR_SCREEN_UNLOCKED_SLOT: &str = "__lmIdleDetectorScreenUnlocked";
-const IDLE_DETECTOR_LISTENERS_SLOT: &str = "__lmIdleDetectorListeners";
 const IDLE_DETECTOR_REGISTRY_SLOT: &str = "__lmIdleDetectorRegistry";
 const MINIMUM_IDLE_THRESHOLD_MS: u32 = 60_000;
 const ACTUAL_IDLE_STATE: crate::protocol_types::EmulatedIdleOverride =
@@ -37,8 +37,8 @@ struct IdleDetectorObjectDeclaration {
     #[webapi(slot = IDLE_DETECTOR_SCREEN_UNLOCKED_SLOT)]
     is_screen_unlocked: bool,
 
-    #[webapi(slot = SIMPLE_EVENT_TARGET_SLOT, value = IDLE_DETECTOR_LISTENERS_SLOT)]
-    event_target_slot: (),
+    #[webapi(slot = SIMPLE_EVENT_TARGET_LISTENERS_SLOT, init = "null_object")]
+    event_listeners: (),
 }
 
 #[derive(WebApiFunctionTemplate)]
@@ -381,13 +381,7 @@ fn dispatch_idle_detector_change_event<'s>(
         return;
     };
     mark_event_trusted(scope, event);
-    let _ = dispatch_simple_event_target_event(
-        scope,
-        detector,
-        IDLE_DETECTOR_LISTENERS_SLOT,
-        "change",
-        event,
-    );
+    let _ = dispatch_simple_event_target_event(scope, detector, "change", event);
 }
 
 fn reject_type_error<'s>(

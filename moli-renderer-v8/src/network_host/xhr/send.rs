@@ -259,11 +259,7 @@ pub(crate) fn dispatch_xhr_loadstart(
         xhr_state_number_property(scope, xhr, XHR_OPEN_GENERATION_SLOT).unwrap_or(0.0);
     // The XHR loadstart listener can abort before upload.loadstart runs.
     let has_upload_listeners = xhr_upload_object(scope, xhr).is_some_and(|upload| {
-        crate::context_bootstrap::simple_object_has_event_listeners(
-            scope,
-            upload,
-            XHR_SIMPLE_EVENT_TARGET_LISTENERS_SLOT,
-        )
+        crate::context_bootstrap::simple_object_has_event_listeners(scope, upload)
     });
     set_xhr_state_bool(scope, xhr, XHR_UPLOAD_LISTENER_SLOT, has_upload_listeners);
     set_xhr_state_bool(scope, xhr, XHR_UPLOAD_IN_PROGRESS_SLOT, send_body.is_some());
