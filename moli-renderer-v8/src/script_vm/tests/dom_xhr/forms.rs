@@ -3,6 +3,7 @@ use super::*;
 mod dialog;
 mod event_activation;
 mod named_lookup;
+mod select_state_styles;
 mod wrappers;
 
 #[test]
