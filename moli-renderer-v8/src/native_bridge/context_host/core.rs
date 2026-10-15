@@ -382,6 +382,7 @@ impl JsContextHost {
             text_codecs: TextCodecStore::default(),
             child_browsing_contexts: IndexMap::new(),
             frame_owner_store,
+            inert_document_execution_contexts: None,
             frame_parser_classic_scripts: FrameParserClassicScriptRunnerStore::default(),
             frame_parser_deferred_script_order: FrameParserDeferredScriptOrderStore::default(),
             frame_document_blocking_stylesheets: FrameDocumentBlockingStylesheetStore::default(),
