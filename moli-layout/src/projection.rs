@@ -969,7 +969,10 @@ where
                         },
                         horizontal: layout_box.style.uses_horizontal_writing_mode(),
                     });
-                    let resolved_grid_tracks = layout_box.resolved_grid_tracks.clone();
+                    let resolved_grid_tracks = world
+                        .resolved_grid_tracks
+                        .get(&LayoutBoxId::from_index(geometry.id.index()))
+                        .cloned();
                     FrozenLayoutBox {
                         geometry,
                         scroll_extent,

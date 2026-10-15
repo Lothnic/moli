@@ -4,7 +4,7 @@ use parley::{AlignmentOptions, PositionedLayoutItem, YieldData};
 use style::Atom;
 use taffy::{
     AbsoluteAxis, AlignContent, AlignContentKeyword, AlignmentSafety, AutoSizeBehavior,
-    AvailableSpace, BlockContext, BlockFormattingContext, BoxSizing, CacheTree, Clear,
+    AvailableSpace, BlockContext, BlockFormattingContext, BoxSizing, Cache, CacheTree, Clear,
     DetailedGridInfo, Dimension, Display, FlexDirection, FloatDirection, Layout,
     LayoutBlockContainer, LayoutFlexboxContainer, LayoutGridContainer, LayoutInput, LayoutOutput,
     LayoutPartialTree, LeafLayoutContext, Line, MaybeMath, MaybeResolve, NodeId, Point,
@@ -114,7 +114,7 @@ impl PreparedWorldLayout {
             }
             self.feedback_invalidation_marks[id.index()] = true;
             invalidated.push(id);
-            world.boxes[id.index()].clear_layout_caches();
+            world.clear_layout_caches(id);
             if let Some(parent) = world.boxes[id.index()].layout_parent {
                 self.feedback_invalidation_worklist.push(parent);
             }
@@ -140,15 +140,16 @@ where
     N: Copy + Debug + Eq + Hash,
 {
     world.prepare_inline_storage();
-    for layout_box in &mut world.boxes {
-        layout_box.clear_layout_caches();
+    world.resolved_grid_tracks.clear();
+    for index in 0..world.boxes.len() {
+        world.clear_layout_caches(LayoutBoxId::from_index(index));
+        let layout_box = &mut world.boxes[index];
         layout_box.unrounded_layout = Layout::with_order(0);
         layout_box.final_layout = Layout::with_order(0);
         layout_box.layout_parent = None;
         layout_box.layout_children.clear();
         layout_box.positioned_containing_block = None;
         layout_box.inline_static_position = None;
-        layout_box.resolved_grid_tracks = None;
     }
 
     world.viewport_layout.children.clear();
@@ -1720,9 +1721,9 @@ where
         if self.is_viewport_taffy_node(node_id) {
             self.viewport_layout.cache.get(inputs)
         } else {
-            self.boxes[LayoutBoxId::from_taffy(node_id).index()]
-                .cache
-                .get(inputs)
+            self.box_caches
+                .get(LayoutBoxId::from_taffy(node_id).index())
+                .and_then(|cache| cache.get(inputs))
         }
     }
 
@@ -1737,7 +1738,10 @@ where
                 // first-class overflow dependencies.
                 self.record_numeric_layout_touch(id);
             }
-            self.boxes[id.index()].cache.store(inputs, output);
+            if self.box_caches.len() <= id.index() {
+                self.box_caches.resize_with(self.boxes.len(), Cache::new);
+            }
+            self.box_caches[id.index()].store(inputs, output);
         }
     }
 
@@ -1745,7 +1749,7 @@ where
         if self.is_viewport_taffy_node(node_id) {
             self.viewport_layout.cache.clear();
         } else {
-            self.boxes[LayoutBoxId::from_taffy(node_id).index()].clear_layout_caches();
+            self.clear_layout_caches(LayoutBoxId::from_taffy(node_id));
         }
     }
 }
@@ -1876,8 +1880,8 @@ where
         else {
             return;
         };
-        self.boxes[LayoutBoxId::from_taffy(node_id).index()].resolved_grid_tracks =
-            Some(resolved_grid_tracks);
+        self.resolved_grid_tracks
+            .insert(LayoutBoxId::from_taffy(node_id), resolved_grid_tracks);
     }
 }
 

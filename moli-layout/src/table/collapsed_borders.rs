@@ -468,7 +468,7 @@ where
     {
         world.boxes[part.index()].collapsed_table_border_part = true;
     }
-    world.boxes[root.index()].collapsed_table_borders = Some(borders);
+    world.collapsed_table_borders.insert(root, borders);
 }
 
 pub(super) fn set_collapsed_border_geometry<N>(
@@ -479,7 +479,7 @@ pub(super) fn set_collapsed_border_geometry<N>(
 ) where
     N: Copy + Debug + Eq + Hash,
 {
-    if let Some(borders) = world.boxes[root.index()].collapsed_table_borders.as_mut() {
+    if let Some(borders) = world.collapsed_table_borders.get_mut(&root) {
         borders.set_geometry(columns, rows);
     }
 }
