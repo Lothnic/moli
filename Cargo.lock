@@ -1481,7 +1481,7 @@ dependencies = [
 [[package]]
 name = "fontique"
 version = "0.11.0"
-source = "git+https://github.com/lexmount/parley?rev=d0f5452487b872562102fde2c133d445272bcccc#d0f5452487b872562102fde2c133d445272bcccc"
+source = "git+https://github.com/lexmount/parley?rev=a18cfc3ba6638d44ff0d0c9ce7b0b3396b42e8cf#a18cfc3ba6638d44ff0d0c9ce7b0b3396b42e8cf"
 dependencies = [
  "hashbrown 0.17.1",
  "linebender_resource_handle",
@@ -4196,12 +4196,12 @@ dependencies = [
 [[package]]
 name = "parlance"
 version = "0.1.0"
-source = "git+https://github.com/lexmount/parley?rev=d0f5452487b872562102fde2c133d445272bcccc#d0f5452487b872562102fde2c133d445272bcccc"
+source = "git+https://github.com/lexmount/parley?rev=a18cfc3ba6638d44ff0d0c9ce7b0b3396b42e8cf#a18cfc3ba6638d44ff0d0c9ce7b0b3396b42e8cf"
 
 [[package]]
 name = "parley"
 version = "0.11.0"
-source = "git+https://github.com/lexmount/parley?rev=d0f5452487b872562102fde2c133d445272bcccc#d0f5452487b872562102fde2c133d445272bcccc"
+source = "git+https://github.com/lexmount/parley?rev=a18cfc3ba6638d44ff0d0c9ce7b0b3396b42e8cf#a18cfc3ba6638d44ff0d0c9ce7b0b3396b42e8cf"
 dependencies = [
  "fontique",
  "hashbrown 0.17.1",
@@ -4214,7 +4214,7 @@ dependencies = [
 [[package]]
 name = "parley_data"
 version = "0.11.0"
-source = "git+https://github.com/lexmount/parley?rev=d0f5452487b872562102fde2c133d445272bcccc#d0f5452487b872562102fde2c133d445272bcccc"
+source = "git+https://github.com/lexmount/parley?rev=a18cfc3ba6638d44ff0d0c9ce7b0b3396b42e8cf#a18cfc3ba6638d44ff0d0c9ce7b0b3396b42e8cf"
 dependencies = [
  "icu_collections",
  "icu_properties",
@@ -4223,12 +4223,12 @@ dependencies = [
 [[package]]
 name = "parley_emoji"
 version = "0.11.0"
-source = "git+https://github.com/lexmount/parley?rev=d0f5452487b872562102fde2c133d445272bcccc#d0f5452487b872562102fde2c133d445272bcccc"
+source = "git+https://github.com/lexmount/parley?rev=a18cfc3ba6638d44ff0d0c9ce7b0b3396b42e8cf#a18cfc3ba6638d44ff0d0c9ce7b0b3396b42e8cf"
 
 [[package]]
 name = "parley_engine"
 version = "0.11.0"
-source = "git+https://github.com/lexmount/parley?rev=d0f5452487b872562102fde2c133d445272bcccc#d0f5452487b872562102fde2c133d445272bcccc"
+source = "git+https://github.com/lexmount/parley?rev=a18cfc3ba6638d44ff0d0c9ce7b0b3396b42e8cf#a18cfc3ba6638d44ff0d0c9ce7b0b3396b42e8cf"
 dependencies = [
  "fontique",
  "harfrust",

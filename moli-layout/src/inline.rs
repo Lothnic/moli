@@ -602,88 +602,69 @@ pub(crate) fn build_inline_fragments(
             }
         }
 
-        // Merge the visual run and inline-box streams once. Asking every
-        // cluster for visual_offset() rescans all preceding line items and
-        // clusters, making fragment construction quadratic on long runs.
-        let mut inline_boxes = line.inline_box_indices().peekable();
-        let mut run_offset = metrics.offset;
-        for run in line.runs() {
-            while let Some((_, inline_box)) =
-                inline_boxes.next_if(|(index, _)| *index < run.index())
-            {
-                run_offset += inline_box.width;
-            }
-            let mut cluster_offset = run_offset;
-            // Keep run and cluster accumulation separate, matching Parley's
-            // visual_offset() rounding and run-level spacing/justification.
-            run_offset += run.advance();
+        for (cluster, cluster_offset) in line.positioned_visual_clusters() {
+            let run = cluster.run();
             let run_metrics = run.font_metrics();
-            for cluster in run.visual_clusters() {
-                let range = cluster.text_range();
-                let style_index = usize::from(cluster.style_index());
-                let vertical_offset = placement.map_or(0.0, |placement| {
-                    placement.glyph_offset(run.index(), style_index)
-                });
-                // CSSOM text quads use the typographic font box. CSS
-                // `line-height` and its leading enlarge the containing line
-                // box, but not LayoutText/Range geometry. This matches
-                // Blink's InlineBoxState::text_top/text_height contract.
-                let font_metrics = context
-                    .font_metrics
-                    .get(style_index)
-                    .copied()
-                    .flatten()
-                    .map(|metrics| inline_strut_metrics(metrics, true));
-                let ascent = font_metrics.map_or(run_metrics.ascent, |metrics| metrics.text_ascent);
-                let descent =
-                    font_metrics.map_or(run_metrics.descent, |metrics| metrics.text_descent);
-                let rect = PaintRect::new(
-                    metrics.inline_min_coord + cluster_offset,
-                    metrics.baseline - ascent + vertical_offset,
-                    cluster.advance().max(0.0),
-                    (ascent + descent).max(0.0),
-                );
-                cluster_offset += cluster.advance();
-                if let Some(style) = layout.styles().get(style_index)
-                    && style.brush.paint
-                {
-                    // Parley exposes typographic cluster boxes rather than
-                    // exact outline bounds. A two-em guard is deliberately
-                    // conservative for italic/color-glyph overhang, while the
-                    // style sidecar adds arbitrary CSS shadow/decoration
-                    // displacement. This work happens once, alongside final
-                    // fragment materialization, not during every paint.
-                    let glyph_guard = run.font_size().max(0.0) * 2.0 + 1.0;
-                    let line = &mut fragments.lines[line_index];
-                    match style_paint_outsets.get(style_index).copied().flatten() {
-                        Some(outsets) => {
-                            line.paint_bounds.include(outsets.outset(rect, glyph_guard))
-                        }
-                        None => line.paint_bounds = InlinePaintBounds::Unbounded,
-                    }
+            let range = cluster.text_range();
+            let style_index = usize::from(cluster.style_index());
+            let vertical_offset = placement.map_or(0.0, |placement| {
+                placement.glyph_offset(run.index(), style_index)
+            });
+            // CSSOM text quads use the typographic font box. CSS
+            // `line-height` and its leading enlarge the containing line
+            // box, but not LayoutText/Range geometry. This matches
+            // Blink's InlineBoxState::text_top/text_height contract.
+            let font_metrics = context
+                .font_metrics
+                .get(style_index)
+                .copied()
+                .flatten()
+                .map(|metrics| inline_strut_metrics(metrics, true));
+            let ascent = font_metrics.map_or(run_metrics.ascent, |metrics| metrics.text_ascent);
+            let descent = font_metrics.map_or(run_metrics.descent, |metrics| metrics.text_descent);
+            let rect = PaintRect::new(
+                metrics.inline_min_coord + cluster_offset,
+                metrics.baseline - ascent + vertical_offset,
+                cluster.advance().max(0.0),
+                (ascent + descent).max(0.0),
+            );
+            if let Some(style) = layout.styles().get(style_index)
+                && style.brush.paint
+            {
+                // Parley exposes typographic cluster boxes rather than
+                // exact outline bounds. A two-em guard is deliberately
+                // conservative for italic/color-glyph overhang, while the
+                // style sidecar adds arbitrary CSS shadow/decoration
+                // displacement. This work happens once, alongside final
+                // fragment materialization, not during every paint.
+                let glyph_guard = run.font_size().max(0.0) * 2.0 + 1.0;
+                let line = &mut fragments.lines[line_index];
+                match style_paint_outsets.get(style_index).copied().flatten() {
+                    Some(outsets) => line.paint_bounds.include(outsets.outset(rect, glyph_guard)),
+                    None => line.paint_bounds = InlinePaintBounds::Unbounded,
                 }
-                for unit in overlapping_output_ranges(&context.text_units, &range) {
-                    for ancestor in &unit.ancestors {
-                        box_fragments
-                            .entry((ancestor.index(), line_index))
-                            .or_default()
-                            .include_inline_axis(rect.x, rect.width);
-                    }
-                }
-                for source in overlapping_output_ranges(&context.source_map, &range) {
-                    source_fragments
-                        .entry(SourceFragmentKey {
-                            box_index: source.box_id.index(),
-                            source_byte_start: source.source_byte_range.start,
-                            source_byte_end: source.source_byte_range.end,
-                            source_utf16_start: source.source_utf16_range.start,
-                            source_utf16_end: source.source_utf16_range.end,
-                            line_index,
-                            rtl: cluster.is_rtl(),
-                        })
+            }
+            for unit in overlapping_output_ranges(&context.text_units, &range) {
+                for ancestor in &unit.ancestors {
+                    box_fragments
+                        .entry((ancestor.index(), line_index))
                         .or_default()
-                        .include(rect);
+                        .include_inline_axis(rect.x, rect.width);
                 }
+            }
+            for source in overlapping_output_ranges(&context.source_map, &range) {
+                source_fragments
+                    .entry(SourceFragmentKey {
+                        box_index: source.box_id.index(),
+                        source_byte_start: source.source_byte_range.start,
+                        source_byte_end: source.source_byte_range.end,
+                        source_utf16_start: source.source_utf16_range.start,
+                        source_utf16_end: source.source_utf16_range.end,
+                        line_index,
+                        rtl: cluster.is_rtl(),
+                    })
+                    .or_default()
+                    .include(rect);
             }
         }
 
@@ -3452,6 +3433,7 @@ mod tests {
         for direction in [parley::BaseDirection::Ltr, parley::BaseDirection::Rtl] {
             for alignment in [
                 parley::Alignment::Start,
+                parley::Alignment::End,
                 parley::Alignment::Center,
                 parley::Alignment::Justify,
             ] {
