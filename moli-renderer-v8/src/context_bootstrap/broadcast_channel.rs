@@ -26,7 +26,7 @@ const BROADCAST_CHANNEL_ONMESSAGE_SLOT: &str = "__lmBroadcastChannelOnmessage";
 const BROADCAST_CHANNEL_ONMESSAGEERROR_SLOT: &str = "__lmBroadcastChannelOnmessageerror";
 
 #[derive(WebApiObject)]
-#[webapi(interface = web_api_interfaces::BroadcastChannel)]
+#[webapi(interface = web_api_interfaces::BroadcastChannel, receiver)]
 struct BroadcastChannelObjectDeclaration<'scope> {
     #[webapi(slot = BROADCAST_CHANNEL_ID_SLOT)]
     channel_id: v8::Local<'scope, v8::Value>,
@@ -49,27 +49,27 @@ struct BroadcastChannelObjectDeclaration<'scope> {
     #[webapi(
         method,
         enumerable,
-        callback = broadcast_channel_event_target_add_event_listener_callback
+        callback = simple_event_target_add_event_listener_callback
     )]
     add_event_listener: (),
 
     #[webapi(
         method,
         enumerable,
-        callback = broadcast_channel_event_target_remove_event_listener_callback
+        callback = simple_event_target_remove_event_listener_callback
     )]
     remove_event_listener: (),
 
     #[webapi(
         method,
         enumerable,
-        callback = broadcast_channel_event_target_dispatch_event_callback
+        callback = simple_event_target_dispatch_event_callback
     )]
     dispatch_event: (),
 }
 
 #[derive(WebApiFunctionTemplate)]
-#[webapi(interface = web_api_interfaces::BroadcastChannel, enumerable)]
+#[webapi(interface = web_api_interfaces::BroadcastChannel, enumerable, receiver)]
 struct BroadcastChannelPrototypeDeclaration {
     #[webapi(
         accessor_property,
@@ -326,49 +326,6 @@ fn broadcast_channel_is_closed<'s>(
         .is_some_and(|value| value.boolean_value(scope))
 }
 
-fn broadcast_channel_receiver_branded<'s>(
-    scope: &mut v8::PinScope<'s, '_>,
-    receiver: v8::Local<'s, v8::Object>,
-) -> bool {
-    web_api_interfaces::BroadcastChannel::is_instance(scope, receiver)
-}
-
-fn broadcast_channel_event_target_add_event_listener_callback<'s>(
-    scope: &mut v8::PinScope<'s, '_>,
-    args: v8::FunctionCallbackArguments<'s>,
-    rv: v8::ReturnValue<'s, v8::Value>,
-) {
-    if !broadcast_channel_receiver_branded(scope, args.this()) {
-        throw_type_error(scope, "Illegal invocation");
-        return;
-    }
-    simple_event_target_add_event_listener_callback(scope, args, rv);
-}
-
-fn broadcast_channel_event_target_remove_event_listener_callback<'s>(
-    scope: &mut v8::PinScope<'s, '_>,
-    args: v8::FunctionCallbackArguments<'s>,
-    rv: v8::ReturnValue<'s, v8::Value>,
-) {
-    if !broadcast_channel_receiver_branded(scope, args.this()) {
-        throw_type_error(scope, "Illegal invocation");
-        return;
-    }
-    simple_event_target_remove_event_listener_callback(scope, args, rv);
-}
-
-fn broadcast_channel_event_target_dispatch_event_callback<'s>(
-    scope: &mut v8::PinScope<'s, '_>,
-    args: v8::FunctionCallbackArguments<'s>,
-    rv: v8::ReturnValue<'s, v8::Value>,
-) {
-    if !broadcast_channel_receiver_branded(scope, args.this()) {
-        throw_type_error(scope, "Illegal invocation");
-        return;
-    }
-    simple_event_target_dispatch_event_callback(scope, args, rv);
-}
-
 fn close_broadcast_channel_object<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     channel: v8::Local<'s, v8::Object>,
@@ -462,10 +419,6 @@ fn broadcast_channel_name_getter_callback<'s>(
     args: v8::FunctionCallbackArguments<'s>,
     mut rv: v8::ReturnValue<'_, v8::Value>,
 ) {
-    if !broadcast_channel_receiver_branded(scope, args.this()) {
-        throw_type_error(scope, "Illegal invocation");
-        return;
-    }
     let value = get_private_value(scope, args.this(), BROADCAST_CHANNEL_NAME_SLOT)
         .unwrap_or_else(|| v8str(scope, "").into());
     rv.set(value);
@@ -476,10 +429,6 @@ fn broadcast_channel_event_handler_getter_callback<'s>(
     args: v8::FunctionCallbackArguments<'s>,
     mut rv: v8::ReturnValue<'_, v8::Value>,
 ) {
-    if !broadcast_channel_receiver_branded(scope, args.this()) {
-        throw_type_error(scope, "Illegal invocation");
-        return;
-    }
     let Some(handler) = callback_data_item(
         scope,
         &args,
@@ -503,10 +452,6 @@ fn broadcast_channel_event_handler_setter_callback<'s>(
     args: v8::FunctionCallbackArguments<'s>,
     _rv: v8::ReturnValue<'_, v8::Value>,
 ) {
-    if !broadcast_channel_receiver_branded(scope, args.this()) {
-        throw_type_error(scope, "Illegal invocation");
-        return;
-    }
     let Some(handler) = callback_data_item(
         scope,
         &args,
@@ -529,10 +474,6 @@ fn broadcast_channel_post_message_callback<'s>(
     args: v8::FunctionCallbackArguments<'s>,
     mut rv: v8::ReturnValue<'_, v8::Value>,
 ) {
-    if !broadcast_channel_receiver_branded(scope, args.this()) {
-        throw_type_error(scope, "Illegal invocation");
-        return;
-    }
     if broadcast_channel_is_closed(scope, args.this()) {
         throw_broadcast_channel_invalid_state(scope);
         return;
@@ -585,10 +526,6 @@ fn broadcast_channel_close_callback<'s>(
     args: v8::FunctionCallbackArguments<'s>,
     mut rv: v8::ReturnValue<'_, v8::Value>,
 ) {
-    if !broadcast_channel_receiver_branded(scope, args.this()) {
-        throw_type_error(scope, "Illegal invocation");
-        return;
-    }
     close_broadcast_channel_object(scope, args.this());
     rv.set_undefined();
 }

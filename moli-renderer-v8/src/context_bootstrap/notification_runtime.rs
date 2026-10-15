@@ -48,7 +48,7 @@ pub(crate) struct NotificationOptionsPayload {
 }
 
 #[derive(WebApiObject)]
-#[webapi(interface = web_api_interfaces::Notification)]
+#[webapi(interface = web_api_interfaces::Notification, receiver)]
 struct NotificationObjectDeclaration<'scope> {
     #[webapi(slot = NOTIFICATION_TITLE_SLOT)]
     title: String,
@@ -101,21 +101,21 @@ struct NotificationObjectDeclaration<'scope> {
     #[webapi(
         method,
         enumerable,
-        callback = notification_event_target_add_event_listener_callback
+        callback = simple_event_target_add_event_listener_callback
     )]
     add_event_listener: (),
 
     #[webapi(
         method,
         enumerable,
-        callback = notification_event_target_remove_event_listener_callback
+        callback = simple_event_target_remove_event_listener_callback
     )]
     remove_event_listener: (),
 
     #[webapi(
         method,
         enumerable,
-        callback = notification_event_target_dispatch_event_callback
+        callback = simple_event_target_dispatch_event_callback
     )]
     dispatch_event: (),
 
@@ -124,7 +124,7 @@ struct NotificationObjectDeclaration<'scope> {
 }
 
 #[derive(WebApiFunctionTemplate)]
-#[webapi(interface = web_api_interfaces::Notification)]
+#[webapi(interface = web_api_interfaces::Notification, receiver)]
 struct NotificationPrototypeDeclaration {
     #[webapi(
         accessor_property = "onclick",
@@ -132,8 +132,7 @@ struct NotificationPrototypeDeclaration {
         setter = simple_event_target_handler_setter_callback,
         data = v8str(scope, "onclick"),
         setter_data = v8str(scope, "onclick"),
-        enumerable,
-        receiver = web_api_interfaces::Notification::is_instance
+        enumerable
     )]
     onclick: (),
     #[webapi(
@@ -142,8 +141,7 @@ struct NotificationPrototypeDeclaration {
         setter = simple_event_target_handler_setter_callback,
         data = v8str(scope, "onerror"),
         setter_data = v8str(scope, "onerror"),
-        enumerable,
-        receiver = web_api_interfaces::Notification::is_instance
+        enumerable
     )]
     onerror: (),
     #[webapi(
@@ -152,8 +150,7 @@ struct NotificationPrototypeDeclaration {
         setter = simple_event_target_handler_setter_callback,
         data = v8str(scope, "onshow"),
         setter_data = v8str(scope, "onshow"),
-        enumerable,
-        receiver = web_api_interfaces::Notification::is_instance
+        enumerable
     )]
     onshow: (),
     #[webapi(
@@ -162,8 +159,7 @@ struct NotificationPrototypeDeclaration {
         setter = simple_event_target_handler_setter_callback,
         data = v8str(scope, "onclose"),
         setter_data = v8str(scope, "onclose"),
-        enumerable,
-        receiver = web_api_interfaces::Notification::is_instance
+        enumerable
     )]
     onclose: (),
 
@@ -1089,10 +1085,6 @@ fn notification_title_getter_callback<'s>(
     args: v8::FunctionCallbackArguments<'s>,
     mut rv: v8::ReturnValue<'s, v8::Value>,
 ) {
-    if !notification_receiver_branded(scope, args.this()) {
-        throw_type_error(scope, "Illegal invocation");
-        return;
-    }
     rv.set(
         get_private_value(scope, args.this(), NOTIFICATION_TITLE_SLOT)
             .unwrap_or_else(|| v8str(scope, "").into()),
@@ -1104,10 +1096,6 @@ fn notification_data_getter_callback<'s>(
     args: v8::FunctionCallbackArguments<'s>,
     mut rv: v8::ReturnValue<'s, v8::Value>,
 ) {
-    if !notification_receiver_branded(scope, args.this()) {
-        throw_type_error(scope, "Illegal invocation");
-        return;
-    }
     rv.set(
         get_private_value(scope, args.this(), NOTIFICATION_DATA_SLOT)
             .unwrap_or_else(|| v8::null(scope).into()),
@@ -1175,10 +1163,6 @@ fn notification_vibrate_getter_callback<'s>(
     args: v8::FunctionCallbackArguments<'s>,
     mut rv: v8::ReturnValue<'s, v8::Value>,
 ) {
-    if !notification_receiver_branded(scope, args.this()) {
-        throw_type_error(scope, "Illegal invocation");
-        return;
-    }
     rv.set(
         get_private_value(scope, args.this(), NOTIFICATION_VIBRATE_SLOT)
             .unwrap_or_else(|| v8::Array::new(scope, 0).into()),
@@ -1190,10 +1174,6 @@ fn notification_timestamp_getter_callback<'s>(
     args: v8::FunctionCallbackArguments<'s>,
     mut rv: v8::ReturnValue<'s, v8::Value>,
 ) {
-    if !notification_receiver_branded(scope, args.this()) {
-        throw_type_error(scope, "Illegal invocation");
-        return;
-    }
     rv.set(
         get_private_value(scope, args.this(), NOTIFICATION_TIMESTAMP_SLOT)
             .unwrap_or_else(|| v8::Number::new(scope, 0.0).into()),
@@ -1213,10 +1193,6 @@ fn notification_silent_getter_callback<'s>(
     args: v8::FunctionCallbackArguments<'s>,
     mut rv: v8::ReturnValue<'s, v8::Value>,
 ) {
-    if !notification_receiver_branded(scope, args.this()) {
-        throw_type_error(scope, "Illegal invocation");
-        return;
-    }
     rv.set(
         get_private_value(scope, args.this(), NOTIFICATION_SILENT_SLOT)
             .unwrap_or_else(|| v8::null(scope).into()),
@@ -1238,10 +1214,6 @@ fn notification_string_slot_getter<'s>(
     slot: &'static str,
     default_value: &'static str,
 ) {
-    if !notification_receiver_branded(scope, args.this()) {
-        throw_type_error(scope, "Illegal invocation");
-        return;
-    }
     rv.set(
         get_private_value(scope, args.this(), slot)
             .unwrap_or_else(|| v8str(scope, default_value).into()),
@@ -1254,10 +1226,6 @@ fn notification_bool_slot_getter<'s>(
     rv: &mut v8::ReturnValue<'s, v8::Value>,
     slot: &'static str,
 ) {
-    if !notification_receiver_branded(scope, args.this()) {
-        throw_type_error(scope, "Illegal invocation");
-        return;
-    }
     rv.set(
         get_private_value(scope, args.this(), slot)
             .unwrap_or_else(|| v8::Boolean::new(scope, false).into()),
@@ -1269,10 +1237,6 @@ fn notification_actions_getter_callback<'s>(
     args: v8::FunctionCallbackArguments<'s>,
     mut rv: v8::ReturnValue<'s, v8::Value>,
 ) {
-    if !notification_receiver_branded(scope, args.this()) {
-        throw_type_error(scope, "Illegal invocation");
-        return;
-    }
     rv.set(
         get_private_value(scope, args.this(), NOTIFICATION_ACTIONS_SLOT)
             .unwrap_or_else(|| v8::Array::new(scope, 0).into()),
@@ -1285,10 +1249,6 @@ fn notification_close_callback<'s>(
     _rv: v8::ReturnValue<'s, v8::Value>,
 ) {
     let this = args.this();
-    if !notification_receiver_branded(scope, this) {
-        throw_type_error(scope, "Illegal invocation");
-        return;
-    }
     let Some(record_id) = notification_private_u64(scope, this, NOTIFICATION_RECORD_ID_SLOT) else {
         return;
     };
@@ -1317,49 +1277,6 @@ fn notification_close_callback<'s>(
     if let Some(host_ptr) = context_host_ptr_from_global_bridge(scope) {
         unsafe { &*host_ptr }.close_service_worker_notification(registration_id, record_id);
     }
-}
-
-fn notification_receiver_branded<'s>(
-    scope: &mut v8::PinScope<'s, '_>,
-    receiver: v8::Local<'s, v8::Object>,
-) -> bool {
-    web_api_interfaces::Notification::is_instance(scope, receiver)
-}
-
-fn notification_event_target_add_event_listener_callback<'s>(
-    scope: &mut v8::PinScope<'s, '_>,
-    args: v8::FunctionCallbackArguments<'s>,
-    rv: v8::ReturnValue<'s, v8::Value>,
-) {
-    if !notification_receiver_branded(scope, args.this()) {
-        throw_type_error(scope, "Illegal invocation");
-        return;
-    }
-    simple_event_target_add_event_listener_callback(scope, args, rv);
-}
-
-fn notification_event_target_remove_event_listener_callback<'s>(
-    scope: &mut v8::PinScope<'s, '_>,
-    args: v8::FunctionCallbackArguments<'s>,
-    rv: v8::ReturnValue<'s, v8::Value>,
-) {
-    if !notification_receiver_branded(scope, args.this()) {
-        throw_type_error(scope, "Illegal invocation");
-        return;
-    }
-    simple_event_target_remove_event_listener_callback(scope, args, rv);
-}
-
-fn notification_event_target_dispatch_event_callback<'s>(
-    scope: &mut v8::PinScope<'s, '_>,
-    args: v8::FunctionCallbackArguments<'s>,
-    rv: v8::ReturnValue<'s, v8::Value>,
-) {
-    if !notification_receiver_branded(scope, args.this()) {
-        throw_type_error(scope, "Illegal invocation");
-        return;
-    }
-    simple_event_target_dispatch_event_callback(scope, args, rv);
 }
 
 fn notification_private_u64<'s>(

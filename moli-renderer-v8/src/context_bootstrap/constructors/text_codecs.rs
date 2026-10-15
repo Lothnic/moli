@@ -24,7 +24,7 @@ struct TextEncoderObjectDeclaration {
 }
 
 #[derive(WebApiFunctionTemplate)]
-#[webapi(interface = web_api_interfaces::TextEncoder, enumerable)]
+#[webapi(interface = web_api_interfaces::TextEncoder, enumerable, receiver)]
 struct TextEncoderPrototypeDeclaration {
     #[webapi(method, length = 0, callback = text_encoder_encode_callback)]
     encode: (),
@@ -51,7 +51,7 @@ struct TextDecoderObjectDeclaration {
 }
 
 #[derive(WebApiFunctionTemplate)]
-#[webapi(interface = web_api_interfaces::TextDecoder, enumerable)]
+#[webapi(interface = web_api_interfaces::TextDecoder, enumerable, receiver)]
 struct TextDecoderPrototypeDeclaration {
     #[webapi(method, length = 0, callback = text_decoder_decode_callback)]
     decode: (),
@@ -164,10 +164,6 @@ fn text_codec_string_attribute_getter_callback<'s>(
         rv.set_empty_string();
         return;
     };
-    if !text_codec_receiver_branded_for_slot(scope, args.this(), slot) {
-        throw_type_error(scope, "Illegal invocation");
-        return;
-    }
     let value = get_private_value(scope, args.this(), slot)
         .and_then(|value| value.to_string(scope))
         .map(|value| value.to_rust_string_lossy(scope))
@@ -188,10 +184,6 @@ fn text_codec_bool_attribute_getter_callback<'s>(
         rv.set_bool(false);
         return;
     };
-    if !text_codec_receiver_branded_for_slot(scope, args.this(), slot) {
-        throw_type_error(scope, "Illegal invocation");
-        return;
-    }
     rv.set_bool(
         get_private_value(scope, args.this(), slot)
             .is_some_and(|value| value.is_boolean() && value.boolean_value(scope)),
@@ -225,10 +217,6 @@ fn text_encoder_encode_callback<'s>(
     args: v8::FunctionCallbackArguments<'s>,
     mut rv: v8::ReturnValue<'s, v8::Value>,
 ) {
-    if !text_encoder_receiver_branded(scope, args.this()) {
-        throw_type_error(scope, "Illegal invocation");
-        return;
-    }
     let Some(parsed) = webidl::parse_args::<TextEncoderEncodeArgs>(scope, &args) else {
         rv.set_undefined();
         return;
@@ -246,10 +234,6 @@ fn text_encoder_encode_into_callback<'s>(
     args: v8::FunctionCallbackArguments<'s>,
     mut rv: v8::ReturnValue<'s, v8::Value>,
 ) {
-    if !text_encoder_receiver_branded(scope, args.this()) {
-        throw_type_error(scope, "Illegal invocation");
-        return;
-    }
     let Some(parsed) = webidl::parse_args::<TextEncoderEncodeIntoArgs>(scope, &args) else {
         rv.set_undefined();
         return;
@@ -343,10 +327,6 @@ fn text_decoder_decode_callback<'s>(
     args: v8::FunctionCallbackArguments<'s>,
     mut rv: v8::ReturnValue<'s, v8::Value>,
 ) {
-    if !text_decoder_receiver_branded(scope, args.this()) {
-        throw_type_error(scope, "Illegal invocation");
-        return;
-    }
     let Some(parsed) = webidl::parse_args::<TextDecoderDecodeArgs>(scope, &args) else {
         rv.set_undefined();
         return;
@@ -378,34 +358,6 @@ fn text_decoder_decode_callback<'s>(
             throw_type_error(scope, error.message());
         }
     }
-}
-
-fn text_codec_receiver_branded_for_slot<'s>(
-    scope: &mut v8::PinScope<'s, '_>,
-    receiver: v8::Local<'s, v8::Object>,
-    slot: &str,
-) -> bool {
-    match slot {
-        TEXT_ENCODER_ENCODING_SLOT => text_encoder_receiver_branded(scope, receiver),
-        TEXT_DECODER_ENCODING_SLOT | TEXT_DECODER_FATAL_SLOT | TEXT_DECODER_IGNORE_BOM_SLOT => {
-            text_decoder_receiver_branded(scope, receiver)
-        }
-        _ => false,
-    }
-}
-
-fn text_encoder_receiver_branded<'s>(
-    scope: &mut v8::PinScope<'s, '_>,
-    receiver: v8::Local<'s, v8::Object>,
-) -> bool {
-    web_api_interfaces::TextEncoder::is_instance(scope, receiver)
-}
-
-fn text_decoder_receiver_branded<'s>(
-    scope: &mut v8::PinScope<'s, '_>,
-    receiver: v8::Local<'s, v8::Object>,
-) -> bool {
-    web_api_interfaces::TextDecoder::is_instance(scope, receiver)
 }
 
 fn init_text_decoder_state(

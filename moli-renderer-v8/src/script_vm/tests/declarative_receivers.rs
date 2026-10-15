@@ -134,3 +134,68 @@ fn canvas_declarations_check_setters_before_conversion_and_keep_foreign_backing_
     assert_eq!(vm.eval("receiverSetup").unwrap(), "ok");
     finish_receiver_checks(&mut vm);
 }
+
+#[test]
+fn shared_value_and_event_declarations_keep_native_brands_across_realms() {
+    let mut vm = receiver_test_vm();
+    vm.eval(r#"(() => {
+      const {child, assert, check, getters} = receiverChecks;
+      for (const realm of [window, child]) {
+        const other = realm === window ? child : window;
+        const channel = new other.BroadcastChannel('receiver-check');
+        getters(realm, 'BroadcastChannel', channel, ['name', 'onmessage', 'onmessageerror']);
+        for (const name of ['postMessage', 'close']) check(realm, channel, realm.BroadcastChannel.prototype[name]);
+        const localChannel = new realm.BroadcastChannel('receiver-check');
+        for (const name of ['addEventListener', 'removeEventListener', 'dispatchEvent']) check(realm, channel, localChannel[name]);
+        for (const name of ['onmessage', 'onmessageerror']) {
+          const setter = Object.getOwnPropertyDescriptor(realm.BroadcastChannel.prototype, name).set;
+          check(realm, channel, setter);
+          const handler = () => {};
+          setter.call(channel, handler);
+          assert(channel[name] === handler, 'foreign channel handler identity');
+        }
+        let events = 0;
+        const listener = () => events++;
+        localChannel.addEventListener.call(channel, 'probe', listener);
+        localChannel.dispatchEvent.call(channel, new other.Event('probe'));
+        localChannel.removeEventListener.call(channel, 'probe', listener);
+        assert(events === 1, 'foreign channel listener state');
+        channel.close(); localChannel.close();
+        const notification = new other.Notification('foreign');
+        getters(realm, 'Notification', notification, ['title', 'data', 'tag', 'dir', 'lang', 'body', 'icon',
+          'image', 'badge', 'vibrate', 'timestamp', 'renotify', 'silent', 'requireInteraction', 'actions']);
+        getters(realm, 'Notification', notification, ['onclick', 'onerror', 'onshow', 'onclose']);
+        for (const name of ['onclick', 'onerror', 'onshow', 'onclose']) {
+          const setter = Object.getOwnPropertyDescriptor(realm.Notification.prototype, name).set;
+          check(realm, notification, setter);
+          const handler = () => {};
+          setter.call(notification, handler);
+          assert(notification[name] === handler, 'foreign notification handler identity');
+        }
+        const localNotification = new realm.Notification('local');
+        for (const name of ['addEventListener', 'removeEventListener', 'dispatchEvent', 'close']) check(realm, notification, localNotification[name]);
+        const encoder = new other.TextEncoder();
+        const decoder = new other.TextDecoder();
+        getters(realm, 'TextEncoder', encoder, ['encoding']);
+        getters(realm, 'TextDecoder', decoder, ['encoding', 'fatal', 'ignoreBOM']);
+        for (const name of ['encode', 'encodeInto']) check(realm, encoder, realm.TextEncoder.prototype[name]);
+        check(realm, decoder, realm.TextDecoder.prototype.decode);
+        const encoded = realm.TextEncoder.prototype.encode.call(encoder, 'foreign');
+        assert(realm.TextDecoder.prototype.decode.call(decoder, encoded) === 'foreign', 'foreign codec backing state');
+        const point = new other.DOMPoint(1, 2, 3, 4);
+        getters(realm, 'DOMPoint', point, ['x', 'y', 'z', 'w']);
+        for (const name of ['x', 'y', 'z', 'w']) check(realm, point, Object.getOwnPropertyDescriptor(realm.DOMPoint.prototype, name).set);
+        check(realm, point, realm.DOMPoint.prototype.toJSON);
+        const setter = Object.getOwnPropertyDescriptor(realm.DOMPoint.prototype, 'x').set;
+        Object.setPrototypeOf(point, null);
+        setter.call(point, 9);
+        assert(realm.DOMPoint.prototype.toJSON.call(point).x === 9, 'native brand survives prototype mutation');
+        class Encoder extends other.TextEncoder {}
+        assert(realm.TextEncoder.prototype.encode.call(new Encoder(), 'subclass').length === 8, 'native subclass receiver');
+        const keyword = new other.CSSKeywordValue('auto');
+        check(realm, keyword, realm.CSSStyleValue.prototype.toString);
+        assert(realm.CSSStyleValue.prototype.toString.call(keyword) === 'auto', 'foreign Typed OM value');
+      }
+    })()"#).unwrap();
+    finish_receiver_checks(&mut vm);
+}

@@ -47,7 +47,7 @@ struct CssKeywordValuePrototypeDeclaration {
 }
 
 #[derive(WebApiFunctionTemplate)]
-#[webapi(interface = web_api_interfaces::CSSStyleValue, enumerable)]
+#[webapi(interface = web_api_interfaces::CSSStyleValue, enumerable, receiver)]
 struct CssStyleValuePrototypeDeclaration {
     #[webapi(method = "toString", callback = css_style_value_to_string_callback, length = 0)]
     to_string: (),
@@ -217,10 +217,6 @@ fn css_style_value_to_string_callback<'s>(
     args: v8::FunctionCallbackArguments<'s>,
     mut rv: v8::ReturnValue<'_, v8::Value>,
 ) {
-    if !css_style_value_receiver_branded(scope, args.this()) {
-        throw_type_error(scope, "Illegal invocation");
-        return;
-    }
     if let Some(unit) = css_unit_value_unit(scope, args.this()) {
         let value = css_unit_value_number(scope, args.this()).unwrap_or(0.0);
         let number = v8::Number::new(scope, value)
@@ -351,13 +347,6 @@ fn css_unit_value_unit_getter_callback<'s>(
     if let Some(unit) = v8_string(scope, &unit) {
         rv.set(unit.into());
     }
-}
-
-fn css_style_value_receiver_branded<'s>(
-    scope: &mut v8::PinScope<'s, '_>,
-    receiver: v8::Local<'s, v8::Object>,
-) -> bool {
-    web_api_interfaces::CSSStyleValue::is_instance(scope, receiver)
 }
 
 fn css_unit_value_number<'s>(

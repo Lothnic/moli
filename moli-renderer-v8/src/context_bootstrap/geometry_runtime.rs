@@ -157,7 +157,7 @@ struct DomMatrixJsonDeclaration {
 }
 
 #[derive(WebApiFunctionTemplate)]
-#[webapi(interface = web_api_interfaces::DOMPoint)]
+#[webapi(interface = web_api_interfaces::DOMPoint, receiver)]
 struct DomPointPrototypeAccessorsDeclaration {
     #[webapi(
         accessor_property,
@@ -194,7 +194,7 @@ struct DomPointPrototypeAccessorsDeclaration {
 }
 
 #[derive(WebApiFunctionTemplate)]
-#[webapi(interface = web_api_interfaces::DOMPoint)]
+#[webapi(interface = web_api_interfaces::DOMPoint, receiver)]
 struct DomPointPrototypeMethodsDeclaration {
     #[webapi(method = "toJSON", enumerable, callback = dom_point_to_json_callback)]
     to_json: (),
@@ -579,7 +579,7 @@ pub(super) fn dom_point_clone_data<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     object: v8::Local<'s, v8::Object>,
 ) -> Option<(bool, [f64; 4])> {
-    if !dom_point_receiver_branded(scope, object) {
+    if !web_api_interfaces::DOMPoint::is_instance(scope, object) {
         return None;
     }
     let mutable = web_api_interfaces::DOMPoint::is_instance(scope, object);
@@ -692,10 +692,6 @@ fn dom_point_getter_callback<'s>(
         rv.set_undefined();
         return;
     };
-    if !dom_point_receiver_branded(scope, args.this()) {
-        throw_type_error(scope, "Illegal invocation");
-        return;
-    }
     rv.set(
         get_private_value(scope, args.this(), slot).unwrap_or_else(|| v8::undefined(scope).into()),
     );
@@ -711,10 +707,6 @@ fn dom_point_setter_callback<'s>(
         rv.set_undefined();
         return;
     };
-    if !dom_point_receiver_branded(scope, args.this()) {
-        throw_type_error(scope, "Illegal invocation");
-        return;
-    }
     if get_private_value(scope, args.this(), DOM_POINT_READ_ONLY_SLOT)
         .is_some_and(|value| value.boolean_value(scope))
     {
@@ -926,10 +918,6 @@ fn dom_point_to_json_callback<'s>(
     mut rv: v8::ReturnValue<'_, v8::Value>,
 ) {
     let this = args.this();
-    if !dom_point_receiver_branded(scope, this) {
-        throw_type_error(scope, "Illegal invocation");
-        return;
-    }
     let declaration = DomPointJsonDeclaration {
         x: dom_point_slot(scope, this, DOM_POINT_X_SLOT, 0.0),
         y: dom_point_slot(scope, this, DOM_POINT_Y_SLOT, 0.0),
@@ -951,13 +939,6 @@ fn dom_point_slot<'s>(
     get_private_value(scope, object, slot)
         .and_then(|value| value.number_value(scope))
         .unwrap_or(default)
-}
-
-fn dom_point_receiver_branded<'s>(
-    scope: &mut v8::PinScope<'s, '_>,
-    receiver: v8::Local<'s, v8::Object>,
-) -> bool {
-    web_api_interfaces::DOMPoint::is_instance(scope, receiver)
 }
 
 fn dom_matrix_require_readonly_receiver<'s>(
