@@ -170,7 +170,7 @@ impl DomHost {
             .is_some_and(Node::is_document)
             .then_some(())?;
         self.node(handle).filter(|node| !node.is_document())?;
-        let owners = self
+        let mut owners = self
             .dom
             .mark_subtree_tree_scope_collecting_stylesheet_owners(
                 handle,
@@ -178,6 +178,7 @@ impl DomHost {
                 false,
                 false,
             );
+        self.mark_shadow_tree_scope_for_subtree(handle, Some(document_handle), false, &mut owners);
         let owner_changes = owners
             .into_iter()
             .map(|owner| {
@@ -784,6 +785,54 @@ mod tests {
     }
 
     #[test]
+    fn adoption_retargets_shadow_roots_and_descendants_before_reinsertion() {
+        let mut host = test_host();
+        let source_document = host.document_handle();
+        let target_document = host.create_detached_html_document();
+        assert!(!host.is_connected(target_document));
+        let root = host.create_element("section");
+        let shadow = host
+            .attach_shadow_root(root, "closed")
+            .expect("closed root");
+        let nested_host = host.create_element("div");
+        assert!(host.append_child(shadow, nested_host));
+        let nested_shadow = host
+            .attach_shadow_root(nested_host, "open")
+            .expect("nested root");
+        let media = host.create_element("video");
+        assert!(host.append_child(nested_shadow, media));
+        let text = host.create_text_node("fallback");
+        assert!(host.append_child(media, text));
+        assert!(host.append_child(source_document, root));
+        assert!(host.remove_child(source_document, root));
+
+        assert_eq!(host.adopt_node(target_document, root), Some(root));
+        for node in [root, shadow, nested_host, nested_shadow, media, text] {
+            assert_eq!(
+                host.node(node).and_then(Node::owner_document),
+                Some(target_document)
+            );
+            assert!(
+                !host.is_connected(node),
+                "adoption must not reconnect a removed subtree"
+            );
+        }
+        assert_eq!(host.shadow_root_handle(root), Some(shadow));
+        assert_eq!(host.shadow_root_mode(shadow).as_deref(), Some("closed"));
+        assert_eq!(host.shadow_root_handle(nested_host), Some(nested_shadow));
+        assert!(host.append_child(target_document, root));
+        assert_eq!(host.parent_node(root), Some(target_document));
+        assert!(
+            !host.is_connected(media),
+            "reinsertion must retain the inactive native Document's connection state"
+        );
+        assert_eq!(
+            host.node(media).and_then(Node::owner_document),
+            Some(target_document)
+        );
+    }
+
+    #[test]
     fn deep_shadow_tree_scope_retarget_walks_iteratively() {
         let mut host = test_host();
         let document = host.document_handle();
@@ -804,5 +853,13 @@ mod tests {
             Some(document)
         );
         assert!(host.is_connected(shadow_host));
+        let target_document = host.create_detached_html_document();
+        assert!(host.remove_child(document, root));
+        assert_eq!(host.adopt_node(target_document, root), Some(root));
+        assert_eq!(
+            host.node(shadow_host).and_then(Node::owner_document),
+            Some(target_document)
+        );
+        assert!(!host.is_connected(shadow_host));
     }
 }
