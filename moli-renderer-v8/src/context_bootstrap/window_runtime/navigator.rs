@@ -611,7 +611,7 @@ fn build_permission_status_object<'s>(
     let status = PermissionStatusObjectDeclaration::new(name.to_owned(), state.to_owned())
         .bind(scope)
         .expect("PermissionStatus declaration should bind");
-    mark_simple_event_target_slot(scope, status, "__moliPermissionStatusListeners");
+    initialize_simple_event_target(scope, status);
     status
 }
 
