@@ -783,3 +783,56 @@ async fn markdown_with_frames_uses_latest_frame_document_and_links_for_failures(
     server.abort();
     Ok(())
 }
+
+#[tokio::test]
+async fn iframe_media_urls_use_their_own_document_base() -> Result<()> {
+    let (_browser, mut page, server) = load_page(r#"<base href="https://parent.example/page/"><video poster="parent.jpg" src="parent.mp4"></video><iframe srcdoc="&lt;base href='https://cdn.example/assets/'&gt;&lt;video poster='cover.jpg' src='movie.mp4'&gt;&lt;/video&gt;"></iframe>"#).await?;
+    let rendered = render_page_dump_with_options_async(
+        &mut page,
+        DumpFormat::Markdown,
+        StripOptions::default(),
+        false,
+        true,
+        false,
+        None,
+    )
+    .await?;
+    server.abort();
+    assert!(
+        rendered.contains("![Video poster](https://cdn.example/assets/cover.jpg)"),
+        "{rendered}"
+    );
+    assert!(
+        rendered.contains("[Video](https://cdn.example/assets/movie.mp4)"),
+        "{rendered}"
+    );
+    assert!(
+        rendered.contains("![Video poster](https://parent.example/page/parent.jpg)"),
+        "{rendered}"
+    );
+    assert!(
+        rendered.contains("[Video](https://parent.example/page/parent.mp4)"),
+        "{rendered}"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn resize_observer_registered_in_child_during_parent_delivery_receives_initial_size()
+-> Result<()> {
+    let config = BrowserConfig::default().with_layout_policy(LayoutPolicy::OnDemand);
+    let (_browser, mut page, server) = load_page_with_config(r#"<div id="box" style="width:120px;height:20px"></div><iframe id="child" srcdoc="&lt;div id='target' style='width:80px;height:20px'&gt;&lt;/div&gt;"></iframe>"#, config).await?;
+    page.publish_layout_async().await?;
+    page.evaluate_runtime_expression_async(r#"window.parentCalls=0;window.childWidths=[];new ResizeObserver(()=>{if(++parentCalls===1){const w=document.getElementById('child').contentWindow;window.childObserver=new w.ResizeObserver(es=>childWidths.push(es[0].contentRect.width));childObserver.observe(w.document.getElementById('target'));}}).observe(document.getElementById('box'))"#).await?;
+    page.evaluate_runtime_expression_with_await_async(
+        "new Promise((resolve,reject)=>{const end=Date.now()+2000;const poll=()=>childWidths.length?resolve():Date.now()>end?reject(new Error('child resize notification missing')):setTimeout(poll,1);poll()})",
+        true,
+    )
+    .await?;
+    let result = page
+        .evaluate_runtime_expression_async("JSON.stringify({parentCalls,childWidths})")
+        .await?;
+    server.abort();
+    assert_eq!(result["value"], r#"{"parentCalls":1,"childWidths":[80]}"#);
+    Ok(())
+}

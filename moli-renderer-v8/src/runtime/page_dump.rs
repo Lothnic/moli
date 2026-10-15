@@ -217,6 +217,8 @@ enum FrameDumpNode {
     Label(NativeNodeId),
 }
 
+const FRAME_MARKDOWN_URL_ATTRIBUTES: [&str; 3] = ["href", "src", "poster"];
+
 struct FrameMarkdownDom<'a> {
     dom: &'a NativeDom,
     roots: std::collections::HashMap<NativeNodeId, NativeNodeId>,
@@ -275,18 +277,11 @@ impl moli_html2md::Dom for FrameMarkdownDom<'_> {
 
     fn attribute(&self, node: Self::NodeId, name: &str) -> Option<&str> {
         match node {
-            FrameDumpNode::Node(id) => self
-                .urls
-                .get(&(
-                    id,
-                    if name == "href" {
-                        "href"
-                    } else if name == "src" {
-                        "src"
-                    } else {
-                        ""
-                    },
-                ))
+            FrameDumpNode::Node(id) => FRAME_MARKDOWN_URL_ATTRIBUTES
+                .iter()
+                .copied()
+                .find(|attr| *attr == name)
+                .and_then(|name| self.urls.get(&(id, name)))
                 .map(String::as_str)
                 .or_else(|| self.dom.attribute(id, name)),
             FrameDumpNode::Link(id) if name == "href" => self
@@ -334,7 +329,7 @@ fn render_markdown_with_frames(
         let mut nodes = vec![document];
         while let Some(node) = nodes.pop() {
             if let Some(element) = dom.node(node).and_then(|node| node.as_element()) {
-                for name in ["href", "src"] {
+                for name in FRAME_MARKDOWN_URL_ATTRIBUTES {
                     if let Some(raw) = element.attribute(name).filter(|value| !value.is_empty())
                         && let Ok(url) = base.join(raw)
                     {

@@ -71,9 +71,11 @@ impl ScriptVm {
                 .ok_or_else(|| anyhow!("authorized rendering update lost its exact payload"))
         })?;
         if resize && applied {
-            self._context_host
+            let previous_target = self
+                ._context_host
                 .borrow_mut()
-                .resize_observer_rendering_update_active = true;
+                .resize_observer_rendering_update_target
+                .replace(owner.target());
             let broadcast: Result<bool> = (|| {
                 let mut minimum_depth = 0;
                 let mut undelivered = false;
@@ -107,7 +109,7 @@ impl ScriptVm {
             })();
             self._context_host
                 .borrow_mut()
-                .resize_observer_rendering_update_active = false;
+                .resize_observer_rendering_update_target = previous_target;
             if broadcast? {
                 self.record_runtime_warning(format_args!(
                     "ResizeObserver loop completed with undelivered notifications."

@@ -220,12 +220,12 @@ impl JsContextHost {
         &mut self,
         scope: &mut v8::PinScope<'_, '_>,
     ) {
-        if self.resize_observer_rendering_update_active {
-            return;
-        }
         let Some(target) = self.current_window_document_task_target(scope) else {
             return;
         };
+        if self.resize_observer_rendering_update_target == Some(target) {
+            return;
+        }
         self.queue_rendering_update(
             target,
             RendererPageRenderingUpdateTaskKind::ResizeObserver,
