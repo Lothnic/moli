@@ -150,6 +150,10 @@ struct RtcPeerConnectionPrototypeDeclaration {
     #[webapi(accessor_property = "pendingLocalDescription", getter = rtc_peer_connection_description_getter, data = callback_data_index_value(scope, 2))]
     pending_local_description: (),
 
+    #[webapi(method, length = 0, callback = configuration::get_configuration, receiver = web_api_interfaces::RTCPeerConnection::is_instance)]
+    get_configuration: (),
+    #[webapi(method, length = 0, callback = configuration::set_configuration, receiver = web_api_interfaces::RTCPeerConnection::is_instance)]
+    set_configuration: (),
     #[webapi(method = "createDataChannel", length = 1, callback = rtc_peer_connection_create_data_channel_callback)]
     create_data_channel: (),
     #[webapi(method = "createOffer", length = 0, callback = rtc_peer_connection_create_offer_callback)]
@@ -215,7 +219,6 @@ pub(in crate::context_bootstrap) fn install_webrtc_template_bindings<'s>(
         }
         "RTCPeerConnection" => {
             RtcPeerConnectionPrototypeDeclaration::initialize_prototype_template(scope, prototype);
-            configuration::install(scope, prototype);
         }
         "RTCErrorEvent" => events::install_event_template_bindings(scope, template, interface_name),
         "RTCRtpReceiver" => {

@@ -9,7 +9,7 @@ use crate::{
     util::{get_private_value, new_null_prototype_object, set_private_value, v8str},
     web_api_interfaces, webidl,
 };
-use moli_webapi_declare::{WebApiFunctionTemplate, WebApiObject, WebApiValue};
+use moli_webapi_declare::{WebApiObject, WebApiValue};
 
 #[derive(Clone, Copy, webidl::WebIdlEnum)]
 #[webidl(name = "RTCBundlePolicy")]
@@ -187,22 +187,6 @@ struct ConfigurationArgs<'s> {
     configuration: Configuration<'s>,
 }
 
-#[derive(WebApiFunctionTemplate)]
-#[webapi(interface = web_api_interfaces::RTCPeerConnection, enumerable, receiver)]
-struct ConfigurationPrototype {
-    #[webapi(method, length = 0, callback = get_configuration)]
-    get_configuration: (),
-    #[webapi(method, length = 0, callback = set_configuration)]
-    set_configuration: (),
-}
-
-pub(super) fn install<'s>(
-    scope: &mut v8::PinScope<'s, '_, ()>,
-    prototype: v8::Local<'s, v8::ObjectTemplate>,
-) {
-    ConfigurationPrototype::initialize_prototype_template(scope, prototype);
-}
-
 pub(super) fn constructor_configuration<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     args: &v8::FunctionCallbackArguments<'s>,
@@ -233,7 +217,7 @@ fn configuration<'s>(
         .expect("native RTCConfiguration snapshot")
 }
 
-fn get_configuration<'s>(
+pub(super) fn get_configuration<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     args: v8::FunctionCallbackArguments<'s>,
     mut rv: v8::ReturnValue<'_, v8::Value>,
@@ -243,7 +227,7 @@ fn get_configuration<'s>(
     rv.set(copy_configuration(scope, stored, false).into());
 }
 
-fn set_configuration<'s>(
+pub(super) fn set_configuration<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     args: v8::FunctionCallbackArguments<'s>,
     _rv: v8::ReturnValue<'_, v8::Value>,
