@@ -217,7 +217,91 @@ async fn resize_observer_deep_growth_yields_without_masking_real_feedback() {
         );
         assert_eq!(
             vm.eval("String(errors.length)").unwrap(),
-            if feedback { "1" } else { "0" }
+            "0",
+            "loop errors are decided after the whole broadcast converges"
+        );
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn resize_observer_continuation_preserves_depth_until_broadcast_settles() {
+    let loader = ResourceRequestClient::new(&moli_fetch::FetchConfig::default()).unwrap();
+    for disconnect in [false, true] {
+        let mut vm = new_storage_page_task_executor_test_vm("https://resize-continuation.test/");
+        vm.eval(&format!(r#"
+          globalThis.rootCalls = 0; globalThis.created = 0; globalThis.errors = [];
+          addEventListener('error', e => errors.push(e.message));
+          const root = document.body.appendChild(document.createElement('div'));
+          root.style.cssText = 'width:100px;height:20px';
+          const observer = new ResizeObserver(entries => {{
+            for (const entry of entries) if (entry.target === root) {{
+              rootCalls++; root.style.width = '101px';
+            }}
+            if (created < 40) {{
+              const child = entries[entries.length - 1].target.appendChild(document.createElement('div'));
+              child.style.cssText = 'width:100px;height:20px'; created++;
+              observer.observe(child);
+            }} else if ({disconnect}) observer.disconnect();
+          }});
+          observer.observe(root);
+        "#)).unwrap();
+        vm.run_one_rendering_update_executor_turn(&loader)
+            .await
+            .unwrap();
+        assert_eq!(
+            vm.eval("String(errors.length)").unwrap(),
+            "0",
+            "a yielded broadcast is not finished"
+        );
+        advance_page_task_executor_until_eval_equals(
+            &mut vm,
+            &loader,
+            "String(created)",
+            "40",
+            "deep resize continuation",
+        )
+        .await;
+        // Drain the final notification that may disconnect the observer.
+        advance_page_task_executor_until_eval_equals(
+            &mut vm,
+            &loader,
+            if disconnect {
+                "String(rootCalls === 1 && errors.length === 0)"
+            } else {
+                "String(errors.length === 1)"
+            },
+            "true",
+            "resize broadcast settlement",
+        )
+        .await;
+        assert_eq!(vm.eval("String(rootCalls)").unwrap(), "1");
+        assert_eq!(
+            vm.eval("String(errors.length)").unwrap(),
+            if disconnect { "0" } else { "1" }
+        );
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn resize_observer_later_callback_can_handle_an_earlier_rejection() {
+    let loader = ResourceRequestClient::new(&moli_fetch::FetchConfig::default()).unwrap();
+    for handled in [false, true] {
+        let mut vm = new_storage_page_task_executor_test_vm("https://resize-rejections.test/");
+        vm.eval(&format!(r#"
+          globalThis.events = []; globalThis.rejected = null;
+          addEventListener('unhandledrejection', e => {{ events.push('unhandled'); e.preventDefault(); }});
+          addEventListener('rejectionhandled', () => events.push('handled'));
+          const target = document.body.appendChild(document.createElement('div'));
+          target.style.cssText = 'width:50px;height:20px';
+          new ResizeObserver(() => {{ rejected = Promise.reject('observer rejection'); }}).observe(target);
+          new ResizeObserver(() => {{ if ({handled}) rejected.catch(() => {{}}); }}).observe(target);
+        "#)).unwrap();
+        vm.run_one_rendering_update_executor_turn(&loader)
+            .await
+            .unwrap();
+        assert_eq!(
+            vm.eval("JSON.stringify(events)").unwrap(),
+            if handled { "[]" } else { r#"["unhandled"]"# }
         );
     }
 }

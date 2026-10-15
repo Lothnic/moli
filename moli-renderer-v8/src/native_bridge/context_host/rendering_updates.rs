@@ -14,7 +14,9 @@ pub(super) enum PendingRenderingUpdatePayload {
     /// The candidate is intentionally resolved at execution time.
     PostParseAutofocus,
     EnvironmentChange(PendingEnvironmentChange),
-    ResizeObserver,
+    ResizeObserver {
+        minimum_depth: usize,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -223,12 +225,13 @@ impl JsContextHost {
         let Some(target) = self.current_window_document_task_target(scope) else {
             return;
         };
-        self.queue_resize_observer_rendering_update_for_target(target);
+        self.queue_resize_observer_rendering_update_for_target(target, 0);
     }
 
     pub(crate) fn queue_resize_observer_rendering_update_for_target(
         &mut self,
         target: WindowDocumentTaskTarget,
+        minimum_depth: usize,
     ) {
         if self.resize_observer_rendering_update_target == Some(target) {
             return;
@@ -236,7 +239,7 @@ impl JsContextHost {
         self.queue_rendering_update(
             target,
             RendererPageRenderingUpdateTaskKind::ResizeObserver,
-            PendingRenderingUpdatePayload::ResizeObserver,
+            PendingRenderingUpdatePayload::ResizeObserver { minimum_depth },
         );
     }
 
@@ -248,7 +251,9 @@ impl JsContextHost {
     ) -> bool {
         if self
             .rendering_updates
-            .find_slot_index(target, kind, |pending| pending == &payload)
+            .find_slot_index(target, kind, |pending| {
+                kind == RendererPageRenderingUpdateTaskKind::ResizeObserver || pending == &payload
+            })
             .is_some()
         {
             return true;
@@ -307,26 +312,37 @@ impl JsContextHost {
         task_id: RendererPageRenderingUpdateTaskId,
         target: WindowDocumentTaskTarget,
         kind: RendererPageRenderingUpdateTaskKind,
-    ) -> Option<bool> {
+    ) -> Option<(bool, usize)> {
         let payload = self
             .rendering_updates
             .remove_exact(task_id, target, kind)?
             .into_payload();
-        Some(match payload {
-            PendingRenderingUpdatePayload::ResizeObserver => true,
-            PendingRenderingUpdatePayload::DocumentScrollEvents => {
-                self.dispatch_authorized_document_scroll_events(scope, host_ptr, target)
-            }
-            PendingRenderingUpdatePayload::AnimationStartScan(event_target) => {
-                self.dispatch_authorized_animation_start_scan(scope, host_ptr, target, event_target)
-            }
-            PendingRenderingUpdatePayload::PostParseAutofocus => {
-                self.dispatch_authorized_post_parse_autofocus(scope, host_ptr, target)
-            }
-            PendingRenderingUpdatePayload::EnvironmentChange(change) => {
-                self.dispatch_authorized_environment_change(scope, host_ptr, target, change)
-            }
-        })
+        let minimum_depth = match payload {
+            PendingRenderingUpdatePayload::ResizeObserver { minimum_depth } => minimum_depth,
+            _ => 0,
+        };
+        Some((
+            match payload {
+                PendingRenderingUpdatePayload::ResizeObserver { .. } => true,
+                PendingRenderingUpdatePayload::DocumentScrollEvents => {
+                    self.dispatch_authorized_document_scroll_events(scope, host_ptr, target)
+                }
+                PendingRenderingUpdatePayload::AnimationStartScan(event_target) => self
+                    .dispatch_authorized_animation_start_scan(
+                        scope,
+                        host_ptr,
+                        target,
+                        event_target,
+                    ),
+                PendingRenderingUpdatePayload::PostParseAutofocus => {
+                    self.dispatch_authorized_post_parse_autofocus(scope, host_ptr, target)
+                }
+                PendingRenderingUpdatePayload::EnvironmentChange(change) => {
+                    self.dispatch_authorized_environment_change(scope, host_ptr, target, change)
+                }
+            },
+            minimum_depth,
+        ))
     }
 
     pub(crate) fn discard_pending_rendering_update_task(

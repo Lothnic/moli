@@ -326,7 +326,7 @@ fn deliver_resize_observer<'s>(
         WindowWebIdlCallbackFunctionOutcome::Returned
         | WindowWebIdlCallbackFunctionOutcome::Retired => {}
     }
-    crate::script_vm::perform_microtask_checkpoint_and_report_pending_promise_rejections(scope);
+    crate::script_vm::perform_microtask_checkpoint_without_rejection_reporting(scope);
     (Some(depth), skipped)
 }
 

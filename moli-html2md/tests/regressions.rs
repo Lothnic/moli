@@ -514,16 +514,14 @@ fn media_elements_do_not_emit_active_script_urls() {
 }
 
 #[test]
-fn preformatted_directory_links_keep_their_destinations_as_text() {
-    let result = markdown(
-        "<pre><a href='release/file.mp4'>file.mp4</a> <a href='release/checksum.txt'>checksum</a></pre>",
-        false,
-    );
-    assert!(result.contains("file.mp4 (release/file.mp4)"), "{result}");
-    assert!(
-        result.contains("checksum (release/checksum.txt)"),
-        "{result}"
-    );
+fn preformatted_directory_links_keep_destinations_outside_literal_text() {
+    let html = "<pre><a href='release/file.mp4'>file.mp4</a> <a href='release/checksum.txt'>checksum</a></pre>";
+    for preformatted in [false, true] {
+        assert_eq!(
+            markdown(html, preformatted),
+            "```\nfile.mp4 checksum\n```\n\n[file.mp4](release/file.mp4)\n[checksum](release/checksum.txt)"
+        );
+    }
 }
 
 #[test]
@@ -532,7 +530,7 @@ fn preformatted_code_cross_references_preserve_literal_source() {
     for preformatted in [false, true] {
         assert_eq!(
             markdown(html, preformatted),
-            "```rust\nprintln!(\"hello\");\nlet values = Vec::new();\n```"
+            "```rust\nprintln!(\"hello\");\nlet values = Vec::new();\n```\n\n[println!](/macros/println)\n[Vec](/types/Vec)"
         );
     }
 }
@@ -543,8 +541,26 @@ fn preformatted_directory_links_survive_around_code_examples() {
     for preformatted in [false, true] {
         assert_eq!(
             markdown(html, preformatted),
-            "```\nbefore (before.txt)\nValue value;\nafter (after.txt)\n```"
+            "```\nbefore\nValue value;\nafter\n```\n\n[before](before.txt)\n[Value](/types/Value)\n[after](after.txt)"
         );
+    }
+}
+
+#[test]
+fn preformatted_signatures_and_language_blocks_keep_source_without_code_wrappers() {
+    for (html, expected) in [
+        (
+            "<pre>public <a href='https://docs.example/String'>String</a> getText()</pre>",
+            "```\npublic String getText()\n```\n\n[String](https://docs.example/String)",
+        ),
+        (
+            "<pre class='language-rust'>let value: <a href='/types/String'>String</a> = String::new();</pre>",
+            "```rust\nlet value: String = String::new();\n```\n\n[String](/types/String)",
+        ),
+    ] {
+        for preformatted in [false, true] {
+            assert_eq!(markdown(html, preformatted), expected, "{html}");
+        }
     }
 }
 

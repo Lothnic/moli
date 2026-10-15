@@ -14,8 +14,8 @@ enum Task<'a, Id> {
     EndHeading(usize),
     EndList(usize),
     EndItem(String),
-    RawChildren(Option<Id>, usize, bool, bool),
-    RawLinkDestination(&'a str),
+    RawChildren(Option<Id>, usize, bool),
+    EndPreLink(&'a str, usize),
     EndRawBlock,
     EndCode,
     EndPre(Option<&'a str>),
@@ -38,6 +38,7 @@ struct Machine<'a, D: Dom + ?Sized> {
     lists: Vec<List>,
     tables: Vec<Table<D::NodeId>>,
     raw: String,
+    pre_links: Vec<(String, &'a str)>,
     serial: usize,
 }
 
@@ -50,6 +51,7 @@ pub(crate) fn convert<D: Dom + ?Sized>(dom: &D, root: D::NodeId, options: &Optio
         lists: Vec::new(),
         tables: Vec::new(),
         raw: String::new(),
+        pre_links: Vec::new(),
         serial: 0,
     };
     machine.run();
@@ -68,7 +70,7 @@ impl<'a, D: Dom + ?Sized> Machine<'a, D> {
                         .push(Task::Children(self.dom.next_sibling(node), depth));
                     self.tasks.push(Task::Visit(node, depth));
                 }
-                Task::Children(None, _) | Task::RawChildren(None, _, _, _) => {}
+                Task::Children(None, _) | Task::RawChildren(None, _, _) => {}
                 Task::Boundary => self.writer().boundary(2),
                 Task::PopStyle => self.writer().pop_style(),
                 Task::EndLink(serial, fallback_label) => {
@@ -134,22 +136,9 @@ impl<'a, D: Dom + ?Sized> Machine<'a, D> {
                     list.loose |= loose;
                     self.writer().block(item.into(), separation, separation);
                 }
-                Task::RawChildren(Some(node), depth, inline, link_destinations) => {
-                    self.raw_node(node, depth, inline, link_destinations)
-                }
-                Task::RawLinkDestination(href) => {
-                    if !self.raw.is_empty()
-                        && !self
-                            .raw
-                            .chars()
-                            .next_back()
-                            .is_some_and(char::is_whitespace)
-                    {
-                        self.raw.push(' ');
-                    }
-                    self.raw.push('(');
-                    self.raw.push_str(href);
-                    self.raw.push(')');
+                Task::RawChildren(Some(node), depth, inline) => self.raw_node(node, depth, inline),
+                Task::EndPreLink(href, start) => {
+                    self.pre_links.push((self.raw[start..].to_owned(), href));
                 }
                 Task::EndRawBlock => {
                     if !self.raw.is_empty() && !self.raw.ends_with('\n') {
@@ -299,6 +288,7 @@ impl<'a, D: Dom + ?Sized> Machine<'a, D> {
             }
             "code" | "pre" => {
                 self.raw.clear();
+                self.pre_links.clear();
                 let end = if tag == "pre" {
                     Task::EndPre(self.language(node))
                 } else {
@@ -310,7 +300,6 @@ impl<'a, D: Dom + ?Sized> Machine<'a, D> {
                         self.dom.first_child(node),
                         depth + 1,
                         tag == "code",
-                        tag == "pre",
                     ));
                 }
                 return;
@@ -439,12 +428,11 @@ impl<'a, D: Dom + ?Sized> Machine<'a, D> {
             .or(self.options.default_code_language.as_deref())
     }
 
-    fn raw_node(&mut self, node: D::NodeId, depth: usize, inline: bool, link_destinations: bool) {
+    fn raw_node(&mut self, node: D::NodeId, depth: usize, inline: bool) {
         self.tasks.push(Task::RawChildren(
             self.dom.next_sibling(node),
             depth,
             inline,
-            link_destinations,
         ));
         if depth >= self.options.max_depth {
             return;
@@ -466,19 +454,16 @@ impl<'a, D: Dom + ?Sized> Machine<'a, D> {
                     }
                     self.tasks.push(Task::EndRawBlock);
                 }
-                if link_destinations
+                if !inline
                     && let NodeKind::Element("a") = self.dom.node_kind(node)
                     && let Some(href) = self.dom.attribute(node, "href").and_then(resource_url)
                 {
-                    self.tasks.push(Task::RawLinkDestination(href));
+                    self.tasks.push(Task::EndPreLink(href, self.raw.len()));
                 }
                 self.tasks.push(Task::RawChildren(
                     self.dom.first_child(node),
                     depth + 1,
                     inline,
-                    // Keep directory URLs in preformatted text, but leave
-                    // source-code cross-references as literal code text.
-                    link_destinations && self.dom.node_kind(node) != NodeKind::Element("code"),
                 ));
             }
             _ => {}
@@ -489,6 +474,7 @@ impl<'a, D: Dom + ?Sized> Machine<'a, D> {
         let text = std::mem::take(&mut self.raw);
         if text.trim().is_empty() {
             self.writer().boundary(2);
+            self.write_pre_links();
             return;
         }
         // CommonMark code blocks normalize CRLF/CR and require a closing fence
@@ -520,6 +506,16 @@ impl<'a, D: Dom + ?Sized> Machine<'a, D> {
         }
         block.push_str(&fence);
         self.writer().block(block.into(), 2, 2);
+        self.write_pre_links();
+    }
+
+    fn write_pre_links(&mut self) {
+        // A preformatted block may contain either source or a directory listing.
+        // Keep its literal text intact and expose destinations after the fence.
+        for (label, href) in std::mem::take(&mut self.pre_links) {
+            let label = label.trim();
+            self.resource_link(href, if label.is_empty() { href } else { label });
+        }
     }
 }
 

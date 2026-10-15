@@ -59,7 +59,7 @@ impl ScriptVm {
         let task = authorization.into_task();
         let owner = task.owner();
         let resize = task.kind() == RendererPageRenderingUpdateTaskKind::ResizeObserver;
-        let applied = self.with_default_context_scope(|scope, host_ptr| {
+        let (applied, mut minimum_depth) = self.with_default_context_scope(|scope, host_ptr| {
             unsafe { &mut *host_ptr }
                 .apply_authorized_rendering_update(
                     scope,
@@ -77,7 +77,6 @@ impl ScriptVm {
                 .resize_observer_rendering_update_target
                 .replace(owner.target());
             let broadcast: Result<(bool, bool)> = (|| {
-                let mut minimum_depth = 0;
                 let mut undelivered = false;
                 for _ in 0..32 {
                     let viewport = self
@@ -116,9 +115,12 @@ impl ScriptVm {
             if resume {
                 self._context_host
                     .borrow_mut()
-                    .queue_resize_observer_rendering_update_for_target(owner.target());
+                    .queue_resize_observer_rendering_update_for_target(
+                        owner.target(),
+                        minimum_depth,
+                    );
             }
-            if undelivered {
+            if undelivered && !resume {
                 self.record_runtime_warning(format_args!(
                     "ResizeObserver loop completed with undelivered notifications."
                 ));
