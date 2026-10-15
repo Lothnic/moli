@@ -82,8 +82,15 @@ struct RendererInspectorSessionExecutorLocal {
     >,
 }
 
-enum RendererInspectorNestedCommand {
+/// Internal owner work has no protocol call ID, session lane or response.
+/// Its sources keep their own scope and coalescing rules; only claim/apply is
+/// shared by owner wakes, V8 interrupts and the nested debugger loop.
+enum InspectorControlWork {
     EnvironmentInvalidation(moli_v8_platform::ProcessEnvironmentInvalidation),
+}
+
+enum RendererInspectorNestedCommand {
+    Control(InspectorControlWork),
     Main(RendererInspectorMainCommand),
     Io(RendererInspectorIoCommand),
 }
@@ -193,12 +200,8 @@ impl RendererInspectorSessionExecutorLocal {
                 // These are actual posted owner tasks, not an environment-version
                 // check. Service them in both pause modes, before a following
                 // Inspector observation; they never execute page JavaScript.
-                if let Some(invalidation) =
-                    self.environment_ingress().claim_environment_invalidation()
-                {
-                    return Some(RendererInspectorNestedCommand::EnvironmentInvalidation(
-                        invalidation,
-                    ));
+                if let Some(work) = self.claim_control_work() {
+                    return Some(RendererInspectorNestedCommand::Control(work));
                 }
                 let command = match pause_loop_policy {
                     crate::devtools::pause::RendererInspectorPauseLoopPolicy::IoOnly => self
@@ -245,10 +248,10 @@ impl RendererInspectorSessionExecutorLocal {
                 Err(reason) => break reason,
             };
             match command {
-                RendererInspectorNestedCommand::EnvironmentInvalidation(invalidation) => {
+                RendererInspectorNestedCommand::Control(work) => {
                     let isolate = unsafe { &mut *self.isolate.get() };
                     let isolate = unsafe { v8::Isolate::ref_from_raw_isolate_ptr_mut(isolate) };
-                    invalidation.notify_isolate(isolate);
+                    self.apply_control_work(work, isolate);
                 }
                 RendererInspectorNestedCommand::Main(command) => {
                     self.dispatch_main_command(context_group_id, command);
@@ -278,6 +281,28 @@ impl RendererInspectorSessionExecutorLocal {
             }
         }
         self.target.pause_ref().leave_pause();
+    }
+
+    fn claim_control_work(&self) -> Option<InspectorControlWork> {
+        self.environment_ingress()
+            .claim_environment_invalidation()
+            .map(InspectorControlWork::EnvironmentInvalidation)
+    }
+
+    fn apply_control_work(&self, work: InspectorControlWork, isolate: &mut v8::Isolate) {
+        match work {
+            InspectorControlWork::EnvironmentInvalidation(invalidation) => {
+                invalidation.notify_isolate(isolate);
+            }
+        }
+    }
+
+    fn dispatch_control_work(&self, isolate: &mut v8::Isolate) {
+        // One merged batch per callback. A racing publication retains its wake
+        // instead of making an interrupt drain an unbounded producer.
+        if let Some(work) = self.claim_control_work() {
+            self.apply_control_work(work, isolate);
+        }
     }
 
     fn environment_ingress(&self) -> &RendererInspectorIoIngress {

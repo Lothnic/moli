@@ -872,6 +872,52 @@ mod tests {
         )
     }
 
+    /// Queue admission through first-dispatch settlement, without V8 or OS
+    /// scheduling. Run serially with --ignored --nocapture for A/B comparisons.
+    #[test]
+    #[ignore = "manual Inspector ingress latency measurement"]
+    fn inspector_io_dispatch_latency() {
+        use std::time::Instant;
+
+        for environment_updates in [false, true] {
+            let ingress = ingress();
+            let notifier = ingress.environment_notifier();
+            let agent = RendererDevToolsAgentToken::allocate();
+            let mut samples = Vec::with_capacity(50_000);
+            for round in 0..55_000 {
+                let start = Instant::now();
+                if environment_updates {
+                    notifier.notify(ProcessEnvironmentInvalidation::DateTime);
+                    notifier.notify(ProcessEnvironmentInvalidation::LocaleAndDateTime);
+                }
+                let mut route = enqueue(&ingress, agent, Some("latency"), "Debugger.enable");
+                std::hint::black_box(ingress.claim_environment_invalidation());
+                let mut command = ingress.claim_for_owner().unwrap();
+                ingress.first_dispatch_guard(&mut command).release();
+                assert_eq!(
+                    route
+                        .first_dispatch_rx
+                        .as_mut()
+                        .unwrap()
+                        .try_recv()
+                        .unwrap(),
+                    RendererRuntimeInspectorIoCommandClaim::Dispatched
+                );
+                if round >= 5_000 {
+                    samples.push(start.elapsed().as_nanos());
+                }
+            }
+            samples.sort_unstable();
+            eprintln!(
+                "inspector_io_dispatch_latency environment={environment_updates} n={} p50={}ns p95={}ns p99={}ns",
+                samples.len(),
+                samples[25_000],
+                samples[47_500],
+                samples[49_500]
+            );
+        }
+    }
+
     #[test]
     fn environment_notifications_are_isolate_owned_and_survive_session_detach() {
         let ingress = ingress();
