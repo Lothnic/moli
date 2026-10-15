@@ -22,18 +22,18 @@ struct ClipboardObjectDeclaration {
 }
 
 #[derive(Default, WebApiFunctionTemplate)]
-#[webapi(interface = web_api_interfaces::Clipboard, enumerable)]
+#[webapi(interface = web_api_interfaces::Clipboard, enumerable, receiver)]
 struct ClipboardPrototypeDeclaration {
-    #[webapi(method, length = 0, callback = clipboard_read_callback)]
+    #[webapi(method, length = 0, callback = clipboard_read_callback, returns_promise)]
     read: (),
 
-    #[webapi(method, length = 0, callback = clipboard_read_text_callback)]
+    #[webapi(method, length = 0, callback = clipboard_read_text_callback, returns_promise)]
     read_text: (),
 
-    #[webapi(method, length = 1, callback = clipboard_write_callback)]
+    #[webapi(method, length = 1, callback = clipboard_write_callback, returns_promise)]
     write: (),
 
-    #[webapi(method, length = 1, callback = clipboard_write_text_callback)]
+    #[webapi(method, length = 1, callback = clipboard_write_text_callback, returns_promise)]
     write_text: (),
 }
 
@@ -54,7 +54,7 @@ struct ClipboardItemObjectDeclaration<'scope> {
 }
 
 #[derive(Default, WebApiFunctionTemplate)]
-#[webapi(interface = web_api_interfaces::ClipboardItem, enumerable)]
+#[webapi(interface = web_api_interfaces::ClipboardItem, enumerable, receiver)]
 struct ClipboardItemPrototypeDeclaration {
     #[webapi(accessor_property, getter = clipboard_item_presentation_style_getter)]
     presentation_style: (),
@@ -62,7 +62,7 @@ struct ClipboardItemPrototypeDeclaration {
     #[webapi(accessor_property, getter = clipboard_item_types_getter)]
     types: (),
 
-    #[webapi(method, length = 1, callback = clipboard_item_get_type_callback)]
+    #[webapi(method, length = 1, callback = clipboard_item_get_type_callback, returns_promise)]
     get_type: (),
 }
 
@@ -282,29 +282,11 @@ fn clipboard_item_data_to_blob_callback<'s>(
     }
 }
 
-fn clipboard_item_receiver_branded<'s>(
-    scope: &mut v8::PinScope<'s, '_>,
-    receiver: v8::Local<'s, v8::Object>,
-) -> bool {
-    web_api_interfaces::ClipboardItem::is_instance(scope, receiver)
-}
-
-fn clipboard_receiver_branded<'s>(
-    scope: &mut v8::PinScope<'s, '_>,
-    receiver: v8::Local<'s, v8::Object>,
-) -> bool {
-    web_api_interfaces::Clipboard::is_instance(scope, receiver)
-}
-
 fn clipboard_item_presentation_style_getter<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     args: v8::FunctionCallbackArguments<'s>,
     mut rv: v8::ReturnValue<'_, v8::Value>,
 ) {
-    if !clipboard_item_receiver_branded(scope, args.this()) {
-        throw_type_error(scope, "Illegal invocation");
-        return;
-    }
     if let Some(value) =
         get_private_value(scope, args.this(), CLIPBOARD_ITEM_PRESENTATION_STYLE_SLOT)
     {
@@ -317,10 +299,6 @@ fn clipboard_item_types_getter<'s>(
     args: v8::FunctionCallbackArguments<'s>,
     mut rv: v8::ReturnValue<'_, v8::Value>,
 ) {
-    if !clipboard_item_receiver_branded(scope, args.this()) {
-        throw_type_error(scope, "Illegal invocation");
-        return;
-    }
     if let Some(value) = get_private_value(scope, args.this(), CLIPBOARD_ITEM_TYPES_SLOT) {
         rv.set(value);
     }
@@ -331,11 +309,6 @@ fn clipboard_item_get_type_callback<'s>(
     args: v8::FunctionCallbackArguments<'s>,
     mut rv: v8::ReturnValue<'_, v8::Value>,
 ) {
-    if !clipboard_item_receiver_branded(scope, args.this()) {
-        let reason = type_error_value(scope, "Illegal invocation");
-        set_rejected_promise(scope, &mut rv, reason);
-        return;
-    }
     let parsed = match try_parse_promise_args::<ClipboardItemGetTypeArgs>(scope, &args) {
         Ok(parsed) => parsed,
         Err(reason) => {
@@ -423,11 +396,6 @@ fn clipboard_read_callback<'s>(
     args: v8::FunctionCallbackArguments<'s>,
     mut rv: v8::ReturnValue<'_, v8::Value>,
 ) {
-    if !clipboard_receiver_branded(scope, args.this()) {
-        let reason = type_error_value(scope, "Illegal invocation");
-        set_rejected_promise(scope, &mut rv, reason);
-        return;
-    }
     let parsed = match try_parse_promise_args::<ClipboardReadArgs>(scope, &args) {
         Ok(parsed) => parsed,
         Err(reason) => {
@@ -466,11 +434,6 @@ fn clipboard_read_text_callback<'s>(
     args: v8::FunctionCallbackArguments<'s>,
     mut rv: v8::ReturnValue<'_, v8::Value>,
 ) {
-    if !clipboard_receiver_branded(scope, args.this()) {
-        let reason = type_error_value(scope, "Illegal invocation");
-        set_rejected_promise(scope, &mut rv, reason);
-        return;
-    }
     let Some(runtime) = clipboard_browser_context(scope, args.this()) else {
         return;
     };
@@ -490,11 +453,6 @@ fn clipboard_write_callback<'s>(
     args: v8::FunctionCallbackArguments<'s>,
     mut rv: v8::ReturnValue<'_, v8::Value>,
 ) {
-    if !clipboard_receiver_branded(scope, args.this()) {
-        let reason = type_error_value(scope, "Illegal invocation");
-        set_rejected_promise(scope, &mut rv, reason);
-        return;
-    }
     let parsed = match try_parse_promise_args::<ClipboardWriteArgs<'s>>(scope, &args) {
         Ok(parsed) => parsed,
         Err(reason) => {
@@ -562,11 +520,6 @@ fn clipboard_write_text_callback<'s>(
     args: v8::FunctionCallbackArguments<'s>,
     mut rv: v8::ReturnValue<'_, v8::Value>,
 ) {
-    if !clipboard_receiver_branded(scope, args.this()) {
-        let reason = type_error_value(scope, "Illegal invocation");
-        set_rejected_promise(scope, &mut rv, reason);
-        return;
-    }
     let parsed = match try_parse_promise_args::<ClipboardWriteTextArgs>(scope, &args) {
         Ok(parsed) => parsed,
         Err(reason) => {

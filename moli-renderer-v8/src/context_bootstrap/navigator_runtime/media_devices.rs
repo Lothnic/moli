@@ -24,7 +24,7 @@ struct MediaDevicesPrototypeDeclaration {
     #[webapi(method, length = 0, callback = enumerate_devices_callback)]
     enumerate_devices: (),
 
-    #[webapi(method, length = 1, callback = navigator_media_devices_get_user_media_callback)]
+    #[webapi(method, length = 1, callback = navigator_media_devices_get_user_media_callback, receiver = web_api_interfaces::MediaDevices::is_instance, returns_promise)]
     get_user_media: (),
 
     #[webapi(accessor_property, getter = ondevicechange_getter, setter = ondevicechange_setter)]

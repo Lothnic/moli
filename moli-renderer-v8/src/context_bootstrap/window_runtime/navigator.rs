@@ -7,7 +7,7 @@ use crate::context_bootstrap::navigator_runtime::{
     STORAGE_BUCKET_MANAGER_CHILD_HANDLE_SLOT, STORAGE_BUCKET_MANAGER_POPUP_ID_SLOT,
     STORAGE_MANAGER_CHILD_HANDLE_SLOT, STORAGE_MANAGER_POPUP_ID_SLOT,
     current_protocol_user_gesture_activation, navigator_identity_profile,
-    navigator_receiver_branded, set_navigator_identity_profile,
+    set_navigator_identity_profile,
 };
 use crate::context_bootstrap::storage_buckets::{
     IMPLICIT_DEFAULT_BUCKET_INTERNAL_NAME, StorageBucketCacheId, StorageBucketCacheMatch,
@@ -286,7 +286,7 @@ struct StorageUsageDetailsObjectDeclaration {
 }
 
 #[derive(WebApiObject)]
-#[webapi(prototype = "Object", interface = web_api_interfaces::BatteryManager, data_properties)]
+#[webapi(prototype = "Object", interface = web_api_interfaces::BatteryManager, data_properties, receiver)]
 struct NavigatorBatteryStatusObjectDeclaration {
     #[webapi(data_property, enumerable)]
     charging: bool,
@@ -464,22 +464,14 @@ pub(in crate::context_bootstrap) fn navigator_send_beacon_callback<'s>(
     args: v8::FunctionCallbackArguments<'s>,
     rv: v8::ReturnValue<'_, v8::Value>,
 ) {
-    if !navigator_receiver_branded(scope, args.this()) {
-        crate::util::throw_type_error(scope, "Illegal invocation");
-        return;
-    }
     crate::network_host::navigator_send_beacon_callback(scope, args, rv);
 }
 
 pub(in crate::context_bootstrap) fn navigator_java_enabled_callback<'s>(
     scope: &mut v8::PinScope<'s, '_>,
-    args: v8::FunctionCallbackArguments<'s>,
+    _args: v8::FunctionCallbackArguments<'s>,
     mut rv: v8::ReturnValue<'_, v8::Value>,
 ) {
-    if !navigator_receiver_branded(scope, args.this()) {
-        crate::util::throw_type_error(scope, "Illegal invocation");
-        return;
-    }
     rv.set(v8::Boolean::new(scope, false).into());
 }
 
@@ -518,10 +510,6 @@ pub(in crate::context_bootstrap) fn navigator_vibrate_callback<'s>(
     args: v8::FunctionCallbackArguments<'s>,
     mut rv: v8::ReturnValue<'_, v8::Value>,
 ) {
-    if !navigator_receiver_branded(scope, args.this()) {
-        crate::util::throw_type_error(scope, "Illegal invocation");
-        return;
-    }
     let Some(mut parsed) = webidl::parse_args::<NavigatorVibrateArgs>(scope, &args) else {
         return;
     };
@@ -537,17 +525,12 @@ pub(in crate::context_bootstrap) fn navigator_vibrate_callback<'s>(
 
 pub(in crate::context_bootstrap) fn navigator_get_battery_callback<'s>(
     scope: &mut v8::PinScope<'s, '_>,
-    args: v8::FunctionCallbackArguments<'s>,
+    _args: v8::FunctionCallbackArguments<'s>,
     mut rv: v8::ReturnValue<'_, v8::Value>,
 ) {
     let Some(resolver) = v8::PromiseResolver::new(scope) else {
         return;
     };
-    if !navigator_receiver_branded(scope, args.this()) {
-        reject_type_error(scope, resolver, "Illegal invocation");
-        rv.set(resolver.get_promise(scope).into());
-        return;
-    }
     let battery = NavigatorBatteryStatusObjectDeclaration::new(true, 0.0, f64::INFINITY, 1.0)
         .bind(scope)
         .expect("Navigator battery status declaration should bind");
@@ -556,32 +539,18 @@ pub(in crate::context_bootstrap) fn navigator_get_battery_callback<'s>(
 }
 
 fn battery_event_target_noop_callback<'s>(
-    scope: &mut v8::PinScope<'s, '_>,
-    args: v8::FunctionCallbackArguments<'s>,
+    _scope: &mut v8::PinScope<'s, '_>,
+    _args: v8::FunctionCallbackArguments<'s>,
     _rv: v8::ReturnValue<'_, v8::Value>,
 ) {
-    if !battery_status_receiver_branded(scope, args.this()) {
-        crate::util::throw_type_error(scope, "Illegal invocation");
-    }
 }
 
 fn battery_dispatch_event_callback<'s>(
     scope: &mut v8::PinScope<'s, '_>,
-    args: v8::FunctionCallbackArguments<'s>,
+    _args: v8::FunctionCallbackArguments<'s>,
     mut rv: v8::ReturnValue<'_, v8::Value>,
 ) {
-    if !battery_status_receiver_branded(scope, args.this()) {
-        crate::util::throw_type_error(scope, "Illegal invocation");
-        return;
-    }
     rv.set(v8::Boolean::new(scope, true).into());
-}
-
-fn battery_status_receiver_branded<'s>(
-    scope: &mut v8::PinScope<'s, '_>,
-    receiver: v8::Local<'s, v8::Object>,
-) -> bool {
-    web_api_interfaces::BatteryManager::is_instance(scope, receiver)
 }
 
 pub(in crate::context_bootstrap) fn navigator_permissions_query_callback<'s>(
@@ -595,11 +564,6 @@ pub(in crate::context_bootstrap) fn navigator_permissions_query_callback<'s>(
     let Some(resolver) = v8::PromiseResolver::new(scope) else {
         return;
     };
-    if !permissions_receiver_branded(scope, args.this()) {
-        reject_type_error(scope, resolver, "Illegal invocation");
-        rv.set(resolver.get_promise(scope).into());
-        return;
-    }
     let permission_name = match permission_query_name(scope, args.get(0)) {
         Ok(permission_name) => permission_name,
         Err(error) => {
@@ -637,13 +601,6 @@ fn permission_query_name<'s>(
     }
 
     Ok(descriptor.name)
-}
-
-fn permissions_receiver_branded<'s>(
-    scope: &mut v8::PinScope<'s, '_>,
-    receiver: v8::Local<'s, v8::Object>,
-) -> bool {
-    web_api_interfaces::Permissions::is_instance(scope, receiver)
 }
 
 fn build_permission_status_object<'s>(
@@ -1217,10 +1174,6 @@ pub(in crate::context_bootstrap) fn storage_bucket_name_getter_callback<'s>(
     args: v8::FunctionCallbackArguments<'s>,
     mut rv: v8::ReturnValue<'_, v8::Value>,
 ) {
-    if !storage_bucket_receiver_branded(scope, args.this()) {
-        throw_type_error(scope, "Illegal invocation");
-        return;
-    }
     let value = get_private_value(scope, args.this(), STORAGE_BUCKET_NAME_SLOT)
         .unwrap_or_else(|| v8str(scope, "").into());
     rv.set(value);
@@ -1231,10 +1184,6 @@ pub(in crate::context_bootstrap) fn storage_bucket_indexed_db_getter_callback<'s
     args: v8::FunctionCallbackArguments<'s>,
     mut rv: v8::ReturnValue<'_, v8::Value>,
 ) {
-    if !storage_bucket_receiver_branded(scope, args.this()) {
-        throw_type_error(scope, "Illegal invocation");
-        return;
-    }
     let Some(handle) = storage_bucket_handle(scope, args.this()) else {
         rv.set_undefined();
         return;
@@ -1250,10 +1199,6 @@ pub(in crate::context_bootstrap) fn storage_bucket_caches_getter_callback<'s>(
     args: v8::FunctionCallbackArguments<'s>,
     mut rv: v8::ReturnValue<'_, v8::Value>,
 ) {
-    if !storage_bucket_receiver_branded(scope, args.this()) {
-        throw_type_error(scope, "Illegal invocation");
-        return;
-    }
     if let Some(value) = get_private_value(scope, args.this(), STORAGE_BUCKET_CACHES_OBJECT_SLOT) {
         rv.set(value);
         return;
@@ -2445,13 +2390,6 @@ fn storage_bucket_resolver<'s>(
     Some(resolver)
 }
 
-fn storage_bucket_receiver_branded<'s>(
-    scope: &mut v8::PinScope<'s, '_>,
-    receiver: v8::Local<'s, v8::Object>,
-) -> bool {
-    web_api_interfaces::StorageBucket::is_instance(scope, receiver)
-}
-
 fn build_storage_bucket_object<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     identity: StorageBucketIdentity,
@@ -3361,10 +3299,6 @@ pub(in crate::context_bootstrap) fn navigator_ua_data_to_json_callback<'s>(
     args: v8::FunctionCallbackArguments<'s>,
     mut rv: v8::ReturnValue<'_, v8::Value>,
 ) {
-    if !navigator_ua_data_receiver_branded(scope, args.this()) {
-        throw_type_error(scope, "Illegal invocation");
-        return;
-    }
     let identity = navigator_ua_data_identity(scope, args.this());
     rv.set(build_navigator_ua_data_snapshot(scope, &identity, None).into());
 }
@@ -3377,11 +3311,6 @@ pub(in crate::context_bootstrap) fn navigator_ua_data_get_high_entropy_values_ca
     let Some(resolver) = v8::PromiseResolver::new(scope) else {
         return;
     };
-    if !navigator_ua_data_receiver_branded(scope, args.this()) {
-        reject_type_error(scope, resolver, "Illegal invocation");
-        rv.set(resolver.get_promise(scope).into());
-        return;
-    }
     let requested = match navigator_ua_data_high_entropy_keys(scope, &args) {
         Ok(requested) => requested,
         Err(exception) => {
@@ -3416,13 +3345,6 @@ fn navigator_ua_data_high_entropy_keys<'s>(
             Err(exception)
         }
     }
-}
-
-fn navigator_ua_data_receiver_branded<'s>(
-    scope: &mut v8::PinScope<'s, '_>,
-    receiver: v8::Local<'s, v8::Object>,
-) -> bool {
-    web_api_interfaces::NavigatorUAData::is_instance(scope, receiver)
 }
 
 pub(in crate::context_bootstrap) fn build_navigator_ua_data_object<'s>(
@@ -3547,27 +3469,15 @@ fn build_storage_usage_details_object<'s>(
 
 pub(in crate::context_bootstrap) fn navigator_media_devices_get_user_media_callback<'s>(
     scope: &mut v8::PinScope<'s, '_>,
-    args: v8::FunctionCallbackArguments<'s>,
+    _args: v8::FunctionCallbackArguments<'s>,
     mut rv: v8::ReturnValue<'_, v8::Value>,
 ) {
     let Some(resolver) = v8::PromiseResolver::new(scope) else {
         return;
     };
-    if !media_devices_receiver_branded(scope, args.this()) {
-        reject_type_error(scope, resolver, "Illegal invocation");
-        rv.set(resolver.get_promise(scope).into());
-        return;
-    }
     let message = v8_string(scope, "Requested media device not found")
         .unwrap_or_else(|| v8_string(scope, "").unwrap());
     let error = v8::Exception::error(scope, message);
     let _ = resolver.reject(scope, error);
     rv.set(resolver.get_promise(scope).into());
-}
-
-fn media_devices_receiver_branded<'s>(
-    scope: &mut v8::PinScope<'s, '_>,
-    receiver: v8::Local<'s, v8::Object>,
-) -> bool {
-    web_api_interfaces::MediaDevices::is_instance(scope, receiver)
 }

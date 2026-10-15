@@ -17,12 +17,12 @@ struct MediaCapabilitiesObjectDeclaration {
 }
 
 #[derive(Default, WebApiFunctionTemplate)]
-#[webapi(interface = web_api_interfaces::MediaCapabilities, enumerable)]
+#[webapi(interface = web_api_interfaces::MediaCapabilities, enumerable, receiver)]
 struct MediaCapabilitiesPrototypeDeclaration {
-    #[webapi(method, length = 1, callback = media_capabilities_decoding_info_callback)]
+    #[webapi(method, length = 1, callback = media_capabilities_decoding_info_callback, returns_promise)]
     decoding_info: (),
 
-    #[webapi(method, length = 1, callback = media_capabilities_encoding_info_callback)]
+    #[webapi(method, length = 1, callback = media_capabilities_encoding_info_callback, returns_promise)]
     encoding_info: (),
 }
 
@@ -300,11 +300,6 @@ fn media_capabilities_decoding_info_callback<'s>(
     mut rv: v8::ReturnValue<'_, v8::Value>,
 ) {
     let receiver = args.this();
-    if !media_capabilities_receiver_branded(scope, receiver) {
-        let reason = type_error_value(scope, "Illegal invocation");
-        set_rejected_promise(scope, &mut rv, reason);
-        return;
-    }
     let parsed = match try_parse_promise_args::<DecodingInfoArgs>(scope, &args) {
         Ok(parsed) => parsed,
         Err(reason) => {
@@ -380,11 +375,6 @@ fn media_capabilities_encoding_info_callback<'s>(
     args: v8::FunctionCallbackArguments<'s>,
     mut rv: v8::ReturnValue<'_, v8::Value>,
 ) {
-    if !media_capabilities_receiver_branded(scope, args.this()) {
-        let reason = type_error_value(scope, "Illegal invocation");
-        set_rejected_promise(scope, &mut rv, reason);
-        return;
-    }
     let parsed = match try_parse_promise_args::<EncodingInfoArgs>(scope, &args) {
         Ok(parsed) => parsed,
         Err(reason) => {
@@ -469,13 +459,6 @@ fn set_resolved_promise<'s>(
     let promise = resolver.get_promise(scope);
     let _ = resolver.resolve(scope, value);
     rv.set(promise.into());
-}
-
-fn media_capabilities_receiver_branded<'s>(
-    scope: &mut v8::PinScope<'s, '_>,
-    receiver: v8::Local<'s, v8::Object>,
-) -> bool {
-    web_api_interfaces::MediaCapabilities::is_instance(scope, receiver)
 }
 
 fn media_capabilities_is_secure_context<'s>(

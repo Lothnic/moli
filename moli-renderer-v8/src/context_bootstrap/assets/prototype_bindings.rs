@@ -354,16 +354,17 @@ struct StorageBucketManagerTemplateMethodsDeclaration {
 #[derive(WebApiFunctionTemplate)]
 #[webapi(interface = web_api_interfaces::StorageBucket, enumerable)]
 struct StorageBucketTemplateMethodsDeclaration {
-    #[webapi(accessor_property, getter = storage_bucket_name_getter_callback)]
+    #[webapi(accessor_property, receiver = web_api_interfaces::StorageBucket::is_instance, getter = storage_bucket_name_getter_callback)]
     name: (),
 
     #[webapi(
         accessor_property = "indexedDB",
+        receiver = web_api_interfaces::StorageBucket::is_instance,
         getter = storage_bucket_indexed_db_getter_callback
     )]
     indexed_db: (),
 
-    #[webapi(accessor_property, getter = storage_bucket_caches_getter_callback)]
+    #[webapi(accessor_property, receiver = web_api_interfaces::StorageBucket::is_instance, getter = storage_bucket_caches_getter_callback)]
     caches: (),
 
     #[webapi(method = "persist", length = 0, callback = storage_bucket_persist_callback)]
