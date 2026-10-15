@@ -50,6 +50,8 @@ pub const MAX_PAINT_LAYER_DEPTH: usize = 4_096;
 /// Failure while validating or rasterizing a paint snapshot.
 #[derive(Clone, Debug, PartialEq)]
 pub enum PaintError {
+    /// A native SVG image mapping contains a non-finite coefficient.
+    InvalidSvgImageTransform { transform: [f64; 6] },
     /// At least one capture-surface dimension was non-finite or not positive.
     InvalidCaptureSurfaceDimensions {
         /// Width in CSS pixels.
@@ -131,6 +133,9 @@ pub enum PaintError {
 impl fmt::Display for PaintError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::InvalidSvgImageTransform { transform } => {
+                write!(formatter, "SVG image mapping must be finite: {transform:?}")
+            }
             Self::InvalidCaptureSurfaceDimensions { width, height } => {
                 write!(
                     formatter,
@@ -329,6 +334,65 @@ pub fn raster_snapshot(snapshot: &PaintSnapshot) -> Result<RasterImage, PaintErr
     Ok(RasterImage {
         width: dimensions.width,
         height: dimensions.height,
+        rgba,
+    })
+}
+
+/// Rasterize an immutable SVG directly at the consumer's pixel resolution.
+/// The affine maps SVG viewport coordinates into output pixels. Unlike page
+/// image projection, this boundary does not snap geometry to CSS pixel edges.
+pub fn raster_svg_image(
+    image: &moli_image::SvgImage,
+    width: u32,
+    height: u32,
+    transform: [f64; 6],
+) -> Result<RasterImage, PaintError> {
+    if !transform.iter().all(|value| value.is_finite()) {
+        return Err(PaintError::InvalidSvgImageTransform { transform });
+    }
+    let dimensions = validate_dimensions(PaintCaptureSurface {
+        css_width: width as f32,
+        css_height: height as f32,
+        device_scale: 1.0,
+    })?;
+    validate_paint_operation_budget(image.paint_work_units().saturating_add(1))?;
+    validate_resource_budget(dimensions, PaintStreamMetrics::default())?;
+    let mut renderer = VelloCpuImageRenderer::new(width, height);
+    let mut rgba = Vec::new();
+    renderer.render_to_vec(
+        |scene| {
+            let transform = Affine::new(transform);
+            let size = image.tree().size();
+            let bounds = image.tree().root().abs_stroke_bounding_box();
+            let clip = bounds.left() < 0.0
+                || bounds.top() < 0.0
+                || bounds.right() > size.width()
+                || bounds.bottom() > size.height();
+            // An identical fractional clip would multiply the image edge's
+            // antialias coverage twice. Clip only content escaping its viewport.
+            if clip {
+                scene.push_clip_layer(
+                    transform,
+                    &Rect::new(0.0, 0.0, f64::from(size.width()), f64::from(size.height())),
+                );
+            }
+            paint_svg_tree(scene, image, transform);
+            if clip {
+                scene.pop_layer();
+            }
+        },
+        &mut rgba,
+    );
+    if rgba.len() != dimensions.byte_len {
+        return Err(PaintError::UnexpectedBufferLength {
+            expected: dimensions.byte_len,
+            actual: rgba.len(),
+        });
+    }
+    unpremultiply_rgba(&mut rgba);
+    Ok(RasterImage {
+        width,
+        height,
         rgba,
     })
 }
@@ -840,16 +904,15 @@ fn paint_svg_image(
             );
     let transform = device_transform(image.transform, scale) * image_to_destination;
 
+    paint_svg_tree(scene, &resource.image, transform);
+}
+
+fn paint_svg_tree(scene: &mut impl PaintScene, image: &moli_image::SvgImage, transform: Affine) {
     // Blitz's SVG executor reports unsupported nodes by painting red boxes.
     // A product screenshot must not invent visible fallback pixels, so retain
     // supported vector content and silently omit unsupported masks, filters,
     // patterns, or embedded raster nodes until their backends are wired.
-    anyrender_svg::render_svg_tree_with(
-        scene,
-        resource.image.tree(),
-        transform,
-        &mut |_scene, _node| {},
-    );
+    anyrender_svg::render_svg_tree_with(scene, image.tree(), transform, &mut |_scene, _node| {});
 }
 
 fn pixel_snapped_image_destination(destination: PaintRect) -> Option<PaintRect> {
@@ -2246,6 +2309,31 @@ fn to_backend_color(color: PaintColor) -> Color {
 mod tests {
     use super::*;
     use moli_layout::{PaintFilter, PaintViewport};
+
+    #[test]
+    fn canvas_svg_rasterization_crops_without_snapping_or_double_edge_coverage() {
+        let svg = moli_image::decode_svg_image(br#"<svg xmlns="http://www.w3.org/2000/svg" width="4" height="2"><rect width="4" height="2" fill="lime"/></svg>"#).unwrap();
+        let image = raster_svg_image(&svg, 15, 10, [2.5, 0.0, 0.0, 2.5, 2.5, 2.5]).unwrap();
+        assert_eq!(pixel(&image, 0, 0), [0, 0, 0, 0]);
+        assert_eq!(pixel(&image, 3, 3), [0, 255, 0, 255]);
+        assert_eq!(pixel(&image, 2, 3), [0, 255, 0, 128]);
+        assert_eq!(pixel(&image, 2, 2), [0, 255, 0, 64]);
+        assert_eq!(pixel(&image, 13, 3), [0, 0, 0, 0]);
+        assert!(matches!(
+            raster_svg_image(&svg, 1, 1, [f64::INFINITY; 6]),
+            Err(PaintError::InvalidSvgImageTransform { .. })
+        ));
+    }
+
+    #[test]
+    fn canvas_svg_rasterization_clips_overflow_to_the_image_viewport() {
+        let svg = moli_image::decode_svg_image(br#"<svg xmlns="http://www.w3.org/2000/svg" width="4" height="2" overflow="visible"><rect x="-2" y="-2" width="8" height="6" fill="lime"/></svg>"#).unwrap();
+        let image = raster_svg_image(&svg, 12, 8, [2.0, 0.0, 0.0, 2.0, 2.0, 2.0]).unwrap();
+        assert_eq!(pixel(&image, 0, 2), [0, 0, 0, 0]);
+        assert_eq!(pixel(&image, 2, 2), [0, 255, 0, 255]);
+        assert_eq!(pixel(&image, 9, 5), [0, 255, 0, 255]);
+        assert_eq!(pixel(&image, 10, 5), [0, 0, 0, 0]);
+    }
 
     fn snapshot(width: u32, height: u32, scale: f32) -> PaintSnapshot {
         PaintSnapshot::new(PaintViewport::new(width, height, scale), PaintColor::WHITE)

@@ -7,10 +7,10 @@ mod collections;
 mod context_host;
 mod current_input;
 pub(crate) use context_host::{
-    CrossOriginWindowAccessor, CrossOriginWindowProperty, DocumentDomainState, JsContextHost,
-    JsContextHostPageTaskCapabilities, MouseReleaseFollowUp, PendingScrollObservableEffects,
-    PostParseAutofocusAdmission, ServiceWorkerWindowOwner, SharedResourceTimingBufferRegistry,
-    WindowAccessOrigin, WindowOriginKey,
+    CrossOriginWindowAccessor, CrossOriginWindowProperty, DecodedImageContent, DocumentDomainState,
+    JsContextHost, JsContextHostPageTaskCapabilities, MouseReleaseFollowUp,
+    PendingScrollObservableEffects, PostParseAutofocusAdmission, ServiceWorkerWindowOwner,
+    SharedResourceTimingBufferRegistry, WindowAccessOrigin, WindowOriginKey,
 };
 pub(crate) use current_input::{
     CurrentInputEvent, CurrentInputEventScope, InputNavigationPolicy, navigation_policy_from_event,
