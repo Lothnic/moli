@@ -1,6 +1,43 @@
 use super::*;
 
 #[test]
+fn html_all_collections_ignore_public_constructor_replacement() {
+    let mut vm = new_parsed_test_vm(
+        "https://dom-intrinsics.test/",
+        "<!doctype html><html><body><div id='live-all'></div></body></html>",
+    );
+
+    let result = vm
+        .eval(
+            r#"
+            (() => {
+              const nativeAllPrototype = HTMLAllCollection.prototype;
+              window.HTMLAllCollection = function ReplacementAllCollection() {};
+
+              const liveAll = document.all;
+              const detachedHtml = document.implementation.createHTMLDocument("");
+              const detachedAll = detachedHtml.all;
+
+              return JSON.stringify({
+                liveAllPrototype: Object.getPrototypeOf(liveAll) === nativeAllPrototype,
+                liveAllWorks: liveAll.namedItem("live-all") ===
+                  document.getElementById("live-all"),
+                detachedAllPrototype:
+                  Object.getPrototypeOf(detachedAll) === nativeAllPrototype,
+                detachedAllWorks: detachedAll.item(0) === detachedHtml.documentElement
+              });
+            })()
+            "#,
+        )
+        .expect("native DOM object intrinsic probe should evaluate");
+
+    assert_eq!(
+        result,
+        r#"{"liveAllPrototype":true,"liveAllWorks":true,"detachedAllPrototype":true,"detachedAllWorks":true}"#
+    );
+}
+
+#[test]
 fn detached_document_lifecycle_methods_use_document_prototype_brand_checks() {
     let mut vm = new_storage_test_vm("https://detached-document-lifecycle-brand.test/");
 

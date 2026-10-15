@@ -244,6 +244,58 @@ async fn media_invalid_request_url_fails_before_load() {
 }
 
 #[tokio::test]
+async fn media_error_uses_the_native_prototype_after_public_constructor_replacement() {
+    let loader = ResourceRequestClient::new(&moli_fetch::FetchConfig::default()).expect("loader");
+    let mut vm = new_storage_page_task_executor_test_vm_with_loader(
+        "https://media-error-intrinsics.test/page.html",
+        &loader,
+    );
+
+    vm.eval(
+        r#"
+        globalThis.__mediaErrorNativeConstructor = window.MediaError;
+        globalThis.__mediaErrorNativePrototype = MediaError.prototype;
+        window.MediaError = function ReplacementMediaError() {};
+        const video = document.createElement("video");
+        video.src = "http://[";
+        (document.body || document.documentElement).appendChild(video);
+        globalThis.__mediaErrorIntrinsicVideo = video;
+        "queued";
+        "#,
+    )
+    .expect("media error intrinsic setup should evaluate");
+
+    run_next_page_media_element_event_for_test(
+        &mut vm,
+        &loader,
+        "intrinsic media error loadstart turn",
+    )
+    .await;
+    run_next_page_media_element_event_for_test(
+        &mut vm,
+        &loader,
+        "intrinsic media error failure turn",
+    )
+    .await;
+
+    assert_eq!(
+        vm.eval(
+            r#"JSON.stringify({
+              publicConstructorReplaced: window.MediaError !== __mediaErrorNativeConstructor,
+              nativePrototype:
+                Object.getPrototypeOf(__mediaErrorIntrinsicVideo.error) ===
+                  __mediaErrorNativePrototype,
+              nativeInstance:
+                __mediaErrorIntrinsicVideo.error instanceof __mediaErrorNativeConstructor,
+              code: __mediaErrorIntrinsicVideo.error && __mediaErrorIntrinsicVideo.error.code
+            })"#,
+        )
+        .expect("media error intrinsic result should evaluate"),
+        r#"{"publicConstructorReplaced":true,"nativePrototype":true,"nativeInstance":true,"code":4}"#
+    );
+}
+
+#[tokio::test]
 async fn media_blocks_http_dangling_markup_without_blocking_safe_url_inputs() {
     let loader = ResourceRequestClient::new(&moli_fetch::FetchConfig::default()).expect("loader");
     let mut vm = new_storage_page_task_executor_test_vm_with_loader(
