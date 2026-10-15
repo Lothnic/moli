@@ -608,9 +608,11 @@ fn build_permission_status_object<'s>(
     name: &str,
     state: &str,
 ) -> v8::Local<'s, v8::Object> {
-    PermissionStatusObjectDeclaration::new(name.to_owned(), state.to_owned())
+    let status = PermissionStatusObjectDeclaration::new(name.to_owned(), state.to_owned())
         .bind(scope)
-        .expect("PermissionStatus declaration should bind")
+        .expect("PermissionStatus declaration should bind");
+    mark_simple_event_target_slot(scope, status, "__moliPermissionStatusListeners");
+    status
 }
 
 pub(in crate::context_bootstrap) fn permission_status_name_getter_callback<'s>(
