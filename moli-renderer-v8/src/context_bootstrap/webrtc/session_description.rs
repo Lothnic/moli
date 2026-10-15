@@ -23,7 +23,7 @@ struct SessionDescriptionObjectDeclaration<'scope> {
 }
 
 #[derive(WebApiFunctionTemplate)]
-#[webapi(interface = web_api_interfaces::RTCSessionDescription, enumerable)]
+#[webapi(interface = web_api_interfaces::RTCSessionDescription, enumerable, receiver)]
 struct SessionDescriptionPrototypeDeclaration {
     #[webapi(accessor_property, getter = description_attribute_getter, data = callback_data_index_value(scope, 0))]
     r#type: (),

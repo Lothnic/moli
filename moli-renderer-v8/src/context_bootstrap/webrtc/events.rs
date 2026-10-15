@@ -1,4 +1,3 @@
-use super::{ice_candidate::ice_candidate_receiver_branded, rtc_data_channel_receiver_branded};
 use crate::web_api_interfaces;
 use crate::{
     context_bootstrap::events::{
@@ -188,8 +187,12 @@ fn construct_event<'s>(
             v8::Local::<v8::Object>::try_from(value)
                 .ok()
                 .is_some_and(|object| match kind {
-                    EventKind::IceCandidate => ice_candidate_receiver_branded(scope, object),
-                    EventKind::DataChannel => rtc_data_channel_receiver_branded(scope, object),
+                    EventKind::IceCandidate => {
+                        web_api_interfaces::RTCIceCandidate::is_instance(scope, object)
+                    }
+                    EventKind::DataChannel => {
+                        web_api_interfaces::RTCDataChannel::is_instance(scope, object)
+                    }
                     EventKind::Error => web_api_interfaces::RTCError::is_instance(scope, object),
                 });
         if !branded {

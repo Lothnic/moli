@@ -19,7 +19,7 @@ struct IceCandidateObjectDeclaration<'scope> {
 }
 
 #[derive(WebApiFunctionTemplate)]
-#[webapi(interface = web_api_interfaces::RTCIceCandidate, enumerable)]
+#[webapi(interface = web_api_interfaces::RTCIceCandidate, enumerable, receiver)]
 struct IceCandidatePrototypeDeclaration {
     #[webapi(accessor_property, getter = candidate_attribute_getter, data = callback_data_index_value(scope, 0))]
     candidate: (),
@@ -200,13 +200,6 @@ fn parse_candidate_init<'s>(
         }
     }
     Some(values)
-}
-
-pub(super) fn ice_candidate_receiver_branded<'s>(
-    scope: &mut v8::PinScope<'s, '_>,
-    receiver: v8::Local<'s, v8::Object>,
-) -> bool {
-    web_api_interfaces::RTCIceCandidate::is_instance(scope, receiver)
 }
 
 fn candidate_values<'s>(

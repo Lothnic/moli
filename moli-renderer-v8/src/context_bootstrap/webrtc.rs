@@ -132,7 +132,7 @@ struct RtcSessionDescriptionInitDeclaration<'scope> {
 }
 
 #[derive(Default, WebApiFunctionTemplate)]
-#[webapi(interface = web_api_interfaces::RTCPeerConnection, enumerable)]
+#[webapi(interface = web_api_interfaces::RTCPeerConnection, enumerable, receiver)]
 struct RtcPeerConnectionPrototypeDeclaration {
     #[webapi(accessor_property, getter = rtc_peer_connection_state_getter, data = callback_data_index_value(scope, 0))]
     signaling_state: (),
@@ -172,7 +172,7 @@ struct RtcRtpReceiverConstructorDeclaration {
 }
 
 #[derive(Default, WebApiFunctionTemplate)]
-#[webapi(interface = web_api_interfaces::RTCDataChannel, enumerable)]
+#[webapi(interface = web_api_interfaces::RTCDataChannel, enumerable, receiver)]
 struct RtcDataChannelPrototypeDeclaration {
     #[webapi(accessor_property, getter = rtc_data_channel_value_getter, data = callback_data_index_value(scope, 0))]
     label: (),
@@ -270,10 +270,6 @@ fn rtc_peer_connection_state_getter<'s>(
     args: v8::FunctionCallbackArguments<'s>,
     mut rv: v8::ReturnValue<'_, v8::Value>,
 ) {
-    if !rtc_peer_connection_receiver_branded(scope, args.this()) {
-        throw_type_error(scope, "Illegal invocation");
-        return;
-    }
     let Some(slot) = callback_data_item(
         scope,
         &args,
@@ -293,10 +289,6 @@ fn rtc_peer_connection_description_getter<'s>(
     args: v8::FunctionCallbackArguments<'s>,
     mut rv: v8::ReturnValue<'_, v8::Value>,
 ) {
-    if !rtc_peer_connection_receiver_branded(scope, args.this()) {
-        throw_type_error(scope, "Illegal invocation");
-        return;
-    }
     let Some(slot) = callback_data_item(
         scope,
         &args,
@@ -314,10 +306,6 @@ fn rtc_peer_connection_create_data_channel_callback<'s>(
     args: v8::FunctionCallbackArguments<'s>,
     mut rv: v8::ReturnValue<'_, v8::Value>,
 ) {
-    if !rtc_peer_connection_receiver_branded(scope, args.this()) {
-        throw_type_error(scope, "Illegal invocation");
-        return;
-    }
     if args.length() == 0 {
         throw_type_error(
             scope,
@@ -346,10 +334,6 @@ fn rtc_peer_connection_create_offer_callback<'s>(
     args: v8::FunctionCallbackArguments<'s>,
     mut rv: v8::ReturnValue<'_, v8::Value>,
 ) {
-    if !rtc_peer_connection_receiver_branded(scope, args.this()) {
-        throw_type_error(scope, "Illegal invocation");
-        return;
-    }
     let options = v8::Local::<v8::Object>::try_from(args.get(0)).ok();
     let audio = options
         .and_then(|options| options.get(scope, v8str(scope, "offerToReceiveAudio").into()))
@@ -379,10 +363,6 @@ fn rtc_peer_connection_set_local_description_callback<'s>(
     args: v8::FunctionCallbackArguments<'s>,
     mut rv: v8::ReturnValue<'_, v8::Value>,
 ) {
-    if !rtc_peer_connection_receiver_branded(scope, args.this()) {
-        throw_type_error(scope, "Illegal invocation");
-        return;
-    }
     let Ok(description) = v8::Local::<v8::Object>::try_from(args.get(0)) else {
         let reason = v8::Exception::type_error(
             scope,
@@ -424,10 +404,6 @@ fn rtc_peer_connection_close_callback<'s>(
     args: v8::FunctionCallbackArguments<'s>,
     mut rv: v8::ReturnValue<'_, v8::Value>,
 ) {
-    if !rtc_peer_connection_receiver_branded(scope, args.this()) {
-        throw_type_error(scope, "Illegal invocation");
-        return;
-    }
     for (slot, state) in [
         (RTC_PEER_CONNECTION_SIGNALING_STATE_SLOT, "closed"),
         (RTC_PEER_CONNECTION_ICE_CONNECTION_STATE_SLOT, "closed"),
@@ -465,10 +441,6 @@ fn rtc_data_channel_value_getter<'s>(
     args: v8::FunctionCallbackArguments<'s>,
     mut rv: v8::ReturnValue<'_, v8::Value>,
 ) {
-    if !rtc_data_channel_receiver_branded(scope, args.this()) {
-        throw_type_error(scope, "Illegal invocation");
-        return;
-    }
     let Some(slot) = callback_data_item(
         scope,
         &args,
@@ -488,10 +460,6 @@ fn rtc_data_channel_close_callback<'s>(
     args: v8::FunctionCallbackArguments<'s>,
     mut rv: v8::ReturnValue<'_, v8::Value>,
 ) {
-    if !rtc_data_channel_receiver_branded(scope, args.this()) {
-        throw_type_error(scope, "Illegal invocation");
-        return;
-    }
     set_string_slot(
         scope,
         args.this(),
@@ -502,14 +470,10 @@ fn rtc_data_channel_close_callback<'s>(
 }
 
 fn rtc_data_channel_send_callback<'s>(
-    scope: &mut v8::PinScope<'s, '_>,
-    args: v8::FunctionCallbackArguments<'s>,
+    _scope: &mut v8::PinScope<'s, '_>,
+    _args: v8::FunctionCallbackArguments<'s>,
     mut rv: v8::ReturnValue<'_, v8::Value>,
 ) {
-    if !rtc_data_channel_receiver_branded(scope, args.this()) {
-        throw_type_error(scope, "Illegal invocation");
-        return;
-    }
     rv.set_undefined();
 }
 
@@ -563,20 +527,6 @@ fn set_rejected_promise<'s>(
     let promise = resolver.get_promise(scope);
     let _ = resolver.reject(scope, reason);
     rv.set(promise.into());
-}
-
-fn rtc_peer_connection_receiver_branded<'s>(
-    scope: &mut v8::PinScope<'s, '_>,
-    receiver: v8::Local<'s, v8::Object>,
-) -> bool {
-    web_api_interfaces::RTCPeerConnection::is_instance(scope, receiver)
-}
-
-fn rtc_data_channel_receiver_branded<'s>(
-    scope: &mut v8::PinScope<'s, '_>,
-    receiver: v8::Local<'s, v8::Object>,
-) -> bool {
-    web_api_interfaces::RTCDataChannel::is_instance(scope, receiver)
 }
 
 fn build_signaling_only_offer(audio: bool, video: bool, data: bool) -> String {
