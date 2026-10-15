@@ -223,6 +223,13 @@ impl JsContextHost {
         let Some(target) = self.current_window_document_task_target(scope) else {
             return;
         };
+        self.queue_resize_observer_rendering_update_for_target(target);
+    }
+
+    pub(crate) fn queue_resize_observer_rendering_update_for_target(
+        &mut self,
+        target: WindowDocumentTaskTarget,
+    ) {
         if self.resize_observer_rendering_update_target == Some(target) {
             return;
         }

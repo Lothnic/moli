@@ -326,6 +326,7 @@ fn deliver_resize_observer<'s>(
         WindowWebIdlCallbackFunctionOutcome::Returned
         | WindowWebIdlCallbackFunctionOutcome::Retired => {}
     }
+    crate::script_vm::perform_microtask_checkpoint_and_report_pending_promise_rejections(scope);
     (Some(depth), skipped)
 }
 
@@ -486,10 +487,7 @@ fn build_resize_observer_entries_at_depth<'s>(
             let mut node = entry.handle;
             while let Some(handle) = node {
                 depth += 1;
-                node = runtime
-                    .dom_host()
-                    .node(handle)
-                    .and_then(crate::dom::native::Node::parent_node);
+                node = runtime.dom_host().flat_tree_parent(handle);
             }
             if depth <= minimum_depth {
                 skipped = true;

@@ -527,6 +527,28 @@ fn preformatted_directory_links_keep_their_destinations_as_text() {
 }
 
 #[test]
+fn preformatted_code_cross_references_preserve_literal_source() {
+    let html = "<pre><code class='language-rust'><a href='/macros/println'>println!</a>(<span>&quot;hello&quot;</span>);\nlet values = <a href='/types/Vec'><span>Vec</span></a>::new();</code></pre>";
+    for preformatted in [false, true] {
+        assert_eq!(
+            markdown(html, preformatted),
+            "```rust\nprintln!(\"hello\");\nlet values = Vec::new();\n```"
+        );
+    }
+}
+
+#[test]
+fn preformatted_directory_links_survive_around_code_examples() {
+    let html = "<pre><a href='before.txt'>before</a>\n<span><code><a href='/types/Value'>Value</a> value;</code></span>\n<a href='after.txt'>after</a></pre>";
+    for preformatted in [false, true] {
+        assert_eq!(
+            markdown(html, preformatted),
+            "```\nbefore (before.txt)\nValue value;\nafter (after.txt)\n```"
+        );
+    }
+}
+
+#[test]
 fn list_paragraphs_and_code_blocks_require_blank_lines_between_items() {
     for (html, expected) in [
         ("<ul><li>one</li><li>two</li></ul>", "- one\n- two"),

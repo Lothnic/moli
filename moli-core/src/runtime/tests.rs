@@ -6094,3 +6094,72 @@ navigator.serviceWorker.onmessage = event => {
         _ => ("404 Not Found", "text/plain", "not found"),
     }
 }
+
+async fn assert_done_post_load_work_respects_fetch_deadline(navigation: bool) -> Result<()> {
+    let listener = TcpListener::bind("127.0.0.1:0").await?;
+    let url = format!("http://{}/start", listener.local_addr()?);
+    let server = tokio::spawn(async move {
+        while let Ok((mut stream, _)) = listener.accept().await {
+            tokio::spawn(async move {
+                let Ok(request) = read_http_request_head(&mut stream).await else {
+                    return;
+                };
+                let path = request_path(&request).unwrap_or_default();
+                let body = if path == "/slow" {
+                    tokio::time::sleep(Duration::from_millis(1200)).await;
+                    "<main>replacement</main>".to_owned()
+                } else {
+                    let callback = if navigation {
+                        "location.href = '/slow'"
+                    } else {
+                        "const until = Date.now() + 1200; while (Date.now() < until) {}"
+                    };
+                    format!(
+                        "<!doctype html><body><main>original</main><script>addEventListener('load', () => setTimeout(() => {{ {callback} }}, 0));</script></body>"
+                    )
+                };
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                let _ = stream.write_all(response.as_bytes()).await;
+            });
+        }
+    });
+    let browser = Browser::new(AppConfig::default())?;
+    let started = std::time::Instant::now();
+    let result = tokio::time::timeout(
+        Duration::from_millis(850),
+        browser.fetch_with_wait_until(&url, RenderedDomWaitUntil::Done, Duration::from_millis(350)),
+    )
+    .await;
+    server.abort();
+    assert!(
+        started.elapsed() < Duration::from_millis(850),
+        "the fetch call itself must return before the outer bound, even if an inner poll blocks"
+    );
+    let result = result.context("Done exceeded the caller's absolute fetch deadline")?;
+    let error = match result {
+        Ok(_) => anyhow::bail!("post-load work should exhaust the original fetch budget"),
+        Err(error) => error,
+    };
+    let timeout = error
+        .downcast_ref::<super::FetchReadinessTimeout>()
+        .context("post-load timeout must retain its typed fetch failure")?;
+    assert_eq!(timeout.timeout(), Duration::from_millis(350));
+    assert_eq!(
+        timeout.phase().to_string(),
+        "completing post-load ready tasks"
+    );
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn fetch_done_deadline_includes_busy_post_load_script() -> Result<()> {
+    assert_done_post_load_work_respects_fetch_deadline(false).await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn fetch_done_deadline_includes_post_load_navigation() -> Result<()> {
+    assert_done_post_load_work_respects_fetch_deadline(true).await
+}

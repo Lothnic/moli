@@ -14,7 +14,7 @@ enum Task<'a, Id> {
     EndHeading(usize),
     EndList(usize),
     EndItem(String),
-    RawChildren(Option<Id>, usize, bool),
+    RawChildren(Option<Id>, usize, bool, bool),
     RawLinkDestination(&'a str),
     EndRawBlock,
     EndCode,
@@ -68,7 +68,7 @@ impl<'a, D: Dom + ?Sized> Machine<'a, D> {
                         .push(Task::Children(self.dom.next_sibling(node), depth));
                     self.tasks.push(Task::Visit(node, depth));
                 }
-                Task::Children(None, _) | Task::RawChildren(None, _, _) => {}
+                Task::Children(None, _) | Task::RawChildren(None, _, _, _) => {}
                 Task::Boundary => self.writer().boundary(2),
                 Task::PopStyle => self.writer().pop_style(),
                 Task::EndLink(serial, fallback_label) => {
@@ -134,7 +134,9 @@ impl<'a, D: Dom + ?Sized> Machine<'a, D> {
                     list.loose |= loose;
                     self.writer().block(item.into(), separation, separation);
                 }
-                Task::RawChildren(Some(node), depth, inline) => self.raw_node(node, depth, inline),
+                Task::RawChildren(Some(node), depth, inline, link_destinations) => {
+                    self.raw_node(node, depth, inline, link_destinations)
+                }
                 Task::RawLinkDestination(href) => {
                     if !self.raw.is_empty()
                         && !self
@@ -308,6 +310,7 @@ impl<'a, D: Dom + ?Sized> Machine<'a, D> {
                         self.dom.first_child(node),
                         depth + 1,
                         tag == "code",
+                        tag == "pre",
                     ));
                 }
                 return;
@@ -436,11 +439,12 @@ impl<'a, D: Dom + ?Sized> Machine<'a, D> {
             .or(self.options.default_code_language.as_deref())
     }
 
-    fn raw_node(&mut self, node: D::NodeId, depth: usize, inline: bool) {
+    fn raw_node(&mut self, node: D::NodeId, depth: usize, inline: bool, link_destinations: bool) {
         self.tasks.push(Task::RawChildren(
             self.dom.next_sibling(node),
             depth,
             inline,
+            link_destinations,
         ));
         if depth >= self.options.max_depth {
             return;
@@ -462,7 +466,7 @@ impl<'a, D: Dom + ?Sized> Machine<'a, D> {
                     }
                     self.tasks.push(Task::EndRawBlock);
                 }
-                if !inline
+                if link_destinations
                     && let NodeKind::Element("a") = self.dom.node_kind(node)
                     && let Some(href) = self.dom.attribute(node, "href").and_then(resource_url)
                 {
@@ -472,6 +476,9 @@ impl<'a, D: Dom + ?Sized> Machine<'a, D> {
                     self.dom.first_child(node),
                     depth + 1,
                     inline,
+                    // Keep directory URLs in preformatted text, but leave
+                    // source-code cross-references as literal code text.
+                    link_destinations && self.dom.node_kind(node) != NodeKind::Element("code"),
                 ));
             }
             _ => {}

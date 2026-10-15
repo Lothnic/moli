@@ -76,10 +76,10 @@ impl ScriptVm {
                 .borrow_mut()
                 .resize_observer_rendering_update_target
                 .replace(owner.target());
-            let broadcast: Result<bool> = (|| {
+            let broadcast: Result<(bool, bool)> = (|| {
                 let mut minimum_depth = 0;
                 let mut undelivered = false;
-                for iteration in 0..32 {
+                for _ in 0..32 {
                     let viewport = self
                         ._context_host
                         .borrow()
@@ -99,18 +99,26 @@ impl ScriptVm {
                             minimum_depth,
                         ))
                     })?;
-                    undelivered = skipped || (iteration == 31 && depth.is_some());
+                    undelivered = skipped;
                     let Some(depth) = depth else {
-                        break;
+                        return Ok((undelivered, false));
                     };
                     minimum_depth = depth;
                 }
-                Ok(undelivered)
+                // Yield the owner without dropping legitimate deeper work.
+                // The budget itself is not evidence of a resize feedback loop.
+                Ok((undelivered, true))
             })();
             self._context_host
                 .borrow_mut()
                 .resize_observer_rendering_update_target = previous_target;
-            if broadcast? {
+            let (undelivered, resume) = broadcast?;
+            if resume {
+                self._context_host
+                    .borrow_mut()
+                    .queue_resize_observer_rendering_update_for_target(owner.target());
+            }
+            if undelivered {
                 self.record_runtime_warning(format_args!(
                     "ResizeObserver loop completed with undelivered notifications."
                 ));
