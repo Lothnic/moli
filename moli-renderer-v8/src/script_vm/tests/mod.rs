@@ -1,3 +1,4 @@
+mod beforeinput_target_validation;
 mod credential_container;
 mod credential_json_options;
 mod picture_in_picture_interfaces;

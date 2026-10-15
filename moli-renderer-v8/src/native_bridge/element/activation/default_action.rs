@@ -549,6 +549,12 @@ pub(crate) fn replace_contenteditable_selection(
     let Some(target) = node_wrapper_from_handle(scope, handle) else {
         return false;
     };
+    let Some(document) = unsafe { &*runtime_ptr }
+        .dom_host()
+        .owner_document_handle(handle)
+    else {
+        return false;
+    };
     if !dispatch_beforeinput(
         scope,
         runtime_ptr,
@@ -557,6 +563,17 @@ pub(crate) fn replace_contenteditable_selection(
         input_type.data(replacement_text),
     ) {
         return false;
+    }
+    // beforeinput can disconnect or adopt the editor, or disable editing.
+    // Revalidate native state before changing its DOM or selection.
+    {
+        let runtime = unsafe { &*runtime_ptr };
+        if runtime.dom_host().owner_document_handle(handle) != Some(document)
+            || !runtime.dom_host().is_connected(handle)
+            || contenteditable_editing_host(runtime, handle).is_none()
+        {
+            return false;
+        }
     }
     let inserted = if let Some(selection) = window_selection(scope) {
         if let Some((node, start, end)) = selected_text_node_range(scope, target, selection) {
