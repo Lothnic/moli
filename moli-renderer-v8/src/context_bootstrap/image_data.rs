@@ -28,7 +28,7 @@ struct ImageDataObjectDeclaration<'s> {
 }
 
 #[derive(WebApiFunctionTemplate)]
-#[webapi(interface = web_api_interfaces::ImageData)]
+#[webapi(interface = web_api_interfaces::ImageData, receiver)]
 struct ImageDataPrototypeDeclaration {
     #[webapi(
         accessor_property,
@@ -146,10 +146,6 @@ fn image_data_getter_callback<'s>(
     args: v8::FunctionCallbackArguments<'s>,
     mut rv: v8::ReturnValue<'_, v8::Value>,
 ) {
-    if !image_data_receiver_branded(scope, args.this()) {
-        throw_type_error(scope, "Illegal invocation");
-        return;
-    }
     let Some(slot) = callback_data_item(
         scope,
         &args,
@@ -162,13 +158,6 @@ fn image_data_getter_callback<'s>(
     let value =
         get_private_value(scope, args.this(), slot).unwrap_or_else(|| v8::undefined(scope).into());
     rv.set(value);
-}
-
-fn image_data_receiver_branded<'s>(
-    scope: &mut v8::PinScope<'s, '_>,
-    receiver: v8::Local<'s, v8::Object>,
-) -> bool {
-    web_api_interfaces::ImageData::is_instance(scope, receiver)
 }
 
 fn image_data_constructor_parts<'s>(

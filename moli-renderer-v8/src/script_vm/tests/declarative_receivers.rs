@@ -100,3 +100,37 @@ fn navigator_declarations_preserve_receiver_checks_and_promise_identity_across_r
     assert_eq!(vm.eval("receiverSetup").unwrap(), "ok");
     finish_receiver_checks(&mut vm);
 }
+
+#[test]
+fn canvas_declarations_check_setters_before_conversion_and_keep_foreign_backing_state() {
+    let mut vm = receiver_test_vm();
+    vm.eval(r#"(async () => {
+      const {child, assert, check, getters} = receiverChecks;
+      for (const realm of [window, child]) {
+        const other = realm === window ? child : window;
+        const canvas = new other.OffscreenCanvas(2, 3);
+        getters(realm, 'OffscreenCanvas', canvas, ['width', 'height']);
+        for (const name of ['width', 'height']) {
+          const setter = Object.getOwnPropertyDescriptor(realm.OffscreenCanvas.prototype, name).set;
+          check(realm, canvas, setter);
+          setter.call(canvas, 4);
+          assert(canvas[name] === 4, 'foreign canvas setter updates receiver');
+        }
+        for (const name of ['getContext', 'convertToBlob']) check(realm, canvas, realm.OffscreenCanvas.prototype[name]);
+        assert(realm.OffscreenCanvas.prototype.getContext.call(canvas, '2d') === canvas.getContext('2d'), 'foreign canvas context identity');
+        const bitmap = await other.createImageBitmap(canvas);
+        getters(realm, 'ImageBitmap', bitmap, ['width', 'height']);
+        check(realm, bitmap, realm.ImageBitmap.prototype.close);
+        realm.ImageBitmap.prototype.close.call(bitmap);
+        assert(bitmap.width === 0 && bitmap.height === 0, 'foreign bitmap close updates receiver');
+        const data = new other.ImageData(2, 3);
+        getters(realm, 'ImageData', data, ['width', 'height', 'colorSpace', 'pixelFormat', 'data']);
+        let error;
+        try {realm.createImageBitmap(new Proxy(canvas, {}));} catch (caught) {error = caught;}
+        assert(Object.getPrototypeOf(error) === realm.TypeError.prototype, 'image source parameter keeps native interface check');
+      }
+      return 'ok';
+    })().then(result => {globalThis.receiverSetup = result;}, error => {globalThis.receiverSetup = String(error);})"#).unwrap();
+    assert_eq!(vm.eval("receiverSetup").unwrap(), "ok");
+    finish_receiver_checks(&mut vm);
+}
