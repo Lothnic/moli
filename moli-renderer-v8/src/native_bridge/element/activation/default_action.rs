@@ -549,6 +549,12 @@ pub(crate) fn replace_contenteditable_selection(
     let Some(target) = node_wrapper_from_handle(scope, handle) else {
         return false;
     };
+    let Some(document) = unsafe { &*runtime_ptr }
+        .dom_host()
+        .owner_document_handle(handle)
+    else {
+        return false;
+    };
     if !dispatch_beforeinput(
         scope,
         runtime_ptr,
@@ -557,6 +563,19 @@ pub(crate) fn replace_contenteditable_selection(
         input_type.data(replacement_text),
     ) {
         return false;
+    }
+    // beforeinput may retire the frame, adopt the target into another
+    // Document, or make it non-editable. Validate native state again before
+    // changing either the DOM or its selection; exceptions alone do not
+    // cancel a still-valid edit.
+    {
+        let runtime = unsafe { &*runtime_ptr };
+        if runtime.dom_host().owner_document_handle(handle) != Some(document)
+            || !runtime.dom_host().is_connected(handle)
+            || contenteditable_editing_host(runtime, handle).is_none()
+        {
+            return false;
+        }
     }
     let inserted = if let Some(selection) = window_selection(scope) {
         if let Some((node, start, end)) = selected_text_node_range(scope, target, selection) {
@@ -785,7 +804,11 @@ fn click_handle_internal(
     focus_behavior: ClickFocusBehavior,
 ) -> RendererInputDispatchOutcome {
     let runtime = unsafe { &*runtime_ptr };
-    if is_disabled_form_control(runtime, handle) {
+    if is_disabled_form_control(runtime, handle)
+        || runtime
+            .document_execution_context_for_node(handle)
+            .is_none()
+    {
         return RendererInputDispatchOutcome {
             handled: false,
             triggered_top_level_navigation: false,
@@ -793,18 +816,30 @@ fn click_handle_internal(
             pending_file_chooser: None,
         };
     }
-    if focus_behavior == ClickFocusBehavior::Apply
+    let focus_handle = if focus_behavior == ClickFocusBehavior::Apply
         && (user_initiated || synthetic_click_focuses_element(runtime, handle))
     {
-        let focus_handle = if is_focusable(runtime, handle) {
+        if is_focusable(runtime, handle) {
             Some(handle)
         } else {
             contenteditable_editing_host(runtime, handle)
                 .filter(|host| is_focusable(runtime, *host))
-        };
-        if let Some(focus_handle) = focus_handle {
-            update_focus(scope, runtime_ptr, Some(focus_handle));
         }
+    } else {
+        None
+    };
+    if let Some(focus_handle) = focus_handle {
+        update_focus(scope, runtime_ptr, Some(focus_handle));
+    }
+    // Focus can run author code. Reborrow and revalidate before legacy
+    // preactivation changes checkedness, dirty flags or indeterminate state.
+    let runtime = unsafe { &*runtime_ptr };
+    if is_disabled_form_control(runtime, handle)
+        || runtime
+            .document_execution_context_for_node(handle)
+            .is_none()
+    {
+        return RendererInputDispatchOutcome::default();
     }
     // A click listener may change an input to or from `type=file`, and may then
     // synchronously call `document.open()`. Chromium decides whether to open a
