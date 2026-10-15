@@ -477,8 +477,6 @@ impl RendererInspectorIoIngress {
         self.shared.state.lock().environment_notifications.take()
     }
 
-    // These entrypoints are consumed by the stacked Session policy integration.
-    #[cfg_attr(not(test), expect(dead_code))]
     pub(crate) fn enqueue_replacement_reconcile(&self, agent: RendererDevToolsAgentToken) -> bool {
         let published = {
             let mut state = self.shared.state.lock();
@@ -490,7 +488,6 @@ impl RendererInspectorIoIngress {
         published
     }
 
-    #[cfg_attr(not(test), expect(dead_code))]
     pub(crate) fn claim_replacement_reconcile(&self) -> Option<RendererDevToolsAgentToken> {
         self.shared.state.lock().control.claim()
     }
@@ -622,7 +619,9 @@ impl RendererInspectorIoIngress {
         pause_bridge: &crate::devtools::pause::RendererInspectorPauseBridge,
     ) -> Option<RendererInspectorIoCommand> {
         pause_bridge
-            .wait_for_pause_work(|| self.claim_for_pause())
+            .wait_for_pause_work(RendererDevToolsAgentToken::allocate(), || {
+                self.claim_for_pause()
+            })
             .ok()
     }
 
@@ -946,6 +945,7 @@ mod tests {
                 }
                 let mut route = enqueue(&ingress, agent, Some("latency"), "Debugger.enable");
                 std::hint::black_box(ingress.claim_environment_invalidation());
+                std::hint::black_box(ingress.claim_replacement_reconcile());
                 let mut command = ingress.claim_for_owner().unwrap();
                 ingress.first_dispatch_guard(&mut command).release();
                 assert_eq!(

@@ -125,6 +125,23 @@ impl RendererDevToolsTargetHandle {
         &self.io
     }
 
+    pub(crate) fn begin_document_replacement(&self, agent: RendererDevToolsAgentToken) -> bool {
+        let Some(first) = self.pause.begin_document_replacement(agent) else {
+            return false;
+        };
+        // Never hold the pause lock while entering ingress or waking V8.
+        if first {
+            self.io.enqueue_replacement_reconcile(agent);
+        }
+        true
+    }
+
+    pub(crate) fn finish_document_replacement(&self, agent: RendererDevToolsAgentToken) {
+        if self.pause.finish_document_replacement(agent) {
+            self.io.enqueue_replacement_reconcile(agent);
+        }
+    }
+
     pub(crate) fn outbound_route(
         &self,
         agent_token: RendererDevToolsAgentToken,

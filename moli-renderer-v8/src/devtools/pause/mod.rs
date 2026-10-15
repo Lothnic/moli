@@ -1,7 +1,7 @@
 //! Nested pause-loop coordination and causal Inspector output routing.
 
 use std::{
-    collections::{HashSet, VecDeque},
+    collections::{HashMap, HashSet, VecDeque},
     sync::{Arc, Weak},
 };
 
@@ -56,7 +56,13 @@ struct RendererInspectorPauseBridgeState {
     pause_loop_policy: RendererInspectorPauseLoopPolicy,
     quit_requested: bool,
     session_detach_arms: usize,
-    document_replacements: usize,
+    // Overlapping preparations belong to the outgoing document, even after a
+    // replacement document attaches to this Page target.
+    document_replacements: HashMap<RendererDevToolsAgentToken, usize>,
+    // Navigation begin must retire an already reported pause even when its
+    // final scope is canceled before the nested loop claims any work. This
+    // edge lives only for the current pause; it is not coalesced policy state.
+    replacement_pause_exits: HashSet<RendererDevToolsAgentToken>,
     target_closed: bool,
     pending_prefaces: VecDeque<RendererInspectorPausePreface>,
     paused_sessions_awaiting_resumed: HashSet<(RendererDevToolsAgentToken, DevToolsSessionKey)>,
@@ -104,6 +110,20 @@ impl Drop for RendererInspectorPausePrefaceGuard {
         self.bridge.cancel_pause_preface(self.id);
     }
 }
+
+impl RendererInspectorPausePrefaceGuard {
+    pub(crate) fn take_unclaimed(self) -> Option<Vec<RendererRuntimeInspectorMessage>> {
+        let mut state = self.bridge.shared.state.lock();
+        let position = state
+            .pending_prefaces
+            .iter()
+            .position(|preface| preface.id == self.id)?;
+        state
+            .pending_prefaces
+            .remove(position)
+            .map(|preface| preface.messages)
+    }
+}
 #[derive(Clone)]
 pub(crate) struct RendererInspectorSessionOutboundRoute {
     target: RendererDevToolsTargetHandle,
@@ -126,7 +146,8 @@ impl RendererInspectorPauseBridge {
                 pause_loop_policy: RendererInspectorPauseLoopPolicy::MainAndIo,
                 quit_requested: false,
                 session_detach_arms: 0,
-                document_replacements: 0,
+                document_replacements: HashMap::new(),
+                replacement_pause_exits: HashSet::new(),
                 target_closed: false,
                 pending_prefaces: VecDeque::new(),
                 paused_sessions_awaiting_resumed: HashSet::new(),
@@ -362,26 +383,61 @@ impl RendererInspectorPauseBridge {
         Some(state.pause_loop_policy)
     }
 
-    pub(crate) fn begin_document_replacement(&self) -> bool {
-        let mut state = self.shared.state.lock();
-        if state.target_closed {
-            return false;
-        }
-        state.document_replacements += 1;
-        self.shared.pause_loop_wake.notify_all();
-        true
+    pub(crate) fn document_replacement_active(&self, agent: RendererDevToolsAgentToken) -> bool {
+        self.shared
+            .state
+            .lock()
+            .document_replacements
+            .contains_key(&agent)
     }
 
-    pub(crate) fn finish_document_replacement(&self) {
+    /// Some(true) starts the first scope, Some(false) overlaps it, and None
+    /// rejects a closed target. Only the first scope needs a policy wake.
+    pub(crate) fn begin_document_replacement(
+        &self,
+        agent: RendererDevToolsAgentToken,
+    ) -> Option<bool> {
         let mut state = self.shared.state.lock();
-        state.document_replacements = state
+        if state.target_closed {
+            return None;
+        }
+        let count = state.document_replacements.entry(agent).or_default();
+        let first = *count == 0;
+        *count = count
+            .checked_add(1)
+            .expect("document replacement scope count overflow");
+        if first {
+            if state.phase != RendererInspectorPausePhase::Running
+                && state
+                    .paused_sessions_awaiting_resumed
+                    .iter()
+                    .any(|(paused, _)| *paused == agent)
+            {
+                state.replacement_pause_exits.insert(agent);
+            }
+            self.shared.pause_loop_wake.notify_all();
+        }
+        Some(first)
+    }
+
+    /// Returns whether the last preparation for this document has finished.
+    pub(crate) fn finish_document_replacement(&self, agent: RendererDevToolsAgentToken) -> bool {
+        let mut state = self.shared.state.lock();
+        let count = state
             .document_replacements
-            .checked_sub(1)
+            .get_mut(&agent)
             .expect("document replacement scope must be balanced");
+        *count -= 1;
+        if *count != 0 {
+            return false;
+        }
+        state.document_replacements.remove(&agent);
+        true
     }
 
     pub(crate) fn wait_for_pause_work<T>(
         &self,
+        agent: RendererDevToolsAgentToken,
         mut claim: impl FnMut() -> Option<T>,
     ) -> Result<T, RendererInspectorPauseExitReason> {
         let mut state = self.shared.state.lock();
@@ -389,7 +445,9 @@ impl RendererInspectorPauseBridge {
             if state.target_closed {
                 return Err(RendererInspectorPauseExitReason::TargetClosed);
             }
-            if state.document_replacements != 0 {
+            if state.document_replacements.contains_key(&agent)
+                || state.replacement_pause_exits.contains(&agent)
+            {
                 return Err(RendererInspectorPauseExitReason::DocumentReplacement);
             }
             if state.session_detach_arms != 0 {
@@ -416,6 +474,7 @@ impl RendererInspectorPauseBridge {
     pub(crate) fn leave_pause(&self) {
         let mut state = self.shared.state.lock();
         state.phase = RendererInspectorPausePhase::Running;
+        state.replacement_pause_exits.clear();
         state.pause_loop_policy = RendererInspectorPauseLoopPolicy::MainAndIo;
         state.quit_requested = false;
         // Commands that lost the nested-loop race stay in their route-specific
@@ -457,6 +516,7 @@ impl RendererInspectorPauseBridge {
     pub(crate) fn close_target(&self) {
         let mut state = self.shared.state.lock();
         state.target_closed = true;
+        state.replacement_pause_exits.clear();
         state.quit_requested = true;
         state.pending_prefaces.clear();
         state.paused_sessions_awaiting_resumed.clear();
@@ -571,6 +631,9 @@ impl RendererInspectorPauseBridge {
                 // shared loop policy before V8 enters the client loop.
                 state.pause_loop_policy = RendererInspectorPauseLoopPolicy::IoOnly;
             }
+        }
+        if is_paused_notification && state.document_replacements.contains_key(&agent_token) {
+            state.replacement_pause_exits.insert(agent_token);
         }
         if state.phase == RendererInspectorPausePhase::Running && !resumes_reported_pause {
             RendererInspectorPauseNotificationRoute::OrdinaryTurn

@@ -170,9 +170,9 @@ pub(crate) fn dispatch_inspector_io_owner_wake(wake: RendererInspectorIoOwnerWak
         isolate.enter();
     }
     let _entered_isolate = EnteredOwnerWakeIsolateGuard(isolate);
-    session_executor.dispatch_control_work(isolate);
     let scope = pin!(v8::HandleScope::new(isolate));
     let scope = &mut scope.init();
+    session_executor.dispatch_control_work(scope);
     with_scoped_inspector_microtasks(scope, || {
         session_executor.dispatch_next_io_command_from_owner();
     });
@@ -190,7 +190,9 @@ pub(crate) fn dispatch_inspector_main_owner_wake(
         let isolate = unsafe { v8::Isolate::ref_from_raw_isolate_ptr_mut(isolate) };
         unsafe { isolate.enter() };
         let _entered_isolate = EnteredOwnerWakeIsolateGuard(isolate);
-        session_executor.apply_control_work(work, isolate);
+        let scope = pin!(v8::HandleScope::new(isolate));
+        let scope = &mut scope.init();
+        session_executor.apply_control_work(work, scope);
     }
     session_executor.claim_next_main_command_from_owner()
 }

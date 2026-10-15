@@ -1,8 +1,8 @@
-use super::InspectorOutbound;
 use super::context_registry::{
     DocumentInspectorContextGroupId, DocumentInspectorContextRegistrationId,
     DocumentInspectorContextRegistry,
 };
+use super::{InspectorOutbound, RendererInspectorSession};
 mod interrupt;
 #[cfg(test)]
 mod page_target_tests;
@@ -56,7 +56,7 @@ struct RendererInspectorClient {
 
 #[derive(Clone)]
 struct RendererInspectorSessionRoute {
-    session: Weak<v8::inspector::V8InspectorSession>,
+    session: Weak<RendererInspectorSession>,
     outbound: InspectorOutbound,
     agent_token: RendererDevToolsAgentToken,
     session_key: DevToolsSessionKey,
@@ -67,7 +67,7 @@ pub(super) struct RendererInspectorSessionExecutorRegistration {
     context_group_id: i32,
     agent_token: RendererDevToolsAgentToken,
     session_key: DevToolsSessionKey,
-    session: Weak<v8::inspector::V8InspectorSession>,
+    session: Weak<RendererInspectorSession>,
 }
 
 struct RendererInspectorSessionExecutorLocal {
@@ -87,10 +87,15 @@ struct RendererInspectorSessionExecutorLocal {
 /// shared by owner wakes, V8 interrupts and the nested debugger loop.
 enum InspectorControlWork {
     EnvironmentInvalidation(moli_v8_platform::ProcessEnvironmentInvalidation),
+    ReconcileDocumentReplacement { agent: RendererDevToolsAgentToken },
 }
 
+// At most one item from each source per opportunity. Sustained environment
+// updates cannot starve Page reconciliation or a ready protocol command.
+type InspectorControlWorkBatch = [Option<InspectorControlWork>; 2];
+
 enum RendererInspectorNestedCommand {
-    Control(InspectorControlWork),
+    Control(InspectorControlWorkBatch),
     Main(RendererInspectorMainCommand),
     Io(RendererInspectorIoCommand),
 }
@@ -101,6 +106,10 @@ impl Drop for RendererInspectorSessionExecutorLocal {
             environment.unregister_page_pause_wake(self.route_id);
         }
         unregister_session_executor(self.route_id);
+        // The last endpoint can disappear without an explicit Page close.
+        // Seal scope admission too; retained cross-thread handles may outlive
+        // this executor, but must not start replacement work for a dead owner.
+        self.target.pause_ref().close_target();
         self.target
             .main_ref()
             .close("Inspector session executor was destroyed");
@@ -161,7 +170,7 @@ impl RendererInspectorSessionExecutorLocal {
         context_group_id: DocumentInspectorContextGroupId,
         agent_token: RendererDevToolsAgentToken,
         session_key: DevToolsSessionKey,
-        session: &Rc<v8::inspector::V8InspectorSession>,
+        session: &Rc<RendererInspectorSession>,
         outbound: InspectorOutbound,
     ) -> RendererInspectorSessionExecutorRegistration {
         let weak_session = Rc::downgrade(session);
@@ -194,55 +203,85 @@ impl RendererInspectorSessionExecutorLocal {
         let Some(pause_loop_policy) = self.target.pause_ref().enter_pause() else {
             return;
         };
+        let agent_token = self
+            .sessions
+            .borrow()
+            .iter()
+            .find(|((group, _), route)| {
+                *group == context_group_id && route.session.strong_count() != 0
+            })
+            .map(|(_, route)| route.agent_token);
+        let Some(agent_token) = agent_token else {
+            // A detached/unbound group can race V8's pause callback. Returning
+            // lets V8 unwind without retaining a zombie Page pause phase.
+            self.target.pause_ref().leave_pause();
+            return;
+        };
         let mut prefer_main = true;
+        let mut prefer_control = true;
         let exit_reason = loop {
-            let work = self.target.pause_ref().wait_for_pause_work(|| {
-                // These are actual posted owner tasks, not an environment-version
-                // check. Service them in both pause modes, before a following
-                // Inspector observation; they never execute page JavaScript.
-                if let Some(work) = self.claim_control_work() {
-                    return Some(RendererInspectorNestedCommand::Control(work));
-                }
-                let command = match pause_loop_policy {
-                    crate::devtools::pause::RendererInspectorPauseLoopPolicy::IoOnly => self
-                        .target
-                        .io_ref()
-                        .claim_for_pause()
-                        .map(RendererInspectorNestedCommand::Io),
-                    crate::devtools::pause::RendererInspectorPauseLoopPolicy::MainAndIo
-                        if prefer_main =>
-                    {
-                        self.target
-                            .main_ref()
-                            .claim_for_pause()
-                            .map(RendererInspectorNestedCommand::Main)
-                            .or_else(|| {
-                                self.target
-                                    .io_ref()
-                                    .claim_for_pause()
-                                    .map(RendererInspectorNestedCommand::Io)
-                            })
+            let work = self
+                .target
+                .pause_ref()
+                .wait_for_pause_work(agent_token, || {
+                    // These are actual posted owner tasks, not an environment-version
+                    // check. Service them in both pause modes, before a following
+                    // Inspector observation; they never execute page JavaScript.
+                    if prefer_control && let Some(work) = self.claim_control_work() {
+                        prefer_control = false;
+                        return Some(RendererInspectorNestedCommand::Control(work));
                     }
-                    crate::devtools::pause::RendererInspectorPauseLoopPolicy::MainAndIo => self
-                        .target
-                        .io_ref()
-                        .claim_for_pause()
-                        .map(RendererInspectorNestedCommand::Io)
-                        .or_else(|| {
+                    let command = match pause_loop_policy {
+                        crate::devtools::pause::RendererInspectorPauseLoopPolicy::IoOnly => self
+                            .target
+                            .io_ref()
+                            .claim_for_pause()
+                            .map(RendererInspectorNestedCommand::Io),
+                        crate::devtools::pause::RendererInspectorPauseLoopPolicy::MainAndIo
+                            if prefer_main =>
+                        {
                             self.target
                                 .main_ref()
                                 .claim_for_pause()
                                 .map(RendererInspectorNestedCommand::Main)
-                        }),
-                };
-                if command.is_some()
-                    && pause_loop_policy
-                        == crate::devtools::pause::RendererInspectorPauseLoopPolicy::MainAndIo
-                {
-                    prefer_main = !prefer_main;
-                }
-                command
-            });
+                                .or_else(|| {
+                                    self.target
+                                        .io_ref()
+                                        .claim_for_pause()
+                                        .map(RendererInspectorNestedCommand::Io)
+                                })
+                        }
+                        crate::devtools::pause::RendererInspectorPauseLoopPolicy::MainAndIo => self
+                            .target
+                            .io_ref()
+                            .claim_for_pause()
+                            .map(RendererInspectorNestedCommand::Io)
+                            .or_else(|| {
+                                self.target
+                                    .main_ref()
+                                    .claim_for_pause()
+                                    .map(RendererInspectorNestedCommand::Main)
+                            }),
+                    };
+                    if command.is_some()
+                        && pause_loop_policy
+                            == crate::devtools::pause::RendererInspectorPauseLoopPolicy::MainAndIo
+                    {
+                        prefer_main = !prefer_main;
+                    }
+                    if command.is_some() {
+                        prefer_control = true;
+                        command
+                    } else {
+                        // If protocol lanes are blocked, control work must still
+                        // prevent sleep. A ready command gets a turn between
+                        // control batches, including instrumentation's IoOnly loop.
+                        self.claim_control_work().map(|work| {
+                            prefer_control = false;
+                            RendererInspectorNestedCommand::Control(work)
+                        })
+                    }
+                });
             let command = match work {
                 Ok(command) => command,
                 Err(reason) => break reason,
@@ -276,6 +315,9 @@ impl RendererInspectorSessionExecutorLocal {
                 .filter(|((group, _), _)| *group == context_group_id)
                 .filter_map(|(_, route)| route.session.upgrade())
                 .collect();
+            for session in &sessions {
+                session.sync_document_replacement();
+            }
             for session in sessions {
                 session.resume(true);
             }
@@ -283,23 +325,47 @@ impl RendererInspectorSessionExecutorLocal {
         self.target.pause_ref().leave_pause();
     }
 
-    fn claim_control_work(&self) -> Option<InspectorControlWork> {
-        self.environment_ingress()
+    fn claim_control_work(&self) -> Option<InspectorControlWorkBatch> {
+        // Environment invalidation remains isolate-owned, even when another
+        // Page's nested pause loop consumes it. No Page gets a duplicate copy.
+        let environment = self
+            .environment_ingress()
             .claim_environment_invalidation()
-            .map(InspectorControlWork::EnvironmentInvalidation)
+            .map(InspectorControlWork::EnvironmentInvalidation);
+        let page = self
+            .target
+            .io_ref()
+            .claim_replacement_reconcile()
+            .map(|agent| InspectorControlWork::ReconcileDocumentReplacement { agent });
+        (environment.is_some() || page.is_some()).then_some([environment, page])
     }
 
-    fn apply_control_work(&self, work: InspectorControlWork, isolate: &mut v8::Isolate) {
-        match work {
-            InspectorControlWork::EnvironmentInvalidation(invalidation) => {
-                invalidation.notify_isolate(isolate);
+    fn apply_control_work(&self, batch: InspectorControlWorkBatch, isolate: &mut v8::Isolate) {
+        for work in batch.into_iter().flatten() {
+            match work {
+                InspectorControlWork::EnvironmentInvalidation(invalidation) => {
+                    invalidation.notify_isolate(isolate);
+                }
+                InspectorControlWork::ReconcileDocumentReplacement { agent } => {
+                    // Release the registry borrow before V8: session policy
+                    // operations may call back into Inspector. Rc keeps each
+                    // upgraded session alive through any reentrant detach.
+                    let sessions: Vec<_> = self
+                        .sessions
+                        .borrow()
+                        .values()
+                        .filter(|route| route.agent_token == agent)
+                        .filter_map(|route| route.session.upgrade())
+                        .collect();
+                    for session in sessions {
+                        session.sync_document_replacement();
+                    }
+                }
             }
         }
     }
 
     fn dispatch_control_work(&self, isolate: &mut v8::Isolate) {
-        // One merged batch per callback. A racing publication retains its wake
-        // instead of making an interrupt drain an unbounded producer.
         if let Some(work) = self.claim_control_work() {
             self.apply_control_work(work, isolate);
         }
@@ -950,7 +1016,7 @@ impl RendererInspectorIsolateBackendHandle {
         context_group_id: DocumentInspectorContextGroupId,
         agent_token: RendererDevToolsAgentToken,
         session_key: DevToolsSessionKey,
-        session: &Rc<v8::inspector::V8InspectorSession>,
+        session: &Rc<RendererInspectorSession>,
         outbound: InspectorOutbound,
     ) -> RendererInspectorSessionExecutorRegistration {
         self.endpoint
