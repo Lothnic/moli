@@ -38,16 +38,16 @@ struct MainWindowCrossOriginSurface {
 pub(super) fn access_surface<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     target_context: v8::Local<'s, v8::Context>,
-) -> v8::Local<'s, v8::Object> {
-    let surface = cached_access_surface(scope, target_context);
+) -> Option<v8::Local<'s, v8::Object>> {
+    let surface = cached_access_surface(scope, target_context)?;
     refresh_indexed_children(scope, target_context, surface);
-    surface
+    Some(surface)
 }
 
 fn cached_access_surface<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     target_context: v8::Local<'s, v8::Context>,
-) -> v8::Local<'s, v8::Object> {
+) -> Option<v8::Local<'s, v8::Object>> {
     let accessing_context = cross_origin_accessing_context(scope);
     cached_cross_origin_window_surface(scope, target_context, accessing_context, |scope| {
         let window = target_context.global(scope);
@@ -165,7 +165,7 @@ pub(super) fn location_access_surface<'s>(
 ) -> Option<v8::Local<'s, v8::Object>> {
     let window = main_location_window(scope, receiver)?;
     let context = window.get_creation_context(scope)?;
-    let surface = cached_access_surface(scope, context);
+    let surface = cached_access_surface(scope, context)?;
     get_private_value(scope, surface, LOCATION_SURFACE)
         .and_then(|value| v8::Local::<v8::Object>::try_from(value).ok())
 }
