@@ -158,18 +158,33 @@ fn visual_viewport_attribute_getter_callback<'s>(
     if matches!(
         slot,
         VISUAL_VIEWPORT_WIDTH_SLOT | VISUAL_VIEWPORT_HEIGHT_SLOT
-    ) && let Some(host_ptr) = crate::util::context_host_ptr_from_global_bridge(scope)
-    {
-        let viewport =
-            crate::context_bootstrap::current_window_style_viewport(scope, unsafe { &*host_ptr });
+    ) {
+        // A borrowed getter belongs to its receiver's Window, even when the
+        // function was obtained from another realm's VisualViewport prototype.
+        let context = args
+            .this()
+            .get_creation_context(scope)
+            .unwrap_or_else(|| scope.get_current_context());
+        let scope = &mut v8::ContextScope::new(scope, context);
+        let window = context.global(scope);
+        let current = super::super::window_accessors::window_host_ptr(scope, window).is_some_and(
+            |host_ptr| {
+                super::super::window_accessors::window_current_dispatch_scope(
+                    scope,
+                    window,
+                    unsafe { &*host_ptr },
+                )
+                .is_some()
+            },
+        );
+        if !current {
+            rv.set_double(0.0);
+            return;
+        }
         let value = if slot == VISUAL_VIEWPORT_WIDTH_SLOT {
-            viewport
-                .width
-                .unwrap_or(DEFAULT_WINDOW_SURFACE_PROFILE.inner_width)
+            super::super::window_accessors::window_inner_surface_width(scope, window)
         } else {
-            viewport
-                .height
-                .unwrap_or(DEFAULT_WINDOW_SURFACE_PROFILE.inner_height)
+            super::super::window_accessors::window_inner_surface_height(scope, window)
         };
         rv.set_double(value);
         return;

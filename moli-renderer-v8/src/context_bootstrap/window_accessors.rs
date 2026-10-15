@@ -28,8 +28,8 @@ pub(super) use document::{WINDOW_DOCUMENT_SLOT, window_document_getter_template}
 pub(crate) use document::{
     bind_current_child_window_document, retain_window_document_in_retired_realm,
 };
-pub(super) use helpers::window_child_context_handle;
 pub(crate) use helpers::{current_window_style_viewport, window_host_ptr};
+pub(super) use helpers::{window_child_context_handle, window_current_dispatch_scope};
 pub(super) use interceptors::{
     window_indexed_property_descriptor, window_indexed_property_enumerator,
     window_indexed_property_getter, window_indexed_property_query, window_named_property_getter,
