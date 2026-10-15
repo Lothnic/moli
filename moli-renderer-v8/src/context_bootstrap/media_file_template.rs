@@ -68,12 +68,12 @@ struct BlobTemplateMethodsDeclaration {
 }
 
 #[derive(WebApiFunctionTemplate)]
-#[webapi(interface = web_api_interfaces::OffscreenCanvas, enumerable)]
+#[webapi(interface = web_api_interfaces::OffscreenCanvas, enumerable, receiver)]
 struct OffscreenCanvasTemplateMethodsDeclaration {
     #[webapi(method, length = 1, callback = offscreen_canvas_get_context_callback)]
     get_context: (),
 
-    #[webapi(method, length = 0, receiver = web_api_interfaces::OffscreenCanvas::is_instance, returns_promise, callback = offscreen_canvas_convert_to_blob_callback)]
+    #[webapi(method, length = 0, returns_promise, callback = offscreen_canvas_convert_to_blob_callback)]
     convert_to_blob: (),
 }
 
