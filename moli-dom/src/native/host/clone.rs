@@ -630,6 +630,7 @@ mod tests {
                 source.set_media_volume(media, 0.25);
                 source.set_media_paused(media, false);
                 source.set_media_current_time(media, 7.0);
+                source.set_media_default_start_position(media, 3.0);
                 source.set_media_playback_rate(media, 2.0);
                 source.set_media_ready_state(media, 4);
                 source.set_media_network_state(media, 1);
@@ -652,6 +653,7 @@ mod tests {
                     assert_eq!(element.media_volume(), 1.0);
                     assert!(element.media_paused());
                     assert_eq!(element.media_current_time(), 0.0);
+                    assert_eq!(element.media_default_start_position(), 0.0);
                     assert_eq!(element.media_playback_rate(), 1.0);
                     assert_eq!(element.media_ready_state(), 0);
                     assert_eq!(element.media_network_state(), 0);
@@ -662,6 +664,7 @@ mod tests {
                 assert_eq!(original.media_muted(), !default_muted);
                 assert_eq!(original.media_volume(), 0.25);
                 assert_eq!(original.media_current_time(), 7.0);
+                assert_eq!(original.media_default_start_position(), 3.0);
             }
         }
     }
