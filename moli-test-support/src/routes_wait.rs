@@ -21,6 +21,28 @@ marker.textContent = 'parser-async-module=settled';
 document.body.appendChild(marker);
 setTimeout(() => { globalThis.unrelatedBackgroundTimerRan = true; }, 30000);
 "#;
+const WAIT_UNTIL_WORKER_TERMINATION_TIMER_HTML: &str = r#"<!doctype html>
+<html><head><script async src="/wait-until-worker-termination-load-delay.js"></script></head>
+<body><main id="worker-timer-result">loading</main><script>
+const worker = new Worker(URL.createObjectURL(new Blob([
+  "postMessage('success'); for (let i = 0; i < 50000; i++) postMessage('stale');"
+], {type: 'text/javascript'})));
+worker.onmessage = event => {
+  if (event.data !== 'success') return;
+  document.querySelector('main').textContent = 'success';
+  worker.terminate();
+  const scheduledAt = Date.now();
+  setTimeout(() => {
+    document.querySelector('main').textContent = 'timer-fired';
+    document.body.setAttribute('data-worker-timer-delay', String(Date.now() - scheduledAt));
+  }, 250);
+};
+// Let the independent Worker enqueue a burst before its first callback runs.
+const releaseAt = performance.now() + 200;
+while (performance.now() < releaseAt) {}
+setTimeout(() => document.body.setAttribute('data-unrelated-future', 'ran'), 60000);
+</script></body></html>"#;
+
 const WAIT_UNTIL_CHILD_SCRIPT_BOOTSTRAP_HTML: &str = r#"<!doctype html>
 <html><body><main id="child-bootstrap-result">loading</main><script>
 addEventListener('message', event => {
@@ -331,6 +353,14 @@ pub(super) fn add_wait_routes(router: Router) -> Router {
         .route(
             "/wait-until-parser-async-module-slow.mjs",
             get(wait_until_parser_async_module_slow_script),
+        )
+        .route(
+            "/wait-until-worker-termination-load-delay.js",
+            get(wait_until_worker_termination_load_delay_script),
+        )
+        .route(
+            "/wait-until-worker-termination-timer",
+            get(wait_until_worker_termination_timer_page),
         )
         .route(
             "/wait-until-child-script-bootstrap",
@@ -763,6 +793,15 @@ async fn wait_until_parser_async_module_slow_page() -> Html<&'static str> {
 async fn wait_until_parser_async_module_slow_script() -> Response {
     sleep(Duration::from_millis(1800)).await;
     javascript_response(WAIT_UNTIL_PARSER_ASYNC_MODULE_SLOW_JS)
+}
+
+async fn wait_until_worker_termination_load_delay_script() -> Response {
+    sleep(Duration::from_millis(2500)).await;
+    javascript_response("window.workerTimerLoadDelayFinished = true;")
+}
+
+async fn wait_until_worker_termination_timer_page() -> Html<&'static str> {
+    Html(WAIT_UNTIL_WORKER_TERMINATION_TIMER_HTML)
 }
 
 async fn wait_until_child_script_bootstrap_page() -> Html<&'static str> {
