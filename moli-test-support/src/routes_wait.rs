@@ -21,6 +21,22 @@ marker.textContent = 'parser-async-module=settled';
 document.body.appendChild(marker);
 setTimeout(() => { globalThis.unrelatedBackgroundTimerRan = true; }, 30000);
 "#;
+const WAIT_UNTIL_CHILD_SCRIPT_BOOTSTRAP_HTML: &str = r#"<!doctype html>
+<html><body><main id="child-bootstrap-result">loading</main><script>
+addEventListener('message', event => {
+  if (event.data === 'child-bootstrap=settled') {
+    document.querySelector('main').textContent = event.data;
+  }
+});
+addEventListener('DOMContentLoaded', () => {
+  const frame = document.createElement('iframe');
+  frame.src = location.search ? '/wait-until-child-script-bootstrap-nested' :
+    '/wait-until-child-script-bootstrap-child';
+  document.body.appendChild(frame);
+});
+setTimeout(() => document.body.setAttribute('data-unrelated-future', 'ran'), 60000);
+</script></body></html>"#;
+
 const WAIT_UNTIL_DEDICATED_WORKER_BOOTSTRAP_SLOW_HTML: &str = r#"<!doctype html>
 <html><body><main id="initial">initial</main><script>
 const worker = new Worker('/wait-until-dedicated-worker-bootstrap-slow.js');
@@ -315,6 +331,22 @@ pub(super) fn add_wait_routes(router: Router) -> Router {
         .route(
             "/wait-until-parser-async-module-slow.mjs",
             get(wait_until_parser_async_module_slow_script),
+        )
+        .route(
+            "/wait-until-child-script-bootstrap",
+            get(wait_until_child_script_bootstrap_page),
+        )
+        .route(
+            "/wait-until-child-script-bootstrap-child",
+            get(wait_until_child_script_bootstrap_child),
+        )
+        .route(
+            "/wait-until-child-script-bootstrap-nested",
+            get(wait_until_child_script_bootstrap_nested),
+        )
+        .route(
+            "/wait-until-child-script-bootstrap.js",
+            get(wait_until_child_script_bootstrap_script),
         )
         .route(
             "/wait-until-dedicated-worker-bootstrap-slow",
@@ -731,6 +763,27 @@ async fn wait_until_parser_async_module_slow_page() -> Html<&'static str> {
 async fn wait_until_parser_async_module_slow_script() -> Response {
     sleep(Duration::from_millis(1800)).await;
     javascript_response(WAIT_UNTIL_PARSER_ASYNC_MODULE_SLOW_JS)
+}
+
+async fn wait_until_child_script_bootstrap_page() -> Html<&'static str> {
+    Html(WAIT_UNTIL_CHILD_SCRIPT_BOOTSTRAP_HTML)
+}
+
+async fn wait_until_child_script_bootstrap_child() -> Html<&'static str> {
+    Html(
+        r#"<!doctype html><html><body><script src="/wait-until-child-script-bootstrap.js"></script></body></html>"#,
+    )
+}
+
+async fn wait_until_child_script_bootstrap_nested() -> Html<&'static str> {
+    Html(
+        r#"<!doctype html><html><body><iframe src="/wait-until-child-script-bootstrap-child"></iframe></body></html>"#,
+    )
+}
+
+async fn wait_until_child_script_bootstrap_script() -> Response {
+    sleep(Duration::from_millis(1800)).await;
+    javascript_response("window.top.postMessage('child-bootstrap=settled', '*');")
 }
 
 async fn wait_until_dedicated_worker_bootstrap_slow_page() -> Html<&'static str> {

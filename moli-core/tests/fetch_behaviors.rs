@@ -1702,6 +1702,37 @@ async fn fetch_with_domstable_waits_for_dedicated_worker_bootstrap_and_first_mes
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn fetch_with_domstable_waits_for_child_script_bootstrap_and_message() -> Result<()> {
+    let server = FixtureServer::spawn().await?;
+    let browser = Browser::new(AppConfig::default())?;
+    for path in [
+        "/wait-until-child-script-bootstrap",
+        "/wait-until-child-script-bootstrap?nested=1",
+    ] {
+        let started = Instant::now();
+        let page = browser
+            .fetch_with_wait_until(
+                &server.url(path),
+                RenderedDomWaitUntil::DomStable,
+                Duration::from_secs(7),
+            )
+            .await?;
+        let html = page.serialize_html_async().await?;
+        assert!(
+            html.contains(">child-bootstrap=settled</main>"),
+            "child bootstrap incomplete for {path}: {html}"
+        );
+        assert!(!html.contains("data-unrelated-future=\"ran\""));
+        assert!(
+            started.elapsed() < Duration::from_secs(6),
+            "domstable waited for an unrelated future timer for {path}"
+        );
+    }
+    server.shutdown().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn fetch_with_domstable_follows_http_redirect_from_script_navigation() -> Result<()> {
     let server = FixtureServer::spawn().await?;
     let browser = Browser::new(AppConfig::default())?;
