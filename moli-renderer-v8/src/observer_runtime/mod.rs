@@ -872,9 +872,7 @@ fn invoke_intersection_deliveries<'s>(
         if !delivery.callback.is_current(scope) {
             continue;
         }
-        let Some(callback_context) = delivery.callback.relevant_context(scope) else {
-            continue;
-        };
+        let callback_context = delivery.callback.relevant_context(scope);
         // Web IDL argument conversion uses the callback's relevant Realm,
         // which can differ from the observer's creation Realm. Enter it before
         // projecting native targets and binding the entry/rect/array wrappers.
