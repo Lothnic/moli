@@ -511,7 +511,15 @@ async fn default_video_fetch_policy_synthesizes_lifecycle_without_a_network_requ
         "policy-skipped video must not emit a requestWillBeSent source record"
     );
 
-    for phase in ["loadstart", "loadedmetadata", "loadeddata", "canplay"] {
+    vm.eval("globalThis.__defaultVideoPolicyThrough = 0; document.getElementById('default-video-policy').addEventListener('canplaythrough', () => __defaultVideoPolicyThrough++);")
+        .expect("register the terminal default-policy event");
+    for phase in [
+        "loadstart",
+        "loadedmetadata",
+        "loadeddata",
+        "canplay",
+        "canplaythrough",
+    ] {
         run_next_page_media_element_event_for_test(
             &mut vm,
             &loader,
@@ -525,6 +533,11 @@ async fn default_video_fetch_policy_synthesizes_lifecycle_without_a_network_requ
         )
         .expect("default-policy video terminal state"),
         r#"{"events":["loadstart","loadedmetadata","loadeddata","canplay"],"ready":4,"network":1}"#
+    );
+    assert_eq!(
+        vm.eval("__defaultVideoPolicyThrough")
+            .expect("terminal count"),
+        "1"
     );
     assert!(
         vm._context_host

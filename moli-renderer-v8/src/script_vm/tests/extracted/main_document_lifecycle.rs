@@ -1425,6 +1425,14 @@ async fn main_static_media_load_delays_complete_until_loadeddata_owner_turn() {
         vm._context_host
             .borrow()
             .pending_media_load_sequence(media)
+            .is_some(),
+        "canplaythrough must retain the sequence until its separate terminal task"
+    );
+    run_next_page_media_element_event_for_test(&mut vm, &loader, "canplaythrough owner turn").await;
+    assert!(
+        vm._context_host
+            .borrow()
+            .pending_media_load_sequence(media)
             .is_none(),
         "the terminal media event must retire the sequence"
     );
@@ -2131,6 +2139,19 @@ async fn main_text_track_network_terminal_gates_canplay_without_delaying_complet
             .expect("canplay event trace"),
         "loadstart|loadedmetadata|loadeddata|track-load:2:1|canplay"
     );
+    assert!(
+        vm._context_host
+            .borrow()
+            .pending_media_load_sequence(media)
+            .is_some(),
+        "text-track completion must leave the terminal canplaythrough task queued"
+    );
+    run_next_page_media_element_event_for_test(
+        &mut vm,
+        &loader,
+        "media canplaythrough follow-up owner turn",
+    )
+    .await;
     assert!(
         vm._context_host
             .borrow()
