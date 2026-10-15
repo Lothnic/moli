@@ -630,11 +630,12 @@ where
     /// large empty slots out of persistent box objects. Retention extracts
     /// only actual owners into the existing sparse working-set storage.
     pub(crate) inline_layouts: Vec<Option<InlineFormattingContext>>,
-    /// Numeric caches live for this world only. Allocate dense slots on the
-    /// first actual store, after construction and numeric-only box growth.
-    /// Keeping empty caches out of LayoutBox avoids retaining their fixed
-    /// measurement arrays with an otherwise reusable construction graph.
+    /// Numeric caches live for this world only. Materialize a cache only for
+    /// an actual store; flattened text boxes do not need measurement arrays.
     pub(crate) box_caches: Vec<Cache>,
+    /// Box-indexed lookup into the compact cache storage. usize::MAX means
+    /// that no cache has been stored for this box in the current world.
+    pub(crate) box_cache_slots: Vec<usize>,
     /// Winning collapsed-table edges, computed by the shared table formatter
     /// and consumed by paint projection. Only actual table owners have entries.
     pub(crate) collapsed_table_borders: HashMap<LayoutBoxId, crate::table::CollapsedTableBorders>,
@@ -688,6 +689,7 @@ where
             boxes,
             inline_layouts: Vec::new(),
             box_caches: Vec::new(),
+            box_cache_slots: Vec::new(),
             collapsed_table_borders: HashMap::new(),
             resolved_grid_tracks: HashMap::new(),
             source_mapping,
@@ -714,12 +716,44 @@ where
     }
 
     pub(crate) fn clear_layout_caches(&mut self, id: LayoutBoxId) {
-        if let Some(cache) = self.box_caches.get_mut(id.index()) {
+        if let Some(cache) = self
+            .box_cache_slots
+            .get(id.index())
+            .and_then(|slot| self.box_caches.get_mut(*slot))
+        {
             cache.clear();
         }
         if let Some(cache) = &mut self.boxes[id.index()].table_measure_cache {
             cache.clear();
         }
+    }
+
+    pub(crate) fn numeric_cache(&self, id: LayoutBoxId) -> Option<&Cache> {
+        self.box_cache_slots
+            .get(id.index())
+            .and_then(|slot| self.box_caches.get(*slot))
+    }
+
+    pub(crate) fn numeric_cache_mut(&mut self, id: LayoutBoxId) -> &mut Cache {
+        self.box_cache_slots.resize(self.boxes.len(), usize::MAX);
+        let mut slot = self.box_cache_slots[id.index()];
+        if slot == usize::MAX {
+            if self.box_caches.is_empty() {
+                // A capacity hint, not eligibility: numeric growth or an
+                // unusual caller may still store any valid box afterwards.
+                // Reserve without initializing caches for unvisited boxes.
+                let candidates = self
+                    .boxes
+                    .iter()
+                    .filter(|layout_box| !layout_box.inline_flattened)
+                    .count();
+                self.box_caches.reserve_exact(candidates);
+            }
+            slot = self.box_caches.len();
+            self.box_caches.push(Cache::new());
+            self.box_cache_slots[id.index()] = slot;
+        }
+        &mut self.box_caches[slot]
     }
 
     pub fn root(&self) -> LayoutBoxId {

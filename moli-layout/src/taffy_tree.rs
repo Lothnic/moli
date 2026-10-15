@@ -4,7 +4,7 @@ use parley::{AlignmentOptions, PositionedLayoutItem, YieldData};
 use style::Atom;
 use taffy::{
     AbsoluteAxis, AlignContent, AlignContentKeyword, AlignmentSafety, AutoSizeBehavior,
-    AvailableSpace, BlockContext, BlockFormattingContext, BoxSizing, Cache, CacheTree, Clear,
+    AvailableSpace, BlockContext, BlockFormattingContext, BoxSizing, CacheTree, Clear,
     DetailedGridInfo, Dimension, Display, FlexDirection, FloatDirection, Layout,
     LayoutBlockContainer, LayoutFlexboxContainer, LayoutGridContainer, LayoutInput, LayoutOutput,
     LayoutPartialTree, LeafLayoutContext, Line, MaybeMath, MaybeResolve, NodeId, Point,
@@ -1721,13 +1721,17 @@ where
         if self.is_viewport_taffy_node(node_id) {
             self.viewport_layout.cache.get(inputs)
         } else {
-            self.box_caches
-                .get(LayoutBoxId::from_taffy(node_id).index())
+            self.numeric_cache(LayoutBoxId::from_taffy(node_id))
                 .and_then(|cache| cache.get(inputs))
         }
     }
 
     fn cache_store(&mut self, node_id: NodeId, inputs: &LayoutInput, output: LayoutOutput) {
+        if inputs.run_mode == RunMode::PerformHiddenLayout {
+            // Taffy's Cache::store ignores this mode. Do not materialize
+            // measurement storage for an operation that cannot write it.
+            return;
+        }
         if self.is_viewport_taffy_node(node_id) {
             self.viewport_layout.cache.store(inputs, output);
         } else {
@@ -1738,10 +1742,7 @@ where
                 // first-class overflow dependencies.
                 self.record_numeric_layout_touch(id);
             }
-            if self.box_caches.len() <= id.index() {
-                self.box_caches.resize_with(self.boxes.len(), Cache::new);
-            }
-            self.box_caches[id.index()].store(inputs, output);
+            self.numeric_cache_mut(id).store(inputs, output);
         }
     }
 
