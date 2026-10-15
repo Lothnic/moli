@@ -567,23 +567,8 @@ impl DomHost {
         let _ = clone_element.set_script_already_started(element.script_already_started());
         // Text selection is live user-interaction state; cloned text controls
         // start from their default collapsed 0/0/none selection.
-        let _ = clone_element.set_media_paused(!element.media_paused());
-        let _ = clone_element.set_media_paused(element.media_paused());
-        let _ = clone_element.set_media_volume(-1.0);
-        let _ = clone_element.set_media_volume(element.media_volume());
-        let _ = clone_element.set_media_muted(!element.media_muted());
-        let _ = clone_element.set_media_muted(element.media_muted());
-        let _ = clone_element.set_media_seeking(!element.media_seeking());
-        let _ = clone_element.set_media_seeking(element.media_seeking());
-        let _ = clone_element.set_media_playback_rate(-1.0);
-        let _ = clone_element.set_media_playback_rate(element.media_playback_rate());
-        let _ = clone_element.set_media_current_time(-1.0);
-        let _ = clone_element.set_media_current_time(element.media_current_time());
-        let _ = clone_element.set_media_ready_state(u32::MAX);
-        let _ = clone_element.set_media_ready_state(element.media_ready_state());
-        let _ = clone_element.set_media_network_state(u32::MAX);
-        let _ = clone_element.set_media_network_state(element.media_network_state());
-        let _ = clone_element.set_media_error_code(element.media_error_code());
+        // Media clones retain their freshly constructed playback state. Only
+        // copied attributes, including the default muted preference, apply.
         // Cloning copies attributes directly, bypassing set_attribute's index updates.
         // Detached clones must be queryable before any tree insertion refreshes them.
         self.record_named_index_candidate(clone);
@@ -804,5 +789,53 @@ mod tests {
             Some(document)
         );
         assert!(host.is_connected(shadow_host));
+    }
+    #[test]
+    fn media_clones_and_imports_start_from_attribute_defaults() {
+        for kind in ["audio", "video"] {
+            for default_muted in [false, true] {
+                let mut source = test_host();
+                let media = source.create_element(kind);
+                if default_muted {
+                    source.set_attribute(media, "muted", "");
+                }
+                source.set_media_muted(media, !default_muted);
+                source.set_media_volume(media, 0.25);
+                source.set_media_paused(media, false);
+                source.set_media_current_time(media, 7.0);
+                source.set_media_playback_rate(media, 2.0);
+                source.set_media_ready_state(media, 4);
+                source.set_media_network_state(media, 1);
+                source.set_media_seeking(media, true);
+                source.set_media_error_code(media, Some(4));
+                let cloned = source.clone_node(media, true).expect("clone");
+                let document = source.create_detached_html_document();
+                let imported = source.import_node(document, media, false).expect("import");
+                let mut foreign = test_host();
+                let foreign_import = foreign
+                    .import_foreign_node(foreign.document_handle(), source.dom(), media, false)
+                    .expect("foreign import");
+                for (host, handle) in [
+                    (&source, cloned),
+                    (&source, imported),
+                    (&foreign, foreign_import),
+                ] {
+                    let element = host.node(handle).unwrap().as_element().unwrap();
+                    assert_eq!(element.media_muted(), default_muted);
+                    assert_eq!(element.media_volume(), 1.0);
+                    assert!(element.media_paused());
+                    assert_eq!(element.media_current_time(), 0.0);
+                    assert_eq!(element.media_playback_rate(), 1.0);
+                    assert_eq!(element.media_ready_state(), 0);
+                    assert_eq!(element.media_network_state(), 0);
+                    assert!(!element.media_seeking());
+                    assert_eq!(element.media_error_code(), None);
+                }
+                let original = source.node(media).unwrap().as_element().unwrap();
+                assert_eq!(original.media_muted(), !default_muted);
+                assert_eq!(original.media_volume(), 0.25);
+                assert_eq!(original.media_current_time(), 7.0);
+            }
+        }
     }
 }

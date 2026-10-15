@@ -3334,7 +3334,11 @@ fn clonable_shadow_roots_are_copied_by_host_clone_node() {
     clonedVideo.volume,
     clonedVideo.muted,
     clonedVideo.playbackRate,
-    clonedVideo.currentTime
+    clonedVideo.currentTime,
+    video.volume,
+    video.muted,
+    video.playbackRate,
+    video.currentTime
   ].join('|');
 })()
 "#,
@@ -3343,7 +3347,7 @@ fn clonable_shadow_roots_are_copied_by_host_clone_node() {
 
     assert_eq!(
         result,
-        "NotSupportedError|true|true|2|input|span|true|2|0|true|true|NotSupportedError|true|true|strong|3|http://www.w3.org/2000/svg|g|yes|dirty|false|true|0.25|true|1.5|3"
+        "NotSupportedError|true|true|2|input|span|true|2|0|true|true|NotSupportedError|true|true|strong|3|http://www.w3.org/2000/svg|g|yes|dirty|false|true|1|false|1|0|0.25|true|1.5|3"
     );
 }
 #[test]
