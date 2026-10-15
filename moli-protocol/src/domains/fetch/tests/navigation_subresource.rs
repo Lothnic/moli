@@ -111,7 +111,7 @@ async fn request_stage_navigation_request_paused_includes_synthesized_cookie_hea
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn fetch_enable_persists_subresource_interception_across_navigation() {
+async fn fetch_enable_during_paused_navigation_persists_subresource_interception() {
     async fn page() -> impl IntoResponse {
         (
             [(CONTENT_TYPE.as_str(), "text/html")],
@@ -152,6 +152,13 @@ fetch('/api', { method: 'POST', body: 'nav-payload' })
         .runtime_slot
         .enable_primary_network_events();
     ctx.conn.install_browser_context_fixture_for_test(bc);
+    ctx.install_navigation_fixture_for_session_owner("about:blank", Some("SID-1"))
+        .await;
+    wait_until_message(&mut ctx, "SID-1", "initial document load", |message| {
+        message["method"] == json!("Page.loadEventFired")
+    })
+    .await;
+    ctx.sent.clear();
     let page_url = format!("http://{addr}/page");
     let api_url = format!("http://{addr}/api");
 
@@ -178,6 +185,19 @@ fetch('/api', { method: 'POST', body: 'nav-payload' })
         .as_str()
         .expect("main document request id")
         .to_owned();
+
+    // Updating target configuration must preserve the held document request
+    // and apply to the subresources loaded by its replacement document.
+    ctx.process_async(json!({
+        "id": 73_001,
+        "method": "Fetch.enable",
+        "sessionId": "SID-1",
+        "params": {
+            "patterns": [{ "urlPattern": "*api", "resourceType": "Fetch" }]
+        }
+    }))
+    .await;
+    ctx.expect_result(73_001, json!({}), Some("SID-1"));
 
     ctx.process_async(json!({
         "id": 75,
@@ -231,7 +251,7 @@ fetch('/api', { method: 'POST', body: 'nav-payload' })
         .expect("navigate result");
     assert_eq!(
         navigate_result["result"],
-        json!({ "frameId": "TID-1", "loaderId": LOADER_ID })
+        json!({ "frameId": "TID-1", "loaderId": main_document_paused["params"]["networkId"] })
     );
     let initial_subresource_request = ctx
         .sent

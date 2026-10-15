@@ -882,7 +882,9 @@ fn complete_fetch_config_update_command(
         Ok(completion) => completion,
         Err(error) => return CommandOutputPlan::error(-32000, error),
     };
-    let page = match conn.loaded_page_mut_for_protocol_access_for_owner(&owner_scope) {
+    // Fetch policy belongs to the target and may finish updating while a
+    // navigation is replacing its document.
+    let page = match conn.loaded_page_mut_for_target_configuration_for_owner(&owner_scope) {
         Ok(page) => page,
         Err(message) if message == "NoDocumentLoaded" => {
             return CommandOutputPlan::from_devtools_result(result);
