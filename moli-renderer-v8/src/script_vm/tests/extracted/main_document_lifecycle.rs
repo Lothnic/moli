@@ -1361,6 +1361,8 @@ async fn main_static_media_load_delays_complete_until_loadeddata_owner_turn() {
         .expect("parser EOF should prepare interactive");
     vm.apply_main_document_interactive_lifecycle_action(interactive)
         .expect("interactive transition should register static media");
+    vm.eval("void 0")
+        .expect("static media selection should reach stable state");
     let pending = vm
         ._context_host
         .borrow()
@@ -1843,6 +1845,8 @@ async fn main_media_source_children_reselect_through_parent_sequence() {
         .expect("parser EOF should prepare interactive");
     vm.apply_main_document_interactive_lifecycle_action(interactive)
         .expect("interactive should select the source child");
+    vm.eval("void 0")
+        .expect("source child selection should reach stable state");
     let media = vm
         .document_runtime
         .get_element_by_id("clip")
