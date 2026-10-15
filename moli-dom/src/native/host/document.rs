@@ -2117,7 +2117,7 @@ impl DomHost {
         true
     }
 
-    fn mark_shadow_tree_scope_for_subtree(
+    pub(super) fn mark_shadow_tree_scope_for_subtree(
         &mut self,
         root: DomHandle,
         owner_document: Option<DomHandle>,
