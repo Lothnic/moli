@@ -487,6 +487,102 @@ async fn render_page_dump_with_options_async_inlines_child_frames() -> Result<()
 }
 
 #[tokio::test]
+async fn html_with_frames_preserves_shadow_content_and_strips_only_the_export() -> Result<()> {
+    let (_browser, mut page, server) = load_page(
+        r#"<!doctype html><iframe id="child" srcdoc="<body>Light body</body>"></iframe>"#,
+    )
+    .await?;
+    page.evaluate_runtime_expression_with_await_async(
+        r#"(() => {
+          const doc = document.getElementById('child').contentDocument;
+          for (const mode of ['open', 'closed']) {
+            const host = doc.body.appendChild(doc.createElement('section'));
+            const root = host.attachShadow({mode});
+            root.innerHTML = `<p style="color:red" onclick="void 0">${mode} shadow body</p><style>.shadow-style-marker{color:red}</style><script>/* shadow-script-marker */</script>`;
+          }
+        })()"#,
+        true,
+    ).await?;
+    for strip in [
+        StripOptions::default(),
+        StripOptions {
+            js: true,
+            css: true,
+            ui: false,
+        },
+    ] {
+        let rendered = render_page_dump_with_options_async(
+            &mut page,
+            DumpFormat::Html,
+            strip,
+            false,
+            true,
+            false,
+            None,
+        )
+        .await?;
+        for mode in ["open", "closed"] {
+            assert!(
+                rendered.contains(&format!("{mode} shadow body")),
+                "{rendered}"
+            );
+            assert!(
+                rendered.contains(&format!("shadowrootmode=&quot;{mode}&quot;")),
+                "{rendered}"
+            );
+        }
+        assert!(rendered.contains("Light body"));
+        assert_eq!(rendered.contains("shadow-script-marker"), !strip.js);
+        assert_eq!(rendered.contains("shadow-style-marker"), !strip.css);
+        assert_eq!(rendered.contains("onclick="), !strip.js);
+        assert_eq!(rendered.contains("style="), !strip.css);
+    }
+    let live = page.evaluate_runtime_expression_with_await_async(
+        "document.getElementById('child').contentDocument.querySelector('section').shadowRoot.innerHTML",
+        true,
+    ).await?;
+    assert!(live.to_string().contains("shadow-script-marker"));
+    assert!(live.to_string().contains("shadow-style-marker"));
+    server.abort();
+    Ok(())
+}
+
+#[tokio::test]
+async fn html_with_frames_preserves_each_documents_scripting_serialization() -> Result<()> {
+    for sandbox in ["", "sandbox='allow-same-origin'"] {
+        let (_browser, mut page, server) = load_page(&format!(
+            r#"<!doctype html><iframe id="child" {sandbox} srcdoc="<body></body>"></iframe>"#,
+        ))
+        .await?;
+        page.evaluate_runtime_expression_with_await_async(
+            "(() => { const doc = document.getElementById('child').contentDocument;
+               const node = doc.body.appendChild(doc.createElement('noscript'));
+               node.textContent = '<literal-marker>'; })()",
+            true,
+        )
+        .await?;
+        let rendered = render_page_dump_with_options_async(
+            &mut page,
+            DumpFormat::Html,
+            StripOptions::default(),
+            false,
+            true,
+            false,
+            None,
+        )
+        .await?;
+        let expected = if sandbox.is_empty() {
+            "&lt;noscript&gt;&lt;literal-marker&gt;&lt;/noscript&gt;"
+        } else {
+            "&lt;noscript&gt;&amp;lt;literal-marker&amp;gt;&lt;/noscript&gt;"
+        };
+        assert!(rendered.contains(expected), "{rendered}");
+        server.abort();
+    }
+    Ok(())
+}
+
+#[tokio::test]
 async fn render_page_dump_async_includes_network_trace_config_summary() -> Result<()> {
     let (_browser, mut page, http_server) =
         load_page(r#"<!doctype html><html><body>ok</body></html>"#).await?;

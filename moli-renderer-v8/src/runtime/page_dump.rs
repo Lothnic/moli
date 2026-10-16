@@ -1,4 +1,4 @@
-use crate::dom::native::{NativeDom, NativeNodeId};
+use crate::dom::native::{DomHost, NativeDom, NativeNodeId};
 use crate::runtime::page_surface::{
     RendererPageDumpFormat, RendererPageDumpOptions, RendererPageDumpStripOptions,
 };
@@ -36,7 +36,22 @@ impl PageVm {
             apply_strip_options_at_root(&mut dom, *document, options.strip);
         }
         if options.with_frames && options.format == RendererPageDumpFormat::Html {
-            self.inline_child_frame_markups_into_dump_dom(&mut dom, &frames);
+            let bindings = self
+                .vm()
+                .document_runtime
+                .dom_host()
+                .snapshot_shadow_root_bindings();
+            let roots = bindings
+                .iter()
+                .map(|binding| binding.root)
+                .collect::<Vec<_>>();
+            for root in &roots {
+                apply_strip_options_at_root(&mut dom, *root, options.strip);
+            }
+            let mut export = DomHost::from_dom(dom);
+            export.restore_shadow_root_bindings(bindings);
+            self.inline_child_frame_markups_into_dump_dom(&mut export, &frames, &roots);
+            return export.dom().serialize_document();
         }
 
         match options.format {
@@ -50,8 +65,9 @@ impl PageVm {
 
     fn inline_child_frame_markups_into_dump_dom(
         &mut self,
-        dom: &mut NativeDom,
+        dom: &mut DomHost,
         frames: &[(String, NativeNodeId, NativeNodeId)],
+        shadow_roots: &[NativeNodeId],
     ) {
         for (frame_id, owner_node_id, document) in frames.iter().rev() {
             let Some(snapshot) = self
@@ -60,7 +76,9 @@ impl PageVm {
             else {
                 continue;
             };
-            let Some(markup) = dom.inner_html(*document) else {
+            let scripting_enabled = |node| self.vm().node_document_scripting_enabled(node);
+            let Some(markup) = dom.get_html(*document, &scripting_enabled, false, shadow_roots)
+            else {
                 continue;
             };
             let _ = dom.set_attribute(*owner_node_id, "srcdoc", &markup);
