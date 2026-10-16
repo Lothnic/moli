@@ -1368,7 +1368,6 @@ impl JsContextHost {
         window: v8::Local<'s, v8::Object>,
     ) {
         let global = scope.get_current_context().global(scope);
-        let same_origin_with_top = self.child_browsing_context_is_same_origin_with_top(handle);
         let existing_parent =
             Self::child_window_non_cross_origin_object_slot(scope, window, "__moliWindowParent");
         let existing_top =
@@ -1384,27 +1383,11 @@ impl JsContextHost {
             .filter(|top| !is_cross_origin_window_proxy(scope, *top))
             .unwrap_or_else(|| self.child_browsing_context_root_window(scope, handle, global));
         let popup_owner = self.child_browsing_context_popup_owner_window_for_realm(scope, handle);
-        let top = if let Some(window) = popup_owner {
-            window
-        } else if same_origin_with_top {
-            root
-        } else {
-            self.cross_origin_window_endpoint_projection_for_child(
-                scope,
-                handle,
-                PendingWindowMessageEndpoint::TopWindow,
-            )
-            .unwrap_or(window)
-        };
-        let parent = if let Some(window) = popup_owner {
-            window
-        } else if same_origin_with_top {
-            stable_parent
-                .or(existing_parent)
-                .unwrap_or_else(|| self.child_browsing_context_parent_window(scope, handle, top))
-        } else {
-            self.child_browsing_context_parent_window(scope, handle, top)
-        };
+        let top = popup_owner.unwrap_or(root);
+        let parent = popup_owner
+            .or(stable_parent)
+            .or(existing_parent)
+            .unwrap_or_else(|| self.child_browsing_context_parent_window(scope, handle, top));
         set_object_slot(scope, window, "__moliWindowParent", parent.into());
         set_object_slot(scope, window, "__moliWindowTop", top.into());
     }
@@ -1456,44 +1439,20 @@ impl JsContextHost {
             return (popup_owner, popup_owner);
         }
 
-        if self.child_browsing_context_is_same_origin_with_top(handle) {
-            let top = self
-                .child_window_proxy_records
-                .browsing_context_top(scope, handle)
-                .or_else(|| {
-                    Self::child_window_non_cross_origin_object_slot(
-                        scope,
-                        window,
-                        "__moliWindowTop",
-                    )
-                })
-                .unwrap_or_else(|| self.child_browsing_context_root_window(scope, handle, global));
-            let parent = self
-                .child_window_proxy_records
-                .browsing_context_parent(scope, handle)
-                .or_else(|| {
-                    Self::child_window_non_cross_origin_object_slot(
-                        scope,
-                        window,
-                        "__moliWindowParent",
-                    )
-                })
-                .unwrap_or_else(|| self.child_browsing_context_parent_window(scope, handle, top));
-            return (parent, top);
-        }
-
-        let existing_top = Self::child_window_object_slot(scope, window, "__moliWindowTop");
-        let top = existing_top
-            .filter(|top| is_cross_origin_window_proxy(scope, *top))
+        let top = self
+            .child_window_proxy_records
+            .browsing_context_top(scope, handle)
             .or_else(|| {
-                self.cross_origin_window_endpoint_projection_for_child(
-                    scope,
-                    handle,
-                    PendingWindowMessageEndpoint::TopWindow,
-                )
+                Self::child_window_non_cross_origin_object_slot(scope, window, "__moliWindowTop")
             })
-            .unwrap_or(global);
-        let parent = self.child_browsing_context_parent_window(scope, handle, top);
+            .unwrap_or_else(|| self.child_browsing_context_root_window(scope, handle, global));
+        let parent = self
+            .child_window_proxy_records
+            .browsing_context_parent(scope, handle)
+            .or_else(|| {
+                Self::child_window_non_cross_origin_object_slot(scope, window, "__moliWindowParent")
+            })
+            .unwrap_or_else(|| self.child_browsing_context_parent_window(scope, handle, top));
         (parent, top)
     }
 
@@ -1555,17 +1514,10 @@ impl JsContextHost {
         }
         match endpoint {
             PendingWindowMessageEndpoint::TopWindow => {
-                let projection = build_cross_origin_top_window_proxy(scope);
-                self.child_window_proxy_records
-                    .set_cross_origin_endpoint_projection(
-                        scope,
-                        accessing_handle,
-                        endpoint,
-                        projection,
-                    );
-                let storage = cross_origin_proxy_storage_object(scope, projection);
-                set_cross_origin_object_slot(scope, storage, "opener", v8::null(scope).into());
-                Some(projection)
+                let dispatch = super::super::OwnerDispatchScope::Top;
+                let owner = self.current_window_execution_context_owner(dispatch)?;
+                let (_, context) = self.window_execution_context(scope, owner, dispatch)?;
+                Some(context.global(scope))
             }
             PendingWindowMessageEndpoint::ChildWindow(handle) => {
                 self.child_browsing_context_cross_origin_window_proxy(scope, handle)
@@ -1834,12 +1786,6 @@ fn build_detached_cross_origin_window_index_proxy<'s>(
     set_cross_origin_object_slot(scope, window, "globalThis", proxy.into());
     set_cross_origin_object_slot(scope, window, "frames", proxy.into());
     proxy
-}
-
-fn build_cross_origin_top_window_proxy<'s>(
-    scope: &mut v8::PinScope<'s, '_>,
-) -> v8::Local<'s, v8::Object> {
-    build_cross_origin_top_level_window_proxy(scope, PendingWindowMessageEndpoint::TopWindow)
 }
 
 fn build_cross_origin_popup_window_proxy<'s>(

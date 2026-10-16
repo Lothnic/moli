@@ -2916,8 +2916,7 @@ fn context_weak_was_collected_for_test(
 }
 
 fn expose_real_top_window_for_test(vm: &mut StandaloneScriptVmHarness, context_id: i64) {
-    // `parent` on an opaque child is a caller-local projection. The cache and
-    // borrowed-receiver bugs live on the real top Window.
+    // Exercise the native access-check handlers on the actual top WindowProxy.
     vm.with_child_frame_realm_context_scope(context_id, |scope, host_ptr| {
         let parent_context = unsafe { &*host_ptr }
             .page_default_context(scope)
@@ -3130,6 +3129,45 @@ void sibling.contentWindow;
             .expect("cross-origin Window keys should reflect removed frames"),
         r#"[1,["0"],["0"],true]"#
     );
+}
+
+#[tokio::test]
+async fn cross_origin_ancestor_search_reaches_the_actual_top_window() {
+    let mut vm = new_storage_test_vm("https://cross-origin-ancestors.test/");
+    let outer = commit_opaque_child_for_test(&mut vm, "outer").await;
+    vm.eval_in_child_default_context(
+        outer,
+        r#"
+        const nested = document.createElement('iframe');
+        nested.srcdoc = '<body>nested';
+        document.body.appendChild(nested);
+        void nested.contentWindow;
+        'created'
+    "#,
+    )
+    .unwrap();
+    run_child_navigation_commit_and_host_load_for_test(&mut vm, "nested opaque child").await;
+    let inner = vm
+        .live_child_default_runtime_realm_inventory()
+        .into_iter()
+        .find(|realm| realm.context_id != outer)
+        .expect("nested realm")
+        .context_id;
+    let result = vm.eval_in_child_default_context(inner, r#"
+        (() => {
+          // Adform's trackpoint-async.js walks parent until it reaches the
+          // captured top. Bound the search so a split identity fails quickly.
+          const capturedTop = top;
+          let ancestor = window, steps = 0;
+          for (; ancestor && steps < 8; steps++) {
+            try { if (ancestor.frames.__tcfapiLocator) break; } catch (_) {}
+            if (ancestor === capturedTop) break;
+            ancestor = ancestor.parent;
+          }
+          return JSON.stringify([ancestor === capturedTop, steps, parent.parent === top, top.parent === top]);
+        })()
+    "#).expect("bounded cross-origin ancestor search");
+    assert_eq!(result, "[true,2,true,true]");
 }
 
 #[test]
