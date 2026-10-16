@@ -90,7 +90,6 @@ const DIRECT_V8_CALL_ALLOWLIST: &[AllowedDirectCallFile] = &[
         DirectCallOwner::JavaScriptEntryPoint,
     ),
     // Browser-created functions, Promise capabilities, and algorithm steps.
-    allowed("blob.rs", 1, DirectCallOwner::BrowserAlgorithm),
     allowed(
         "context_bootstrap/animation_runtime.rs",
         1,
