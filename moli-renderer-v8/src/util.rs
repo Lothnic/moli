@@ -149,6 +149,90 @@ impl RealmObjectHandle {
     }
 }
 
+/// A uniquely owned pending resolver needs a realm root only until its native
+/// operation ends. Identity caches use `RealmObjectHandle` instead, since their
+/// roots intentionally last as long as the realm.
+pub(crate) enum PendingPromiseResolver {
+    Strong(v8::Global<v8::PromiseResolver>),
+    Traced(v8::Weak<v8::PromiseResolver>),
+}
+
+impl PendingPromiseResolver {
+    const ROOTS: &str = "__moliPendingRealmResolvers";
+
+    pub(crate) fn new(
+        scope: &mut v8::PinScope<'_, '_>,
+        resolver: v8::Local<'_, v8::PromiseResolver>,
+    ) -> Self {
+        if page_context_is_detached_document(scope.get_current_context()) {
+            Self::traced(scope, resolver)
+        } else {
+            Self::Strong(v8::Global::new(scope, resolver))
+        }
+    }
+
+    fn traced(
+        scope: &mut v8::PinScope<'_, '_>,
+        resolver: v8::Local<'_, v8::PromiseResolver>,
+    ) -> Self {
+        let context = resolver
+            .get_creation_context(scope)
+            .unwrap_or_else(|| scope.get_current_context());
+        // Create the collection in its owning realm even when main-document
+        // teardown visits a resolver belonging to a shared child world.
+        let scope = &mut v8::ContextScope::new(scope, context);
+        let anchor = context.get_extras_binding_object(scope);
+        let roots = get_private_value(scope, anchor, Self::ROOTS)
+            .and_then(|value| v8::Local::<v8::Set>::try_from(value).ok())
+            .unwrap_or_else(|| {
+                let roots = v8::Set::new(scope);
+                set_private_value(scope, anchor, Self::ROOTS, roots.into());
+                roots
+            });
+        let _ = roots.add(scope, resolver.into());
+        Self::Traced(v8::Weak::new(scope, resolver))
+    }
+
+    pub(crate) fn to_local<'s>(
+        &self,
+        scope: &mut v8::PinScope<'s, '_>,
+    ) -> Option<v8::Local<'s, v8::PromiseResolver>> {
+        match self {
+            Self::Strong(resolver) => Some(v8::Local::new(scope, resolver)),
+            Self::Traced(resolver) => resolver.to_local(scope),
+        }
+    }
+
+    pub(crate) fn retain_in_realm(&mut self, scope: &mut v8::PinScope<'_, '_>) {
+        if let Self::Strong(resolver) = self {
+            let resolver = v8::Local::new(scope, &*resolver);
+            *self = Self::traced(scope, resolver);
+        }
+    }
+
+    /// Release the realm edge before settling or cancelling the operation.
+    /// The returned Local keeps the resolver alive for the rest of this scope.
+    pub(crate) fn into_local<'s>(
+        self,
+        scope: &mut v8::PinScope<'s, '_>,
+    ) -> Option<v8::Local<'s, v8::PromiseResolver>> {
+        let resolver = self.to_local(scope)?;
+        if matches!(self, Self::Traced(_)) {
+            let context = resolver
+                .get_creation_context(scope)
+                .unwrap_or_else(|| scope.get_current_context());
+            let scope = &mut v8::ContextScope::new(scope, context);
+            let anchor = context.get_extras_binding_object(scope);
+            if let Some(roots) = get_private_value(scope, anchor, Self::ROOTS)
+                .and_then(|value| v8::Local::<v8::Set>::try_from(value).ok())
+            {
+                let _ = roots.delete(scope, resolver.into());
+            }
+        }
+        Some(resolver)
+    }
+}
+
 /// Value edges owned by native state become ordinary V8 edges when a realm
 /// retires. A private holder supports primitives as well as objects and keeps
 /// cross-realm values attached to the realm that owns the native state.

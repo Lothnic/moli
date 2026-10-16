@@ -167,6 +167,203 @@ fn retained_response_body_keeps_bytes_until_the_last_v8_reference() {
     }
 }
 
+enum RetiredBodyCompletion<'a> {
+    Bytes(&'a [u8]),
+    Error,
+    Cancel,
+}
+
+fn assert_body_result_is_collectible_in_retained_realm(
+    method: &str,
+    completion: RetiredBodyCompletion<'_>,
+    expected_state: Option<v8::PromiseState>,
+) {
+    let (mut vm, body_source_id) = new_vm_with_pending_response_for_teardown_test();
+    vm.eval(&format!(
+        "globalThis.bodyPromise = response.{method}();\n\
+         bodyPromise.catch(() => {{}});\n\
+         globalThis.keepRealmAlive = () => document.URL;"
+    ))
+    .unwrap();
+    if matches!(completion, RetiredBodyCompletion::Cancel) {
+        vm.with_default_context_scope_and_checkpoint_for_test(|scope, _| {
+            let global = scope.get_current_context().global(scope);
+            let response = global
+                .get(scope, crate::util::v8str(scope, "response").into())
+                .unwrap();
+            let response = v8::Local::<v8::Object>::try_from(response).unwrap();
+            let source = crate::util::get_private_value(scope, response, "__lmNetworkBodySource")
+                .expect("the pending Response has a native body source");
+            let _ = global.set(
+                scope,
+                crate::util::v8str(scope, "cancelBody").into(),
+                source,
+            );
+            Ok(())
+        })
+        .unwrap();
+    }
+    let (callback, promise) = vm
+        .with_default_context_scope_and_checkpoint_for_test(|scope, _| {
+            let global = scope.get_current_context().global(scope);
+            let callback = global
+                .get(scope, crate::util::v8str(scope, "keepRealmAlive").into())
+                .unwrap();
+            let callback = v8::Local::<v8::Function>::try_from(callback).unwrap();
+            let promise = global
+                .get(scope, crate::util::v8str(scope, "bodyPromise").into())
+                .unwrap();
+            let promise = v8::Local::<v8::Promise>::try_from(promise).unwrap();
+            Ok((
+                v8::Global::new(scope, callback),
+                v8::Weak::new(scope, promise),
+            ))
+        })
+        .unwrap();
+    vm.eval("globalThis.response = null; globalThis.bodyPromise = null")
+        .unwrap();
+    let weak_host = vm.context_host_weak_for_test();
+    let isolate = vm.renderer_document_isolate.clone();
+    drop(vm);
+    for _ in 0..2 {
+        isolate.with_renderer_document_isolate_mut(|isolate| isolate.low_memory_notification());
+    }
+    assert!(weak_host.upgrade().is_some());
+
+    let result = isolate.with_renderer_document_isolate_mut(|isolate| {
+        let scope = std::pin::pin!(v8::HandleScope::new(isolate));
+        let scope = &mut scope.init();
+        let caller_context = v8::Context::new(scope, Default::default());
+        let scope = &mut v8::ContextScope::new(scope, caller_context);
+        let callback = v8::Local::new(scope, &callback);
+        let context = callback.get_creation_context(scope).unwrap();
+        let scope = &mut v8::ContextScope::new(scope, context);
+        let promise = promise
+            .to_local(scope)
+            .expect("a pending body resolver must survive retirement and GC");
+        assert_eq!(promise.state(), v8::PromiseState::Pending);
+        match completion {
+            RetiredBodyCompletion::Bytes(bytes) => {
+                crate::network_host::enqueue_pending_network_body_chunk(
+                    scope,
+                    body_source_id,
+                    bytes.to_vec(),
+                );
+                crate::network_host::close_pending_network_body_stream(scope, body_source_id);
+            }
+            RetiredBodyCompletion::Error => {
+                crate::network_host::error_pending_network_body_stream(
+                    scope,
+                    body_source_id,
+                    "body failed".to_owned(),
+                );
+            }
+            RetiredBodyCompletion::Cancel => {
+                // Exercise the native cancellation protocol directly.
+                let global = context.global(scope);
+                let source = global
+                    .get(scope, crate::util::v8str(scope, "cancelBody").into())
+                    .unwrap();
+                let source = v8::Local::<v8::Object>::try_from(source).unwrap();
+                let cancel = source
+                    .get(scope, crate::util::v8str(scope, "cancel").into())
+                    .unwrap();
+                let cancel = v8::Local::<v8::Function>::try_from(cancel).unwrap();
+                crate::script_execution::call_function(scope, cancel, source.into(), &[])
+                    .expect("the retained native body source should be cancellable");
+                let _ = global.set(
+                    scope,
+                    crate::util::v8str(scope, "cancelBody").into(),
+                    v8::null(scope).into(),
+                );
+            }
+        }
+        context
+            .get_microtask_queue()
+            .unwrap()
+            .perform_checkpoint(scope);
+        expected_state.map(|state| {
+            assert_eq!(promise.state(), state);
+            let result = v8::Local::<v8::Object>::try_from(promise.result(scope)).unwrap();
+            v8::Weak::new(scope, result)
+        })
+    });
+    for _ in 0..2 {
+        isolate.with_renderer_document_isolate_mut(|isolate| isolate.low_memory_notification());
+    }
+    assert!(
+        weak_host.upgrade().is_some(),
+        "the unrelated callback must still retain the retired Document"
+    );
+    isolate.with_renderer_document_isolate_mut(|isolate| {
+        let scope = std::pin::pin!(v8::HandleScope::new(isolate));
+        let scope = &mut scope.init();
+        if let Some(result) = result {
+            assert!(
+                result.to_local(scope).is_none(),
+                "a completed body result must be collectible before its retired realm"
+            );
+        }
+        assert!(
+            promise.to_local(scope).is_none(),
+            "a completed or cancelled body resolver must no longer be rooted by its realm"
+        );
+    });
+    isolate.with_renderer_document_isolate_mut(|_| drop(callback));
+    for _ in 0..2 {
+        isolate.with_renderer_document_isolate_mut(|isolate| isolate.low_memory_notification());
+    }
+    assert!(
+        weak_host.upgrade().is_none(),
+        "releasing the unrelated callback must release the retired Document"
+    );
+}
+
+#[test]
+fn resolved_json_body_result_is_collectible_in_retained_realm() {
+    assert_body_result_is_collectible_in_retained_realm(
+        "json",
+        RetiredBodyCompletion::Bytes(br#"{"ok":true}"#),
+        Some(v8::PromiseState::Fulfilled),
+    );
+}
+
+#[test]
+fn resolved_array_buffer_body_result_is_collectible_in_retained_realm() {
+    assert_body_result_is_collectible_in_retained_realm(
+        "arrayBuffer",
+        RetiredBodyCompletion::Bytes(b"body bytes"),
+        Some(v8::PromiseState::Fulfilled),
+    );
+}
+
+#[test]
+fn invalid_json_body_error_is_collectible_in_retained_realm() {
+    assert_body_result_is_collectible_in_retained_realm(
+        "json",
+        RetiredBodyCompletion::Bytes(b"invalid json"),
+        Some(v8::PromiseState::Rejected),
+    );
+}
+
+#[test]
+fn network_body_error_is_collectible_in_retained_realm() {
+    assert_body_result_is_collectible_in_retained_realm(
+        "json",
+        RetiredBodyCompletion::Error,
+        Some(v8::PromiseState::Rejected),
+    );
+}
+
+#[test]
+fn cancelled_body_promise_is_collectible_in_retained_realm() {
+    assert_body_result_is_collectible_in_retained_realm(
+        "json",
+        RetiredBodyCompletion::Cancel,
+        None,
+    );
+}
+
 #[test]
 fn retained_response_body_keeps_error_reason_until_the_last_v8_reference() {
     let (mut vm, body_source_id) = new_vm_with_pending_response_for_teardown_test();
