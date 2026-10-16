@@ -256,9 +256,9 @@ fn fingerprint(pass: &LayoutPassResult<usize>, cells: &[usize]) -> u64 {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = std::env::args().skip(1).collect::<Vec<_>>();
-    if args.len() != 4 {
+    if !(4..=5).contains(&args.len()) {
         return Err(
-            "usage: layout-cost <blocks|grid|table> <repeated|unique> <nodes> <iterations>".into(),
+            "usage: layout-cost <blocks|grid|table> <repeated|unique> <nodes> <iterations> [cold|prepare]".into(),
         );
     }
     let container = args[0].as_str();
@@ -269,6 +269,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     let count: usize = args[2].parse()?;
     let iterations: usize = args[3].parse()?;
+    let mode = args.get(4).map_or("cold", String::as_str);
+    if !["cold", "prepare"].contains(&mode) {
+        return Err("unknown reuse mode".into());
+    }
     if count == 0 || iterations == 0 {
         return Err("nodes and iterations must be positive".into());
     }
@@ -296,7 +300,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let request = LayoutPassRequest::new(
         LayoutViewport::new(1280, 720, 1.0),
         LayoutFlushReason::Explicit,
-    );
+    )
+    .with_text_preparation_reuse(mode == "prepare");
     let mut last = build_layout_pass(&source, &mut styles, &mut services, request)?;
     println!(
         "{{\"phase\":\"ready\",\"nodes\":{count},\"iterations\":{iterations},\"fingerprint\":{},\"box_slot_bytes\":{},\"taffy_cache_bytes\":{}}}",

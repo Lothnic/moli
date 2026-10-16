@@ -83,6 +83,7 @@ pub struct LayoutPassRequest {
     pub reason: LayoutFlushReason,
     environment: crate::LayoutEnvironment,
     paint_capture: Option<PaintCaptureRequest>,
+    text_preparation_reuse: bool,
 }
 
 impl LayoutPassRequest {
@@ -94,6 +95,7 @@ impl LayoutPassRequest {
                 scrollbars_hidden: false,
             },
             paint_capture: None,
+            text_preparation_reuse: false,
         }
     }
 
@@ -117,6 +119,18 @@ impl LayoutPassRequest {
     pub const fn with_environment(mut self, environment: crate::LayoutEnvironment) -> Self {
         self.environment = environment;
         self
+    }
+
+    /// Allows bounded reuse of pristine short-text results within this pass.
+    /// This does not retain any layouts between passes. Opting in can also
+    /// change the call-based aging of the underlying font source cache.
+    pub const fn with_text_preparation_reuse(mut self, enabled: bool) -> Self {
+        self.text_preparation_reuse = enabled;
+        self
+    }
+
+    pub const fn text_preparation_reuse(self) -> bool {
+        self.text_preparation_reuse
     }
 
     /// Whether this demand also needs immutable software-paint input.
@@ -231,7 +245,7 @@ where
     prepare_form_controls(&mut world, styles)?;
     let form_control_elapsed = phase_started.elapsed();
     let phase_started = Instant::now();
-    prepare_inline_contexts(&mut world, services);
+    prepare_inline_contexts(&mut world, services, request.text_preparation_reuse);
     let inline_preparation_elapsed = phase_started.elapsed();
     world.validate_invariants()?;
     let phase_started = Instant::now();

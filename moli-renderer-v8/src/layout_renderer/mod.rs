@@ -69,6 +69,7 @@ fn build_native_layout_pass_recursive(
             reason: request.reason,
             capture_paint: request.requests_paint(),
             include_backgrounds: request.includes_backgrounds(),
+            text_preparation_reuse: request.text_preparation_reuse(),
             document_stack,
             embedded_document_services,
         };
@@ -102,6 +103,7 @@ struct NativeEmbeddedFrameRenderer<'a> {
     reason: moli_layout::LayoutFlushReason,
     capture_paint: bool,
     include_backgrounds: bool,
+    text_preparation_reuse: bool,
     document_stack: &'a mut Vec<DomHandle>,
     embedded_document_services: &'a mut HashMap<DomHandle, DocumentLayoutServices>,
 }
@@ -143,6 +145,7 @@ impl EmbeddedFrameRenderer<DomHandle> for NativeEmbeddedFrameRenderer<'_> {
         } else {
             LayoutPassRequest::new(viewport, self.reason)
         };
+        let request = request.with_text_preparation_reuse(self.text_preparation_reuse);
         let result = build_native_layout_pass_recursive(
             self.runtime,
             root,
