@@ -15,7 +15,8 @@ use parking_lot::Mutex;
 
 use crate::{
     devtools::{
-        ingress::lane::RendererDevToolsSessionLaneKey, pause::RendererInspectorPauseLoopWake,
+        ingress::lane::RendererDevToolsSessionLaneKey,
+        pause::{RendererInspectorPauseId, RendererInspectorPauseLoopWake},
         route::RendererInspectorSessionExecutorRouteId,
     },
     runtime::{
@@ -251,7 +252,13 @@ impl RendererInspectorIoOwnerWake {
     }
 }
 
-/// Pending policy reconciliation, never the replacement lifecycle itself.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum InspectorPageControlWork {
+    ReconcileDocumentReplacement { agent: RendererDevToolsAgentToken },
+    UnpauseAndTerminateOldDocument { pause: RendererInspectorPauseId },
+}
+
+/// Pending Page work, never the replacement lifecycle itself.
 ///
 /// Producers release the pause mutex before publishing under the ingress lock.
 /// Consumers remove a key under that lock, then release it before reading the
@@ -260,23 +267,43 @@ impl RendererInspectorIoOwnerWake {
 #[derive(Debug, Default)]
 struct PageControlMailbox {
     dirty_agents: BTreeSet<RendererDevToolsAgentToken>,
+    // Only identical pause identities coalesce. Finishing a scope must not
+    // remove its begin edge, and another pause gets a distinct task.
+    unpause_tasks: BTreeSet<RendererInspectorPauseId>,
 }
 
 impl PageControlMailbox {
-    fn publish(&mut self, agent: RendererDevToolsAgentToken) -> bool {
-        self.dirty_agents.insert(agent)
+    fn publish(&mut self, work: InspectorPageControlWork) -> bool {
+        match work {
+            InspectorPageControlWork::ReconcileDocumentReplacement { agent } => {
+                self.dirty_agents.insert(agent)
+            }
+            InspectorPageControlWork::UnpauseAndTerminateOldDocument { pause } => {
+                self.unpause_tasks.insert(pause)
+            }
+        }
     }
 
-    fn claim(&mut self) -> Option<RendererDevToolsAgentToken> {
-        self.dirty_agents.pop_first()
+    fn claim(&mut self) -> Option<InspectorPageControlWork> {
+        if let Some(pause) = self.unpause_tasks.pop_first() {
+            // Termination also reconciles this Agent's current policy. A
+            // publication after claim can still enqueue a fresh dirty key.
+            self.dirty_agents.remove(&pause.agent);
+            Some(InspectorPageControlWork::UnpauseAndTerminateOldDocument { pause })
+        } else {
+            self.dirty_agents
+                .pop_first()
+                .map(|agent| InspectorPageControlWork::ReconcileDocumentReplacement { agent })
+        }
     }
 
     fn has_ready(&self) -> bool {
-        !self.dirty_agents.is_empty()
+        !self.dirty_agents.is_empty() || !self.unpause_tasks.is_empty()
     }
 
     fn close(&mut self) {
         self.dirty_agents.clear();
+        self.unpause_tasks.clear();
     }
 }
 
@@ -477,10 +504,10 @@ impl RendererInspectorIoIngress {
         self.shared.state.lock().environment_notifications.take()
     }
 
-    pub(crate) fn enqueue_replacement_reconcile(&self, agent: RendererDevToolsAgentToken) -> bool {
+    pub(crate) fn enqueue_control_work(&self, work: InspectorPageControlWork) -> bool {
         let published = {
             let mut state = self.shared.state.lock();
-            !state.closed && state.control.publish(agent)
+            !state.closed && state.control.publish(work)
         };
         if published {
             self.notify_execution_opportunities();
@@ -488,7 +515,7 @@ impl RendererInspectorIoIngress {
         published
     }
 
-    pub(crate) fn claim_replacement_reconcile(&self) -> Option<RendererDevToolsAgentToken> {
+    pub(crate) fn claim_control_work(&self) -> Option<InspectorPageControlWork> {
         self.shared.state.lock().control.claim()
     }
 
@@ -619,8 +646,8 @@ impl RendererInspectorIoIngress {
         pause_bridge: &crate::devtools::pause::RendererInspectorPauseBridge,
     ) -> Option<RendererInspectorIoCommand> {
         pause_bridge
-            .wait_for_pause_work(RendererDevToolsAgentToken::allocate(), || {
-                self.claim_for_pause()
+            .wait_for_pause_work(|allow_commands| {
+                allow_commands.then(|| self.claim_for_pause()).flatten()
             })
             .ok()
     }
@@ -945,7 +972,7 @@ mod tests {
                 }
                 let mut route = enqueue(&ingress, agent, Some("latency"), "Debugger.enable");
                 std::hint::black_box(ingress.claim_environment_invalidation());
-                std::hint::black_box(ingress.claim_replacement_reconcile());
+                std::hint::black_box(ingress.claim_control_work());
                 let mut command = ingress.claim_for_owner().unwrap();
                 ingress.first_dispatch_guard(&mut command).release();
                 assert_eq!(
@@ -1013,23 +1040,40 @@ mod tests {
         let ingress = ingress();
         let first = RendererDevToolsAgentToken::allocate();
         let second = RendererDevToolsAgentToken::allocate();
-        assert!(ingress.enqueue_replacement_reconcile(first));
+        assert!(ingress.enqueue_control_work(
+            InspectorPageControlWork::ReconcileDocumentReplacement { agent: first }
+        ));
         for _ in 0..10_000 {
-            assert!(!ingress.enqueue_replacement_reconcile(first));
+            assert!(!ingress.enqueue_control_work(
+                InspectorPageControlWork::ReconcileDocumentReplacement { agent: first }
+            ));
         }
-        assert!(ingress.enqueue_replacement_reconcile(second));
+        assert!(ingress.enqueue_control_work(
+            InspectorPageControlWork::ReconcileDocumentReplacement { agent: second }
+        ));
         assert_eq!(ingress.shared.state.lock().control.dirty_agents.len(), 2);
-        assert_eq!(ingress.claim_replacement_reconcile(), Some(first));
+        assert_eq!(
+            ingress.claim_control_work(),
+            Some(InspectorPageControlWork::ReconcileDocumentReplacement { agent: first })
+        );
         // A producer racing application must not be merged with claimed work.
         let publisher = ingress.clone();
         assert!(
-            std::thread::spawn(move || publisher.enqueue_replacement_reconcile(first))
-                .join()
-                .unwrap()
+            std::thread::spawn(move || publisher.enqueue_control_work(
+                InspectorPageControlWork::ReconcileDocumentReplacement { agent: first }
+            ))
+            .join()
+            .unwrap()
         );
-        assert_eq!(ingress.claim_replacement_reconcile(), Some(first));
-        assert_eq!(ingress.claim_replacement_reconcile(), Some(second));
-        assert_eq!(ingress.claim_replacement_reconcile(), None);
+        assert_eq!(
+            ingress.claim_control_work(),
+            Some(InspectorPageControlWork::ReconcileDocumentReplacement { agent: first })
+        );
+        assert_eq!(
+            ingress.claim_control_work(),
+            Some(InspectorPageControlWork::ReconcileDocumentReplacement { agent: second })
+        );
+        assert_eq!(ingress.claim_control_work(), None);
         assert!(!ingress.shared.state.lock().has_ready());
     }
 
@@ -1041,10 +1085,15 @@ mod tests {
         let mut command = ingress.claim_for_owner().unwrap();
         let mut first_dispatch = ingress.first_dispatch_guard(&mut command);
         ingress.begin_session_detach(agent, command.ticket().session());
-        assert!(ingress.enqueue_replacement_reconcile(agent));
+        assert!(ingress.enqueue_control_work(
+            InspectorPageControlWork::ReconcileDocumentReplacement { agent }
+        ));
         assert!(ingress.shared.state.lock().has_ready());
         assert!(ingress.claim_for_pause().is_none());
-        assert_eq!(ingress.claim_replacement_reconcile(), Some(agent));
+        assert_eq!(
+            ingress.claim_control_work(),
+            Some(InspectorPageControlWork::ReconcileDocumentReplacement { agent })
+        );
         assert!(matches!(
             route.first_dispatch_rx.as_mut().unwrap().try_recv(),
             Err(tokio::sync::oneshot::error::TryRecvError::Empty)
@@ -1062,7 +1111,9 @@ mod tests {
         let ingress = ingress();
         let agent = RendererDevToolsAgentToken::allocate();
         for _ in 0..128 {
-            assert!(ingress.enqueue_replacement_reconcile(agent));
+            assert!(ingress.enqueue_control_work(
+                InspectorPageControlWork::ReconcileDocumentReplacement { agent }
+            ));
             let barrier = Arc::new(std::sync::Barrier::new(3));
             let claims = std::thread::scope(|scope| {
                 let handles = (0..3)
@@ -1071,7 +1122,7 @@ mod tests {
                         let barrier = barrier.clone();
                         scope.spawn(move || {
                             barrier.wait();
-                            ingress.claim_replacement_reconcile()
+                            ingress.claim_control_work()
                         })
                     })
                     .collect::<Vec<_>>();
@@ -1082,29 +1133,120 @@ mod tests {
             });
             assert_eq!(
                 claims.into_iter().flatten().collect::<Vec<_>>(),
-                vec![agent]
+                vec![InspectorPageControlWork::ReconcileDocumentReplacement { agent }]
             );
-            assert!(ingress.enqueue_replacement_reconcile(agent));
-            assert_eq!(ingress.claim_replacement_reconcile(), Some(agent));
+            assert!(ingress.enqueue_control_work(
+                InspectorPageControlWork::ReconcileDocumentReplacement { agent }
+            ));
+            assert_eq!(
+                ingress.claim_control_work(),
+                Some(InspectorPageControlWork::ReconcileDocumentReplacement { agent })
+            );
         }
+    }
+
+    #[test]
+    fn unpause_edges_keep_distinct_generations_and_bypass_protocol_lanes() {
+        let ingress = ingress();
+        let agent = RendererDevToolsAgentToken::allocate();
+        let mut route = enqueue(&ingress, agent, Some("detaching"), "active");
+        let mut command = ingress.claim_for_owner().unwrap();
+        let mut guard = ingress.first_dispatch_guard(&mut command);
+        ingress.begin_session_detach(agent, command.ticket().session());
+        let reconcile = InspectorPageControlWork::ReconcileDocumentReplacement { agent };
+        assert!(ingress.enqueue_control_work(reconcile));
+        for generation in [1, 2] {
+            let edge = InspectorPageControlWork::UnpauseAndTerminateOldDocument {
+                pause: RendererInspectorPauseId { agent, generation },
+            };
+            assert!(ingress.enqueue_control_work(edge));
+            assert!(!ingress.enqueue_control_work(edge));
+        }
+        for generation in [1, 2] {
+            assert!(ingress.claim_for_pause().is_none());
+            assert_eq!(
+                ingress.claim_control_work(),
+                Some(InspectorPageControlWork::UnpauseAndTerminateOldDocument {
+                    pause: RendererInspectorPauseId { agent, generation },
+                })
+            );
+        }
+        assert!(ingress.claim_control_work().is_none());
+        assert!(matches!(
+            route.first_dispatch_rx.as_mut().unwrap().try_recv(),
+            Err(tokio::sync::oneshot::error::TryRecvError::Empty)
+        ));
+        guard.release();
+        ingress.finish_session_detach(agent, command.ticket().session());
+    }
+
+    #[test]
+    fn concurrent_unpause_claims_are_unique_and_close_rejects_delayed_edges() {
+        let ingress = ingress();
+        let agent = RendererDevToolsAgentToken::allocate();
+        for generation in 1..=128 {
+            let edge = InspectorPageControlWork::UnpauseAndTerminateOldDocument {
+                pause: RendererInspectorPauseId { agent, generation },
+            };
+            assert!(ingress.enqueue_control_work(edge));
+            let barrier = Arc::new(std::sync::Barrier::new(3));
+            let claims = std::thread::scope(|scope| {
+                let handles: Vec<_> = (0..3)
+                    .map(|_| {
+                        let ingress = ingress.clone();
+                        let barrier = barrier.clone();
+                        scope.spawn(move || {
+                            barrier.wait();
+                            ingress.claim_control_work()
+                        })
+                    })
+                    .collect();
+                handles
+                    .into_iter()
+                    .filter_map(|h| h.join().unwrap())
+                    .collect::<Vec<_>>()
+            });
+            assert_eq!(claims, vec![edge]);
+            // A delayed publisher can race an acknowledged task. The mailbox
+            // retains it; the pause identity check makes execution idempotent.
+            assert!(ingress.enqueue_control_work(edge));
+            assert_eq!(ingress.claim_control_work(), Some(edge));
+        }
+        let edge = InspectorPageControlWork::UnpauseAndTerminateOldDocument {
+            pause: RendererInspectorPauseId {
+                agent,
+                generation: 129,
+            },
+        };
+        assert!(ingress.enqueue_control_work(edge));
+        ingress.close("Page disposed");
+        assert!(ingress.claim_control_work().is_none());
+        assert!(!ingress.enqueue_control_work(edge));
+        assert!(!ingress.shared.state.lock().has_ready());
     }
 
     #[test]
     fn closing_control_mailbox_rejects_inflight_and_late_publications() {
         let ingress = ingress();
         let agent = RendererDevToolsAgentToken::allocate();
-        assert!(ingress.enqueue_replacement_reconcile(agent));
+        assert!(ingress.enqueue_control_work(
+            InspectorPageControlWork::ReconcileDocumentReplacement { agent }
+        ));
         let publisher = ingress.clone();
         std::thread::scope(|scope| {
             scope.spawn(move || {
                 for _ in 0..10_000 {
-                    publisher.enqueue_replacement_reconcile(agent);
+                    publisher.enqueue_control_work(
+                        InspectorPageControlWork::ReconcileDocumentReplacement { agent },
+                    );
                 }
             });
             ingress.close("Page destroyed");
         });
-        assert_eq!(ingress.claim_replacement_reconcile(), None);
-        assert!(!ingress.enqueue_replacement_reconcile(agent));
+        assert_eq!(ingress.claim_control_work(), None);
+        assert!(!ingress.enqueue_control_work(
+            InspectorPageControlWork::ReconcileDocumentReplacement { agent }
+        ));
         assert!(!ingress.shared.state.lock().has_ready());
     }
 

@@ -13,7 +13,9 @@ use page_targets::RendererInspectorPageTargets;
 use crate::{
     devtools::{
         ingress::{
-            io::{RendererInspectorIoCommand, RendererInspectorIoIngress},
+            io::{
+                InspectorPageControlWork, RendererInspectorIoCommand, RendererInspectorIoIngress,
+            },
             main::{
                 RendererInspectorMainCommand, RendererInspectorMainIngress,
                 RendererInspectorMainOwnerDispatch,
@@ -87,7 +89,7 @@ struct RendererInspectorSessionExecutorLocal {
 /// shared by owner wakes, V8 interrupts and the nested debugger loop.
 enum InspectorControlWork {
     EnvironmentInvalidation(moli_v8_platform::ProcessEnvironmentInvalidation),
-    ReconcileDocumentReplacement { agent: RendererDevToolsAgentToken },
+    Page(InspectorPageControlWork),
 }
 
 // At most one item from each source per opportunity. Sustained environment
@@ -203,33 +205,33 @@ impl RendererInspectorSessionExecutorLocal {
         let Some(pause_loop_policy) = self.target.pause_ref().enter_pause() else {
             return;
         };
-        let agent_token = self
-            .sessions
-            .borrow()
-            .iter()
-            .find(|((group, _), route)| {
-                *group == context_group_id && route.session.strong_count() != 0
-            })
-            .map(|(_, route)| route.agent_token);
-        let Some(agent_token) = agent_token else {
+        let has_live_session = self.sessions.borrow().iter().any(|((group, _), route)| {
+            *group == context_group_id && route.session.strong_count() != 0
+        });
+        if !has_live_session {
             // A detached/unbound group can race V8's pause callback. Returning
             // lets V8 unwind without retaining a zombie Page pause phase.
             self.target.pause_ref().leave_pause();
             return;
-        };
+        }
         let mut prefer_main = true;
         let mut prefer_control = true;
-        let exit_reason = loop {
+        loop {
             let work = self
                 .target
                 .pause_ref()
-                .wait_for_pause_work(agent_token, || {
+                .wait_for_pause_work(|allow_commands| {
                     // These are actual posted owner tasks, not an environment-version
                     // check. Service them in both pause modes, before a following
                     // Inspector observation; they never execute page JavaScript.
-                    if prefer_control && let Some(work) = self.claim_control_work() {
+                    if (!allow_commands || prefer_control)
+                        && let Some(work) = self.claim_control_work()
+                    {
                         prefer_control = false;
                         return Some(RendererInspectorNestedCommand::Control(work));
+                    }
+                    if !allow_commands {
+                        return None;
                     }
                     let command = match pause_loop_policy {
                         crate::devtools::pause::RendererInspectorPauseLoopPolicy::IoOnly => self
@@ -284,7 +286,7 @@ impl RendererInspectorSessionExecutorLocal {
                 });
             let command = match work {
                 Ok(command) => command,
-                Err(reason) => break reason,
+                Err(_) => break,
             };
             match command {
                 RendererInspectorNestedCommand::Control(work) => {
@@ -298,28 +300,6 @@ impl RendererInspectorSessionExecutorLocal {
                 RendererInspectorNestedCommand::Io(command) => {
                     self.dispatch_io_command(context_group_id, command);
                 }
-            }
-        };
-        if exit_reason
-            == crate::devtools::pause::RendererInspectorPauseExitReason::DocumentReplacement
-        {
-            // Like Chromium's UnpauseAndTerminate, unwind the paused old
-            // document before preparing its replacement on the owner thread.
-            // Later pauses observe the same renderer preparation scope until
-            // it commits or is discarded. No debugger setting leaks
-            // into the replacement document's Inspector restore snapshots.
-            let sessions: Vec<_> = self
-                .sessions
-                .borrow()
-                .iter()
-                .filter(|((group, _), _)| *group == context_group_id)
-                .filter_map(|(_, route)| route.session.upgrade())
-                .collect();
-            for session in &sessions {
-                session.sync_document_replacement();
-            }
-            for session in sessions {
-                session.resume(true);
             }
         }
         self.target.pause_ref().leave_pause();
@@ -335,8 +315,8 @@ impl RendererInspectorSessionExecutorLocal {
         let page = self
             .target
             .io_ref()
-            .claim_replacement_reconcile()
-            .map(|agent| InspectorControlWork::ReconcileDocumentReplacement { agent });
+            .claim_control_work()
+            .map(InspectorControlWork::Page);
         (environment.is_some() || page.is_some()).then_some([environment, page])
     }
 
@@ -346,7 +326,16 @@ impl RendererInspectorSessionExecutorLocal {
                 InspectorControlWork::EnvironmentInvalidation(invalidation) => {
                     invalidation.notify_isolate(isolate);
                 }
-                InspectorControlWork::ReconcileDocumentReplacement { agent } => {
+                InspectorControlWork::Page(work) => {
+                    let (agent, terminate) = match work {
+                        InspectorPageControlWork::ReconcileDocumentReplacement { agent } => {
+                            (agent, false)
+                        }
+                        InspectorPageControlWork::UnpauseAndTerminateOldDocument { pause } => (
+                            pause.agent,
+                            self.target.pause_ref().claim_pause_termination(pause),
+                        ),
+                    };
                     // Release the registry borrow before V8: session policy
                     // operations may call back into Inspector. Rc keeps each
                     // upgraded session alive through any reentrant detach.
@@ -357,8 +346,16 @@ impl RendererInspectorSessionExecutorLocal {
                         .filter(|route| route.agent_token == agent)
                         .filter_map(|route| route.session.upgrade())
                         .collect();
-                    for session in sessions {
+                    for session in &sessions {
                         session.sync_document_replacement();
+                    }
+                    if terminate {
+                        // Each Agent retains its context group across same-agent
+                        // document replacements. Acknowledge the exact pause
+                        // before V8, with no bridge/registry/mailbox lock held.
+                        for session in sessions {
+                            session.resume(true);
+                        }
                     }
                 }
             }

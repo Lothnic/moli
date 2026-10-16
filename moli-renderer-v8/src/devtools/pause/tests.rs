@@ -403,22 +403,28 @@ fn document_replacement_preserves_the_original_resume_for_every_session() {
     }
     assert!(bridge.enter_pause().is_some());
     let agent = routes[0].agent_token;
-    assert!(bridge.begin_document_replacement(agent).is_some());
+    assert!(routes[0].target.begin_document_replacement(agent));
+    let Some(InspectorPageControlWork::UnpauseAndTerminateOldDocument { pause }) =
+        routes[0].target.io_ref().claim_control_work()
+    else {
+        panic!("replacement must publish an unpause task");
+    };
+    assert!(bridge.claim_pause_termination(pause));
     assert_eq!(
-        bridge.wait_for_pause_work(agent, || Some(())),
-        Err(RendererInspectorPauseExitReason::DocumentReplacement)
+        bridge.wait_for_pause_work(|_| Some(())),
+        Err(RendererInspectorPauseExitReason::Resumed)
     );
     bridge.leave_pause();
     for route in &routes {
         expect_immediate_preface(route.route_notification(&resumed));
     }
 
-    bridge.finish_document_replacement(agent);
+    routes[0].target.finish_document_replacement(agent);
     for route in &routes {
         expect_immediate_preface(route.route_notification(&paused));
     }
     assert!(bridge.enter_pause().is_some());
-    assert_eq!(bridge.wait_for_pause_work(agent, || Some(())), Ok(()));
+    assert_eq!(bridge.wait_for_pause_work(|_| Some(())), Ok(()));
 }
 
 #[test]
@@ -601,17 +607,24 @@ fn canceled_replacement_begin_retires_the_reported_pause_before_control_claim() 
             assert!(bridge.enter_pause().is_some());
         }
         let agent = first.agent_token;
-        assert_eq!(bridge.begin_document_replacement(agent), Some(true));
-        assert_eq!(bridge.begin_document_replacement(agent), Some(false));
-        assert!(!bridge.finish_document_replacement(agent));
+        assert!(first.target.begin_document_replacement(agent));
+        assert!(first.target.begin_document_replacement(agent));
+        first.target.finish_document_replacement(agent);
         assert!(bridge.document_replacement_active(agent));
-        assert!(bridge.finish_document_replacement(agent));
+        first.target.finish_document_replacement(agent);
         assert!(!bridge.document_replacement_active(agent));
-        // Both scopes ended before any mailbox claim: the exit edge must
+        // Both scopes ended before any mailbox claim: the task must
         // survive while the coalesced policy correctly reconciles to false.
+        let Some(InspectorPageControlWork::UnpauseAndTerminateOldDocument { pause }) =
+            first.target.io_ref().claim_control_work()
+        else {
+            panic!("cancellation must preserve the unpause task");
+        };
+        assert!(bridge.claim_pause_termination(pause));
+        assert!(!bridge.claim_pause_termination(pause), "acknowledge once");
         assert_eq!(
-            bridge.wait_for_pause_work(agent, || Some(42)),
-            Err(RendererInspectorPauseExitReason::DocumentReplacement)
+            bridge.wait_for_pause_work(|_| Some(42)),
+            Err(RendererInspectorPauseExitReason::Resumed)
         );
         bridge.leave_pause();
         for route in [&first, &second] {
@@ -625,7 +638,11 @@ fn canceled_replacement_begin_retires_the_reported_pause_before_control_claim() 
                 .outbound_route(next_agent, DevToolsSessionKey::Primary);
             expect_immediate_preface(route.route_notification(&paused));
             assert!(bridge.enter_pause().is_some());
-            assert_eq!(bridge.wait_for_pause_work(next_agent, || Some(42)), Ok(42));
+            assert!(
+                !bridge.claim_pause_termination(pause),
+                "reject a stale task"
+            );
+            assert_eq!(bridge.wait_for_pause_work(|_| Some(42)), Ok(42));
             bridge.leave_pause();
             expect_immediate_preface(route.route_notification(&resumed));
         }
