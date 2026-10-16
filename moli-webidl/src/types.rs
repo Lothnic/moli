@@ -283,6 +283,16 @@ impl From<ClampedUnsignedLong> for u32 {
     }
 }
 
+/// WebIDL `[Clamp] long long`, bounded by JavaScript's exact integer range.
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub struct ClampedLongLong(pub i64);
+
+impl From<ClampedLongLong> for i64 {
+    fn from(value: ClampedLongLong) -> Self {
+        value.0
+    }
+}
+
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub struct EnforceRangeUnsignedLong(pub u32);
 

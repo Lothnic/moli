@@ -2,7 +2,7 @@ use crate::context_bootstrap::media_source::{MediaSourceObject, media_source_obj
 use crate::{native_bridge, web_api_interfaces};
 use moli_file_api::{
     BlobId, BlobStore, ObjectUrlEntry, ObjectUrlTarget, blob_slice_relative_index,
-    clamp_blob_long_long, normalize_blob_mime_type,
+    normalize_blob_mime_type,
 };
 use moli_webapi_declare::{WebApiFunctionTemplate, WebApiObject};
 use std::sync::{Arc, OnceLock};
@@ -26,6 +26,17 @@ struct BlobConstructorArgs<'s> {
     parts: BlobParts<'s>,
     #[webidl(dictionary)]
     options: BlobPropertyBag,
+}
+
+#[derive(webidl::WebIdlArgs)]
+#[webidl(prefix = "Blob.slice")]
+struct BlobSliceArgs {
+    #[webidl(converter = "clamped_long_long")]
+    start: Option<i64>,
+    #[webidl(converter = "clamped_long_long")]
+    end: Option<i64>,
+    #[webidl(default = String::new())]
+    content_type: String,
 }
 
 fn native_blob_line_ending() -> &'static str {
@@ -290,17 +301,14 @@ pub(super) fn blob_slice_callback<'s>(
         throw_type_error(scope, "Illegal invocation");
         return;
     }
-    let bytes = blob_bytes_from_object(scope, args.this()).unwrap_or_default();
-    let size = bytes.len();
-    let start = clamped_long_long_arg(scope, &args, 0).unwrap_or(0);
-    let end = if args.length() > 1 && !args.get(1).is_undefined() {
-        clamped_long_long_arg(scope, &args, 1).unwrap_or(size as i64)
-    } else {
-        size as i64
-    };
-    let Some(mime_type) = blob_slice_content_type(scope, &args) else {
+    let Some(parsed) = webidl::parse_args::<BlobSliceArgs>(scope, &args) else {
         return;
     };
+    let bytes = blob_bytes_from_object(scope, args.this()).unwrap_or_default();
+    let size = bytes.len();
+    let start = parsed.start.unwrap_or(0);
+    let end = parsed.end.unwrap_or(size as i64);
+    let mime_type = normalize_blob_mime_type(&parsed.content_type);
 
     let relative_start = blob_slice_relative_index(start, size);
     let relative_end = blob_slice_relative_index(end, size);
@@ -549,29 +557,6 @@ fn track_blob_ref_lifetime(
     finalizer: impl FnOnce() + 'static,
 ) {
     crate::v8_finalizer::track_context_owned_v8_finalizer(scope, object, finalizer);
-}
-
-fn clamped_long_long_arg(
-    scope: &mut v8::PinScope<'_, '_>,
-    args: &v8::FunctionCallbackArguments<'_>,
-    index: i32,
-) -> Option<i64> {
-    args.get(index)
-        .number_value(scope)
-        .map(clamp_blob_long_long)
-}
-
-fn blob_slice_content_type(
-    scope: &mut v8::PinScope<'_, '_>,
-    args: &v8::FunctionCallbackArguments<'_>,
-) -> Option<String> {
-    if args.length() <= 2 || args.get(2).is_undefined() {
-        return Some(String::new());
-    }
-    let value = args.get(2).to_string(scope)?;
-    Some(normalize_blob_mime_type(
-        value.to_rust_string_lossy(scope).as_str(),
-    ))
 }
 
 pub(super) fn buffer_source_bytes_from_value(

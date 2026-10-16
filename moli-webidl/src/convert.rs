@@ -379,6 +379,25 @@ impl<'s> WebIdlConverter<'s> for crate::LongLong {
     }
 }
 
+impl<'s> WebIdlConverter<'s> for crate::ClampedLongLong {
+    type Options = ();
+
+    fn convert(
+        scope: &mut v8::PinScope<'s, '_>,
+        value: v8::Local<'s, v8::Value>,
+        context: Context,
+        _options: &Self::Options,
+    ) -> Result<Self, WebIdlError> {
+        let value = number_value(scope, value, context, "[Clamp] long long")?;
+        if value.is_nan() {
+            return Ok(Self(0));
+        }
+        // ConvertToInt restricts annotated 64-bit integers to exact Numbers.
+        let value = value.clamp(-9_007_199_254_740_991.0, 9_007_199_254_740_991.0);
+        Ok(Self(value.round_ties_even() as i64))
+    }
+}
+
 impl<'s> WebIdlConverter<'s> for EnforceRangeLongLong {
     type Options = ();
 
@@ -1469,21 +1488,7 @@ fn clamped_unsigned(value: f64, maximum: f64) -> f64 {
     if value.is_nan() {
         return 0.0;
     }
-    round_half_even(value.clamp(0.0, maximum))
-}
-
-fn round_half_even(value: f64) -> f64 {
-    let floor = value.floor();
-    let fraction = value - floor;
-    if fraction < 0.5 {
-        floor
-    } else if fraction > 0.5 {
-        floor + 1.0
-    } else if (floor as u64).is_multiple_of(2) {
-        floor
-    } else {
-        floor + 1.0
-    }
+    value.clamp(0.0, maximum).round_ties_even()
 }
 
 fn unsigned_long_long(value: f64) -> u64 {
