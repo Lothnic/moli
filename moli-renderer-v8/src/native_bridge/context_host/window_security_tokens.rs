@@ -403,6 +403,31 @@ pub(in crate::native_bridge::context_host) enum WindowAccessOrigin {
 }
 
 impl WindowAccessOrigin {
+    /// Compare document origins without document.domain relaxation.
+    pub(in crate::native_bridge::context_host) fn is_same_origin(&self, other: &Self) -> bool {
+        match (self, other) {
+            (
+                Self::Tuple {
+                    serialized_origin: left,
+                    ..
+                },
+                Self::Tuple {
+                    serialized_origin: right,
+                    ..
+                },
+            ) => left == right,
+            (
+                Self::Opaque {
+                    identity: Some(left),
+                },
+                Self::Opaque {
+                    identity: Some(right),
+                },
+            ) => left == right,
+            _ => false,
+        }
+    }
+
     pub(in crate::native_bridge::context_host) fn opaque(
         identity: WindowExecutionContextOwner,
     ) -> Self {
@@ -534,6 +559,25 @@ mod tests {
         assert!(inherited.can_access(&WindowAccessOrigin::opaque(inherited_identity)));
         assert!(!inherited.can_access(&WindowAccessOrigin::opaque(distinct_identity)));
         assert!(!inherited.can_access(&WindowAccessOrigin::Opaque { identity: None }));
+        assert!(inherited.is_same_origin(&WindowAccessOrigin::opaque(inherited_identity)));
+        assert!(!inherited.is_same_origin(&WindowAccessOrigin::opaque(distinct_identity)));
+        assert!(!inherited.is_same_origin(&WindowAccessOrigin::Opaque { identity: None }));
+    }
+
+    #[test]
+    fn same_origin_compares_tuples_without_document_domain_relaxation() {
+        let origin = |url: &str, domain: Option<&str>| {
+            WindowAccessOrigin::from_serialized_origin(url.to_owned(), domain.map(str::to_owned))
+                .unwrap()
+        };
+        let parent = origin("https://a.example.test:8443", Some("example.test"));
+        let same = origin("https://a.example.test:8443", None);
+        let relaxed = origin("https://b.example.test:9443", Some("example.test"));
+        assert!(parent.is_same_origin(&same));
+        assert!(parent.can_access(&relaxed));
+        assert!(!parent.is_same_origin(&relaxed));
+        assert!(!parent.is_same_origin(&origin("http://a.example.test:8443", None)));
+        assert!(!parent.is_same_origin(&origin("https://a.example.test:9443", None)));
     }
 
     #[test]

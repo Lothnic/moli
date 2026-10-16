@@ -195,8 +195,9 @@ fn window_named_access_value<'s>(
     // Browsing-context names win over document id/name exposure, matching the
     // Window named access ordering. Both paths are fast miss paths now: child
     // contexts return immediately when empty, and document name lookup is indexed.
-    if let Some(handle) =
-        unsafe { &*host_ptr }.child_browsing_context_named_child_handle(child_handle, &key_name)
+    let named_child = host.child_browsing_context_named_object_handle(child_handle, &key_name);
+    if let Some(handle) = named_child
+        && host.child_browsing_context_child_is_same_origin(child_handle, handle)
         && let Some(window) =
             unsafe { &mut *host_ptr }.child_browsing_context_window_wrapper(scope, handle)
     {
@@ -208,6 +209,13 @@ fn window_named_access_value<'s>(
         None => host.document_handle(),
     };
     let handles = window_named_item_handles(host.dom_host(), document, &key_name);
+    if !handles.is_empty()
+        && let Some(handle) = named_child
+        && let Some(window) =
+            unsafe { &mut *host_ptr }.child_browsing_context_window_wrapper(scope, handle)
+    {
+        return Some(window.into());
+    }
     if moli_trace::window_message_trace_enabled() {
         tracing::info!(
             target: "moli_window_message_trace",

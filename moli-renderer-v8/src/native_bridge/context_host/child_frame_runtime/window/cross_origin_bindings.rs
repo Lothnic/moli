@@ -125,10 +125,7 @@ impl<'s> WindowTarget<'s> {
         })
     }
 
-    fn children(&self, scope: &mut v8::PinScope<'s, '_>) -> Vec<DomHandle> {
-        if self.closed {
-            return Vec::new();
-        }
+    fn sync_children(&self, scope: &mut v8::PinScope<'s, '_>) {
         let host = unsafe { &mut *self.host };
         let document = match self.child {
             Some(handle) => host.child_browsing_context_document_handle(handle),
@@ -138,6 +135,14 @@ impl<'s> WindowTarget<'s> {
         if let Some(document) = document {
             host.sync_child_browsing_context_subtree(scope, document);
         }
+    }
+
+    fn children(&self, scope: &mut v8::PinScope<'s, '_>) -> Vec<DomHandle> {
+        if self.closed {
+            return Vec::new();
+        }
+        self.sync_children(scope);
+        let host = unsafe { &*self.host };
         match self.child {
             Some(handle) => host
                 .child_browsing_context_direct_host_handles(handle)
@@ -162,10 +167,10 @@ impl<'s> WindowTarget<'s> {
         scope: &mut v8::PinScope<'s, '_>,
         name: &str,
     ) -> Option<v8::Local<'s, v8::Object>> {
-        self.children(scope);
-        if self.closed {
+        if self.closed || name.is_empty() {
             return None;
         }
+        self.sync_children(scope);
         let host = unsafe { &mut *self.host };
         let handle = host.child_browsing_context_named_child_handle(self.child, name)?;
         host.child_browsing_context_window_proxy_for_top(scope, handle)
