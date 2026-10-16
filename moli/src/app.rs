@@ -9,6 +9,7 @@ use std::{
     path::Path,
     process::ExitCode,
     sync::Arc,
+    time::Duration,
 };
 
 use crate::{
@@ -27,6 +28,8 @@ use moli_fetch::{NetworkFetchFailureContext, Request};
 use moli_protocol_server::ProtocolServer;
 
 use self::readiness::ReadinessPlan;
+
+const READINESS_FAILURE_DIAGNOSTICS_TIMEOUT: Duration = Duration::from_millis(250);
 
 pub async fn run_from_env() -> Result<()> {
     let cli = Cli::parse_from(normalize_args_for_compat(std::env::args_os()));
@@ -154,13 +157,28 @@ pub async fn run_cli_with_config<W: Write>(
             }
             .await;
             if let Err(error) = readiness_result {
-                if (args.fail || args.fail_with_body)
-                    && let Err(snapshot_error) = page.page_diagnostics_snapshot_async().await
-                {
-                    tracing::debug!(
-                        error = %snapshot_error,
-                        "failed to refresh main-document state after readiness failure"
-                    );
+                if args.fail || args.fail_with_body {
+                    // Keep diagnostics bounded so Page close can interrupt a
+                    // renderer still occupied by the failed readiness script.
+                    match tokio::time::timeout(
+                        READINESS_FAILURE_DIAGNOSTICS_TIMEOUT,
+                        page.page_diagnostics_snapshot_async(),
+                    )
+                    .await
+                    {
+                        Ok(Ok(_)) => {}
+                        Ok(Err(snapshot_error)) => {
+                            tracing::debug!(
+                                error = %snapshot_error,
+                                "failed to refresh main-document state after readiness failure"
+                            );
+                        }
+                        Err(_) => {
+                            tracing::debug!(
+                                "timed out refreshing main-document state after readiness failure; using cached state"
+                            );
+                        }
+                    }
                 }
                 let error = with_http_status_context(
                     error,

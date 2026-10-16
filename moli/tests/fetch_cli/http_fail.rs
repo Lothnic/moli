@@ -1,4 +1,4 @@
-use anyhow::{Result, ensure};
+use anyhow::{Context, Result, ensure};
 use axum::{
     Router,
     extract::Path,
@@ -727,6 +727,59 @@ async fn http_failure_modes_report_status_when_page_readiness_times_out() -> Res
                 );
                 assert_eq!(stderr.lines().count(), 2, "{stderr}");
             }
+        }
+    }
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn http_failure_modes_bound_diagnostics_for_busy_wait_scripts() -> Result<()> {
+    let server = HttpFailureFixture::spawn().await?;
+    for status in [200, 403] {
+        let path = format!("/status/{status}");
+        for flag in [None, Some("--fail"), Some("--fail-with-body")] {
+            let mut command = Command::new(env!("CARGO_BIN_EXE_moli"));
+            command
+                .env("MOLI_LAYOUT", "false")
+                .args([
+                    "fetch",
+                    "--http-no-proxy",
+                    "*",
+                    "--redirect-wait-ms",
+                    "0",
+                    "--wait-until",
+                    "load",
+                    "--timeout",
+                    "1000",
+                    "--wait-script",
+                    "() => { for (;;) {} }",
+                ])
+                .args(flag)
+                .arg(format!("{}{path}", server.base_url));
+            let output = tokio::task::spawn_blocking(move || {
+                run_command_with_process_timeout(command, Duration::from_secs(4))
+            })
+            .await?
+            .with_context(|| format!("busy readiness script: status {status}, flag {flag:?}"))?;
+            if status == 403 && flag == Some("--fail") {
+                server.assert_http_failure(&output, status, &path);
+            } else {
+                assert_eq!(output.status.code(), Some(1), "{output:?}");
+            }
+            assert!(output.stdout.is_empty(), "{output:?}");
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            assert!(
+                stderr.contains(
+                    "fetch readiness timed out after 1000 ms while waiting for a script to become truthy"
+                ),
+                "{stderr}"
+            );
+            assert_eq!(
+                stderr.contains("HTTP status 403"),
+                status == 403 && flag.is_some(),
+                "{stderr}"
+            );
+            assert_eq!(stderr.lines().count(), 2, "{stderr}");
         }
     }
     Ok(())
