@@ -122,6 +122,7 @@ pub(crate) mod webidl;
 #[cfg(test)]
 mod webidl_callback_source_boundary_tests;
 mod webidl_iterator;
+mod webvtt;
 mod window_document_identity;
 mod window_host;
 mod window_webidl_callback;
