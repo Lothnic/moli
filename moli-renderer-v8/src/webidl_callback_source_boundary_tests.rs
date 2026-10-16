@@ -94,7 +94,6 @@ const DIRECT_V8_CALL_ALLOWLIST: &[AllowedDirectCallFile] = &[
         1,
         DirectCallOwner::BrowserAlgorithm,
     ),
-    allowed("blob.rs", 1, DirectCallOwner::BrowserAlgorithm),
     allowed(
         "context_bootstrap/animation_runtime.rs",
         1,
