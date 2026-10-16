@@ -662,10 +662,12 @@ where
 
     fn anonymous_style(
         &mut self,
-        _owner: N,
-        parent: &ResolvedLayoutStyle,
+        context: crate::LayoutAnonymousStyleContext<'_, N>,
         display: crate::LayoutDisplay,
     ) -> Result<ResolvedLayoutStyle, LayoutError> {
-        Ok(ResolvedLayoutStyle::anonymous_from(parent, display))
+        Ok(ResolvedLayoutStyle::anonymous_from(
+            context.parent_style,
+            display,
+        ))
     }
 }

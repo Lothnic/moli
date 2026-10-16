@@ -5,9 +5,10 @@ use std::{fmt::Debug, hash::Hash, sync::Arc};
 use taffy::Size;
 
 use crate::{
-    LayoutAnonymousReason, LayoutBoxId, LayoutBoxKind, LayoutDisplay, LayoutElementCategory,
-    LayoutElementSemantics, LayoutError, LayoutFormControlKind, LayoutInputControlKind,
-    LayoutStyleResolver, LayoutWorld, ResolvedLayoutStyle, replaced::ReplacedContext,
+    LayoutAnonymousReason, LayoutAnonymousStyleContext, LayoutBoxId, LayoutBoxKind, LayoutDisplay,
+    LayoutElementCategory, LayoutElementSemantics, LayoutError, LayoutFormControlKind,
+    LayoutInputControlKind, LayoutStyleResolver, LayoutWorld, ResolvedLayoutStyle,
+    replaced::ReplacedContext,
 };
 
 pub(crate) fn prepare_form_controls<N, R>(
@@ -52,8 +53,7 @@ where
             None
         };
         let editor_style = styles.anonymous_style(
-            owner,
-            &world.boxes[control.index()].style,
+            LayoutAnonymousStyleContext::new(owner, &world.boxes[control.index()].style),
             LayoutDisplay::Block,
         )?;
         let selection = world.boxes[control.index()].text_selection;

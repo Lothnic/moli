@@ -3,8 +3,9 @@ use std::{cell::RefCell, rc::Rc};
 use crate::{
     document_runtime::DomHandle,
     style_engine::{
-        FullStyleWorldSnapshot, PreparedStyleWorldUpdate, StyleObservationSnapshot, StyleViewport,
-        StyleWorldUpdatePlan, StyloComputedStyleSnapshot, StyloStyleEnvironment,
+        FullStyleWorldSnapshot, OwnedStyleSourceDocumentContext, PreparedStyleWorldUpdate,
+        StyleObservationSnapshot, StyleViewport, StyleWorldUpdatePlan, StyloComputedStyleSnapshot,
+        StyloStyleEnvironment,
     },
 };
 
@@ -67,6 +68,8 @@ impl StyleComputationContext {
 /// query needs it, then shared by every read in this observation.
 pub(crate) struct StyleObservation<'a> {
     runtime: &'a JsContextHost,
+    #[cfg(test)]
+    read_count: usize,
     /// `None` resolves one stable context per touched Document. Layout and
     /// detached CSSOM snapshots use `Some` to pin an exact caller-owned
     /// viewport instead.
@@ -269,6 +272,8 @@ impl<'a> StyleObservation<'a> {
     ) -> Self {
         Self {
             runtime,
+            #[cfg(test)]
+            read_count: 0,
             fixed_context,
             tracks_persistent_world,
             sizing_target,
@@ -283,7 +288,16 @@ impl<'a> StyleObservation<'a> {
         self.runtime
     }
 
+    #[cfg(test)]
+    pub(crate) const fn read_count_for_test(&self) -> usize {
+        self.read_count
+    }
+
     pub(crate) fn read(&mut self, handle: DomHandle) -> ComputedStyleRead<'a> {
+        #[cfg(test)]
+        {
+            self.read_count += 1;
+        }
         let read_document = self
             .fixed_context
             .unwrap_or_default()
@@ -415,6 +429,45 @@ pub(crate) struct ComputedStyleRead<'a> {
     pub(super) context: StyleComputationContext,
     pub(super) observation_inputs: Rc<StyleObservationInputs<'a>>,
     pub(super) stylo_style: Option<StyloComputedStyleSnapshot>,
+}
+
+/// A document world already updated by the pass's initial style read. Layout
+/// remains synchronous; subsequent anonymous boxes only inherit and cascade.
+pub(crate) struct PreparedAnonymousStyleContext<'a> {
+    runtime: &'a JsContextHost,
+    document: DomHandle,
+    document_context: OwnedStyleSourceDocumentContext,
+}
+
+impl<'a> PreparedAnonymousStyleContext<'a> {
+    pub(super) fn new(runtime: &'a JsContextHost, document: DomHandle) -> Self {
+        Self {
+            runtime,
+            document,
+            document_context: runtime.style_source_document_context_for_read_document(document),
+        }
+    }
+
+    pub(crate) const fn document(&self) -> DomHandle {
+        self.document
+    }
+
+    pub(crate) fn computed_values(
+        &self,
+        owner: DomHandle,
+        parent_style: &style::properties::ComputedValues,
+        anonymous_kind: crate::style_engine::StyloAnonymousBoxKind,
+    ) -> Option<style::servo_arc::Arc<style::properties::ComputedValues>> {
+        self.runtime
+            .computed_anonymous_style_snapshot_from_current_observation(
+                owner,
+                parent_style,
+                anonymous_kind,
+                &self.document_context,
+                self.document,
+            )
+            .map(|snapshot| snapshot.computed_values())
+    }
 }
 
 #[cfg(test)]

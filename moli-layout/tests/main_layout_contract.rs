@@ -141,11 +141,13 @@ impl LayoutStyleResolver<usize> for FixtureStyles {
 
     fn anonymous_style(
         &mut self,
-        _owner: usize,
-        parent: &ResolvedLayoutStyle,
+        context: moli_layout::LayoutAnonymousStyleContext<'_, usize>,
         display: LayoutDisplay,
     ) -> Result<ResolvedLayoutStyle, LayoutError> {
-        Ok(ResolvedLayoutStyle::anonymous_from(parent, display))
+        Ok(ResolvedLayoutStyle::anonymous_from(
+            context.parent_style,
+            display,
+        ))
     }
 }
 

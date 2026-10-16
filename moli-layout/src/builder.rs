@@ -13,10 +13,10 @@ use std::{
 };
 
 use crate::{
-    LayoutAnonymousReason, LayoutBoxId, LayoutBoxKind, LayoutCapabilityDiagnostic, LayoutDisplay,
-    LayoutElementCategory, LayoutElementSemantics, LayoutError, LayoutPseudo, LayoutSource,
-    LayoutSourceKind, LayoutStyleResolver, LayoutWorld, ResolvedLayoutPseudoStyle,
-    ResolvedLayoutStyle,
+    LayoutAnonymousReason, LayoutAnonymousStyleContext, LayoutBoxId, LayoutBoxKind,
+    LayoutCapabilityDiagnostic, LayoutDisplay, LayoutElementCategory, LayoutElementSemantics,
+    LayoutError, LayoutPseudo, LayoutSource, LayoutSourceKind, LayoutStyleResolver, LayoutWorld,
+    ResolvedLayoutPseudoStyle, ResolvedLayoutStyle,
     form::form_control_context,
     replaced::ReplacedContext,
     style::{InlineWhiteSpaceCollapse, LayoutOverflowMode},
@@ -885,9 +885,10 @@ where
             run.clear();
             return Ok(());
         }
-        let style = self
-            .styles
-            .anonymous_style(owner, parent_style, LayoutDisplay::Block)?;
+        let style = self.styles.anonymous_style(
+            LayoutAnonymousStyleContext::new(owner, parent_style),
+            LayoutDisplay::Block,
+        )?;
         let mut anonymous = LayoutWorld::new_box(
             None,
             Some(owner),
@@ -1146,7 +1147,10 @@ where
             return Ok(last);
         }
 
-        let style = self.styles.anonymous_style(owner, parent_style, display)?;
+        let style = self.styles.anonymous_style(
+            LayoutAnonymousStyleContext::new(owner, parent_style),
+            display,
+        )?;
         let id = world.allocate(LayoutWorld::new_box(
             None,
             Some(owner),

@@ -482,6 +482,7 @@ impl ResolvedLayoutTransform {
 /// invalid.
 #[derive(Clone)]
 pub struct ResolvedLayoutStyle {
+    source_origin: Option<crate::LayoutStyleOrigin>,
     pub(crate) computed: Option<ServoArc<ComputedValues>>,
     pub(crate) taffy: Style<Atom>,
     preferred_aspect_ratio: PreferredAspectRatio,
@@ -865,6 +866,7 @@ impl ResolvedLayoutStyle {
             };
         }
         Self {
+            source_origin: None,
             computed: Some(computed),
             taffy,
             preferred_aspect_ratio,
@@ -942,6 +944,7 @@ impl ResolvedLayoutStyle {
         };
         let sticky_inset = taffy.inset;
         Self {
+            source_origin: None,
             computed: None,
             taffy,
             preferred_aspect_ratio,
@@ -1165,6 +1168,17 @@ impl ResolvedLayoutStyle {
     /// Synthetic construction tests deliberately return `None` here.
     pub fn stylo_computed_values(&self) -> Option<&ServoArc<ComputedValues>> {
         self.computed.as_ref()
+    }
+
+    /// Binds a renderer projection to its pass and source. Cloning and
+    /// deriving anonymous/text styles preserve this identity.
+    pub fn with_source_origin(mut self, origin: crate::LayoutStyleOrigin) -> Self {
+        self.source_origin = Some(origin);
+        self
+    }
+
+    pub const fn source_origin(&self) -> Option<crate::LayoutStyleOrigin> {
+        self.source_origin
     }
 
     pub fn background_color(&self) -> PaintColor {
@@ -1979,6 +1993,7 @@ impl ResolvedLayoutStyle {
 
     pub(crate) fn text_leaf_from(parent: &Self) -> Self {
         Self {
+            source_origin: parent.source_origin,
             computed: parent.computed.clone(),
             taffy: Style {
                 display: TaffyDisplay::Block,
@@ -2046,6 +2061,7 @@ impl ResolvedLayoutStyle {
     /// Stylo allocation (primarily DOM-free tests and conservative fallback).
     pub fn anonymous_from(parent: &Self, display: LayoutDisplay) -> Self {
         Self {
+            source_origin: parent.source_origin,
             computed: parent.computed.clone(),
             taffy: Style {
                 display: taffy_display(display),

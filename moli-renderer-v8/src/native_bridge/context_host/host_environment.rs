@@ -1422,7 +1422,7 @@ impl JsContextHost {
         )
     }
 
-    fn style_source_document_context_for_read_document(
+    pub(crate) fn style_source_document_context_for_read_document(
         &self,
         read_document: DomHandle,
     ) -> OwnedStyleSourceDocumentContext {
@@ -1800,9 +1800,9 @@ impl JsContextHost {
         owner: DomHandle,
         parent_style: &style::properties::ComputedValues,
         anonymous_kind: crate::style_engine::StyloAnonymousBoxKind,
+        document_context: &OwnedStyleSourceDocumentContext,
         read_document: DomHandle,
     ) -> Option<crate::style_engine::StyloComputedStyleSnapshot> {
-        let document_context = self.style_source_document_context_for_read_document(read_document);
         self.style_engine
             .computed_anonymous_style_snapshot_from_current_observation(
                 self.dom_host(),
