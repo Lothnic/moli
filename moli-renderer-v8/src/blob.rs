@@ -223,9 +223,8 @@ pub(super) fn blob_text_callback<'s>(
         set_rejected_type_error_promise(scope, &mut rv, "Illegal invocation");
         return;
     }
-    let text = blob_bytes_from_object(scope, args.this())
-        .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
-        .unwrap_or_default();
+    let bytes = blob_bytes_from_object(scope, args.this()).unwrap_or_default();
+    let text = moli_encoding::decode_utf8(&bytes);
     let Some(value) = v8_string(scope, &text) else {
         rv.set(v8::undefined(scope).into());
         return;
