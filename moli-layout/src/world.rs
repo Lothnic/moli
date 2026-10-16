@@ -279,7 +279,6 @@ pub struct LayoutBox<N> {
     /// This is browser-owned canonical geometry rather than a retained Taffy
     /// object. It is frozen with the rest of the layout tree for CSSOM reads.
     pub(crate) resolved_grid_tracks: Option<LayoutResolvedGridTracks>,
-    pub(crate) cache: Cache,
     pub(crate) table_measure_cache: Option<Box<crate::table::TableMeasureCache>>,
     pub(crate) unrounded_layout: Layout,
     pub(crate) final_layout: Layout,
@@ -551,13 +550,6 @@ impl Default for ViewportLayoutState {
 }
 
 impl<N> LayoutBox<N> {
-    pub(crate) fn clear_layout_caches(&mut self) {
-        self.cache.clear();
-        if let Some(cache) = &mut self.table_measure_cache {
-            cache.clear();
-        }
-    }
-
     pub fn kind(&self) -> LayoutBoxKind {
         self.kind
     }
@@ -647,6 +639,11 @@ where
     N: Copy + Debug + Eq + Hash,
 {
     pub(crate) boxes: Vec<LayoutBox<N>>,
+    /// Pass-local numeric caches, created only for boxes with actual stores.
+    /// Flattened text boxes need no empty Taffy measurement arrays.
+    pub(crate) box_caches: Vec<Cache>,
+    /// Box-indexed lookup into compact cache storage; usize::MAX is absent.
+    pub(crate) box_cache_slots: Vec<usize>,
     pub(crate) source_mapping: HashMap<N, LayoutBoxId>,
     pub(crate) display_contents_mapping: HashMap<N, Vec<LayoutBoxId>>,
     pub(crate) root: LayoutBoxId,
@@ -674,6 +671,8 @@ where
     pub(crate) fn new(root: LayoutBox<N>, root_is_document_element: bool) -> Self {
         Self {
             boxes: vec![root],
+            box_caches: Vec::new(),
+            box_cache_slots: Vec::new(),
             source_mapping: HashMap::new(),
             display_contents_mapping: HashMap::new(),
             root: LayoutBoxId::from_index(0),
@@ -689,6 +688,47 @@ where
             numeric_layout_touched: Vec::new(),
             numeric_layout_touched_marks: vec![false],
         }
+    }
+
+    pub(crate) fn clear_layout_caches(&mut self, id: LayoutBoxId) {
+        if let Some(cache) = self
+            .box_cache_slots
+            .get(id.index())
+            .and_then(|slot| self.box_caches.get_mut(*slot))
+        {
+            cache.clear();
+        }
+        if let Some(cache) = &mut self.boxes[id.index()].table_measure_cache {
+            cache.clear();
+        }
+    }
+
+    pub(crate) fn numeric_cache(&self, id: LayoutBoxId) -> Option<&Cache> {
+        self.box_cache_slots
+            .get(id.index())
+            .and_then(|slot| self.box_caches.get(*slot))
+    }
+
+    pub(crate) fn numeric_cache_mut(&mut self, id: LayoutBoxId) -> &mut Cache {
+        self.box_cache_slots.resize(self.boxes.len(), usize::MAX);
+        let mut slot = self.box_cache_slots[id.index()];
+        if slot == usize::MAX {
+            if self.box_caches.is_empty() {
+                // Reserve without initializing caches for unvisited boxes.
+                // This is a hint, not an eligibility restriction: a caller
+                // may subsequently store any valid construction/numeric box.
+                let candidates = self
+                    .boxes
+                    .iter()
+                    .filter(|layout_box| !layout_box.inline_flattened)
+                    .count();
+                self.box_caches.reserve_exact(candidates);
+            }
+            slot = self.box_caches.len();
+            self.box_caches.push(Cache::new());
+            self.box_cache_slots[id.index()] = slot;
+        }
+        &mut self.box_caches[slot]
     }
 
     pub fn root(&self) -> LayoutBoxId {
@@ -1206,7 +1246,6 @@ where
             collapsed_table_border_part: false,
             inline_formatting_context: false,
             resolved_grid_tracks: None,
-            cache: Cache::new(),
             table_measure_cache: None,
             unrounded_layout: Layout::with_order(0),
             final_layout: Layout::with_order(0),

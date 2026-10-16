@@ -113,7 +113,7 @@ impl PreparedWorldLayout {
             }
             self.feedback_invalidation_marks[id.index()] = true;
             invalidated.push(id);
-            world.boxes[id.index()].clear_layout_caches();
+            world.clear_layout_caches(id);
             if let Some(parent) = world.boxes[id.index()].layout_parent {
                 self.feedback_invalidation_worklist.push(parent);
             }
@@ -138,8 +138,9 @@ pub(crate) fn prepare_world_layout<N>(
 where
     N: Copy + Debug + Eq + Hash,
 {
-    for layout_box in &mut world.boxes {
-        layout_box.clear_layout_caches();
+    for index in 0..world.boxes.len() {
+        world.clear_layout_caches(LayoutBoxId::from_index(index));
+        let layout_box = &mut world.boxes[index];
         layout_box.unrounded_layout = Layout::with_order(0);
         layout_box.final_layout = Layout::with_order(0);
         layout_box.layout_parent = None;
@@ -1720,13 +1721,16 @@ where
         if self.is_viewport_taffy_node(node_id) {
             self.viewport_layout.cache.get(inputs)
         } else {
-            self.boxes[LayoutBoxId::from_taffy(node_id).index()]
-                .cache
-                .get(inputs)
+            self.numeric_cache(LayoutBoxId::from_taffy(node_id))
+                .and_then(|cache| cache.get(inputs))
         }
     }
 
     fn cache_store(&mut self, node_id: NodeId, inputs: &LayoutInput, output: LayoutOutput) {
+        if inputs.run_mode == RunMode::PerformHiddenLayout {
+            // Taffy's store ignores this mode; avoid allocating an empty cache.
+            return;
+        }
         if self.is_viewport_taffy_node(node_id) {
             self.viewport_layout.cache.store(inputs, output);
         } else {
@@ -1737,7 +1741,7 @@ where
                 // first-class overflow dependencies.
                 self.record_numeric_layout_touch(id);
             }
-            self.boxes[id.index()].cache.store(inputs, output);
+            self.numeric_cache_mut(id).store(inputs, output);
         }
     }
 
@@ -1745,7 +1749,7 @@ where
         if self.is_viewport_taffy_node(node_id) {
             self.viewport_layout.cache.clear();
         } else {
-            self.boxes[LayoutBoxId::from_taffy(node_id).index()].clear_layout_caches();
+            self.clear_layout_caches(LayoutBoxId::from_taffy(node_id));
         }
     }
 }
@@ -3198,6 +3202,9 @@ fn measure_text(
             .unwrap_or(line_height.max(0.0) * line_count),
     }
 }
+
+#[cfg(test)]
+mod cache_storage_tests;
 
 #[cfg(test)]
 mod tests {
