@@ -26,8 +26,8 @@ use moli_core::page::{
     RendererDocumentSourcedSameDocumentNavigation,
     RendererDocumentSourcedTopLevelLocationNavigation, RendererLayoutMetrics,
     RendererPendingTopLevelHistoryTraversal, RendererPendingWindowOpenEvent,
-    RendererScreenshotClip, RendererScreenshotFormat, RendererScreenshotPurpose,
-    RendererScreenshotRegion, RendererSetDocumentContentResult, RendererVisualStateToken,
+    RendererScreenshotClip, RendererScreenshotFormat, RendererScreenshotRegion,
+    RendererSetDocumentContentResult, RendererVisualStateToken,
 };
 use moli_core::{RendererDocumentTitleChanged, RendererRuntimeCommandCausalIdentity};
 use serde::Deserialize;

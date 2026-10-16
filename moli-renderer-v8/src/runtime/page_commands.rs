@@ -1418,10 +1418,9 @@ fn renderer_page_command_action_barrier(
         {
             None
         }
-        RendererPageCommand::CaptureScreenshot(request) => Some(match request.purpose {
-            RendererScreenshotPurpose::Screenshot => moli_action_window::ActionBarrier::Screenshot,
-            RendererScreenshotPurpose::Print { .. } => moli_action_window::ActionBarrier::Explicit,
-        }),
+        RendererPageCommand::CaptureScreenshot(_) => {
+            Some(moli_action_window::ActionBarrier::Screenshot)
+        }
         RendererPageCommand::CaptureScreencastFrame(_) => {
             Some(moli_action_window::ActionBarrier::Screencast)
         }

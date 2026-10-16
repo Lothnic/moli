@@ -192,7 +192,6 @@ async fn bounded_viewport_clip_keeps_root_controls_while_page_clip_omits_them() 
         &page,
         super::RendererCaptureScreenshotRequest {
             base_background_color: [255; 4],
-            purpose: super::RendererScreenshotPurpose::Screenshot,
             format: super::RendererScreenshotFormat::Png,
             quality: 100,
             region: super::RendererScreenshotRegion::ViewportClip(clip),
@@ -222,7 +221,6 @@ async fn bounded_viewport_clip_keeps_root_controls_while_page_clip_omits_them() 
         &page,
         super::RendererCaptureScreenshotRequest {
             base_background_color: [255; 4],
-            purpose: super::RendererScreenshotPurpose::Screenshot,
             format: super::RendererScreenshotFormat::Png,
             quality: 100,
             region: super::RendererScreenshotRegion::PageClip(clip),

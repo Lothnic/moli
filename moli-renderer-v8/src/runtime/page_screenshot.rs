@@ -115,15 +115,6 @@ pub enum RendererScreenshotFormat {
     Jpeg,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum RendererScreenshotPurpose {
-    Screenshot,
-    /// Pixel capture under print media, independent of native PDF output.
-    Print {
-        print_background: bool,
-    },
-}
-
 /// A CDP page-coordinate clip. Validation remains at the renderer boundary so
 /// every protocol frontend shares the same finite/range checks.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -148,7 +139,6 @@ pub enum RendererScreenshotRegion {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct RendererCaptureScreenshotRequest {
-    pub purpose: RendererScreenshotPurpose,
     pub format: RendererScreenshotFormat,
     pub quality: u8,
     pub region: RendererScreenshotRegion,
@@ -208,7 +198,6 @@ pub enum RendererCaptureScreencastFrameReply {
 impl RendererCaptureScreenshotRequest {
     pub fn viewport_png() -> Self {
         Self {
-            purpose: RendererScreenshotPurpose::Screenshot,
             format: RendererScreenshotFormat::Png,
             quality: 100,
             region: RendererScreenshotRegion::Viewport,
@@ -221,44 +210,23 @@ impl RendererCaptureScreenshotRequest {
 }
 
 impl PageVm {
-    /// Captures an explicit screenshot or print raster. These demands always
-    /// execute a fresh paint pass and never carry screencast state.
+    /// Captures an explicit screenshot. These demands always execute a fresh
+    /// paint pass and never carry screencast state.
     pub(super) fn capture_screenshot(
         &mut self,
         request: RendererCaptureScreenshotRequest,
     ) -> anyhow::Result<RendererCaptureScreenshotReply> {
-        let barrier = match request.purpose {
-            RendererScreenshotPurpose::Screenshot => moli_action_window::ActionBarrier::Screenshot,
-            RendererScreenshotPurpose::Print { .. } => moli_action_window::ActionBarrier::Explicit,
-        };
-        self.flush_page_action_window(barrier)?;
+        self.flush_page_action_window(moli_action_window::ActionBarrier::Screenshot)?;
         let paint_capture = request
             .paint_capture_request(self.document_settings.viewport_surface.unwrap_or_default())?;
-        let restore_media = if matches!(request.purpose, RendererScreenshotPurpose::Print { .. })
-            && self.document_settings.emulated_media.media.is_none()
-        {
-            let previous = self.document_settings.emulated_media.clone();
-            let mut print = previous.clone();
-            print.media = Some("print".to_owned());
-            self.set_emulated_media(&print)?;
-            Some(previous)
-        } else {
-            None
-        };
-        let result = self.capture_image(
+        self.capture_image(
             request.format,
             request.quality,
             request.optimize_for_speed,
             paint_capture,
-            match request.purpose {
-                RendererScreenshotPurpose::Screenshot => moli_layout::LayoutFlushReason::Screenshot,
-                RendererScreenshotPurpose::Print { .. } => moli_layout::LayoutFlushReason::Print,
-            },
-        );
-        if let Some(previous) = restore_media {
-            self.set_emulated_media(&previous)?;
-        }
-        result.map(RendererImageCaptureOutcome::into_screenshot_reply)
+            moli_layout::LayoutFlushReason::Screenshot,
+        )
+        .map(RendererImageCaptureOutcome::into_screenshot_reply)
     }
 
     /// Polls one screencast subscription. Only this request accepts a known
@@ -512,10 +480,7 @@ impl RendererCaptureScreenshotRequest {
         };
         Ok(PaintCaptureRequest {
             region,
-            include_backgrounds: match self.purpose {
-                RendererScreenshotPurpose::Print { print_background } => print_background,
-                RendererScreenshotPurpose::Screenshot => true,
-            },
+            include_backgrounds: true,
             include_viewport_controls,
             base_background_color: paint_background_color(self.base_background_color),
             max_width: self.max_width,

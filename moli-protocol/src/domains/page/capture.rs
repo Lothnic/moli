@@ -446,7 +446,6 @@ pub(super) fn renderer_screenshot_request(
         None => RendererScreenshotRegion::Viewport,
     };
     Ok(RendererCaptureScreenshotRequest {
-        purpose: RendererScreenshotPurpose::Screenshot,
         base_background_color,
         format,
         quality: command.quality.unwrap_or(80),
