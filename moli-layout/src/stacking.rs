@@ -113,7 +113,7 @@ fn emit_context<N>(
         kind: UnitKind::Contents,
         sequence: next_sequence(sequence),
     });
-    if world.boxes[root.index()].collapsed_table_borders.is_some() {
+    if world.collapsed_table_borders.contains_key(&root) {
         collection.table_collapsed_borders.push(PaintUnit {
             id: root,
             kind: UnitKind::TableCollapsedBorders,
@@ -240,7 +240,7 @@ fn collect_subtree<N>(
     for child in ordered_children(world, id) {
         collect_subtree(world, child, descendant_group, sequence, collection);
     }
-    if layout_box.collapsed_table_borders.is_some() {
+    if world.collapsed_table_borders.contains_key(&id) {
         push_unit(
             collection,
             group,

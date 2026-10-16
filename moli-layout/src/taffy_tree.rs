@@ -138,6 +138,7 @@ pub(crate) fn prepare_world_layout<N>(
 where
     N: Copy + Debug + Eq + Hash,
 {
+    world.resolved_grid_tracks.clear();
     for index in 0..world.boxes.len() {
         world.clear_layout_caches(LayoutBoxId::from_index(index));
         let layout_box = &mut world.boxes[index];
@@ -147,7 +148,6 @@ where
         layout_box.layout_children.clear();
         layout_box.positioned_containing_block = None;
         layout_box.inline_static_position = None;
-        layout_box.resolved_grid_tracks = None;
     }
 
     world.viewport_layout.children.clear();
@@ -1880,8 +1880,8 @@ where
         else {
             return;
         };
-        self.boxes[LayoutBoxId::from_taffy(node_id).index()].resolved_grid_tracks =
-            Some(resolved_grid_tracks);
+        self.resolved_grid_tracks
+            .insert(LayoutBoxId::from_taffy(node_id), resolved_grid_tracks);
     }
 }
 
