@@ -1942,6 +1942,11 @@ pub(crate) fn prepare_inline_contexts<N>(
 ) where
     N: Copy + Debug + Eq + Hash,
 {
+    let profile_started = moli_trace::cpu_profile_enabled().then(std::time::Instant::now);
+    let mut collection_elapsed = std::time::Duration::ZERO;
+    let mut preparation_elapsed = std::time::Duration::ZERO;
+    let mut prepared_context_count = 0usize;
+    let mut text_unit_count = 0usize;
     for layout_box in &mut world.boxes {
         layout_box.inline_layout = None;
         layout_box.inline_context_owner = None;
@@ -1960,20 +1965,42 @@ pub(crate) fn prepare_inline_contexts<N>(
         if world.boxes[owner.index()].inline_flattened {
             continue;
         }
+        let collection_started = profile_started.map(|_| std::time::Instant::now());
         let input = collect_inline_input(world, owner);
+        if let Some(started) = collection_started {
+            collection_elapsed += started.elapsed();
+            text_unit_count += input.units.len();
+        }
         if input.units.is_empty()
             && input.objects.is_empty()
             && world.boxes[owner.index()].text_selection.is_none()
         {
             continue;
         }
+        let preparation_started = profile_started.map(|_| std::time::Instant::now());
         let parley = services.parley_mut();
         let context = input.build(world, parley);
+        if let Some(started) = preparation_started {
+            preparation_elapsed += started.elapsed();
+            prepared_context_count += 1;
+        }
         world.boxes[owner.index()].inline_layout = Some(context);
         initialized = true;
     }
     if initialized {
         services.text_layout_passes = services.text_layout_passes.saturating_add(1);
+    }
+    if let Some(started) = profile_started {
+        tracing::info!(
+            target: "moli_cpu_profile",
+            stage = "layout_inline_preparation",
+            root = ?world.boxes[world.root().index()].source(),
+            total_us = started.elapsed().as_micros(),
+            collection_us = collection_elapsed.as_micros(),
+            preparation_us = preparation_elapsed.as_micros(),
+            prepared_context_count,
+            text_unit_count,
+        );
     }
 }
 
