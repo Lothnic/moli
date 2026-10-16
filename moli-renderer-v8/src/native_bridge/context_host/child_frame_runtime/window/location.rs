@@ -1,7 +1,23 @@
 use super::*;
+#[cfg(test)]
+mod tests;
+
 const LOCATION: &str = "__moliCrossOriginLocationObject";
 const TARGET_WINDOW: &str = "__moliCrossOriginLocationWindow";
 const WINDOW_LOCATION_SLOT: &str = "__moliWindowLocation";
+
+pub(super) fn set_slot(
+    scope: &mut v8::PinScope<'_, '_>,
+    object: v8::Local<'_, v8::Object>,
+    slot: &str,
+    value: v8::Local<'_, v8::Value>,
+) -> Option<()> {
+    let key = crate::util::private_key(scope, slot)?;
+    object
+        .set_private(scope, key, value)
+        .filter(|set| *set)
+        .map(|_| ())
+}
 
 fn ensure_shared_location<'s>(
     scope: &mut v8::PinScope<'s, '_>,
@@ -13,19 +29,10 @@ fn ensure_shared_location<'s>(
     {
         return Some(location);
     }
-    let target = new_null_prototype_object(scope);
-    let marker = v8::Boolean::new(scope, true).into();
-    set_private_value(scope, target, CROSS_ORIGIN_LOCATION_PROXY_SLOT, marker);
-    set_private_value(scope, target, TARGET_WINDOW, window.into());
-    install_cross_origin_location_keys(scope, target)?;
-    let location = wrap_cross_origin_location_proxy(scope, target)?;
-    set_private_value(
-        scope,
-        target,
-        CROSS_ORIGIN_LOCATION_PROXY_SELF_SLOT,
-        location.into(),
-    );
-    set_private_value(scope, anchor, LOCATION, location.into());
+    let target = new_cross_origin_location_proxy_target(scope)?;
+    set_slot(scope, target, TARGET_WINDOW, window.into())?;
+    let location = initialize_cross_origin_location_proxy(scope, target)?;
+    set_slot(scope, anchor, LOCATION, location.into())?;
     Some(location)
 }
 
