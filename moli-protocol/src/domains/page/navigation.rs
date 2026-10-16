@@ -1452,11 +1452,7 @@ fn start_top_level_same_document_navigate(
     result_payload: Value,
     replace_current: bool,
 ) -> NavigateCommandStart {
-    let Some(page) = conn
-        .runtime_session_owner_slot_mut_for_owner(owner)
-        .ok()
-        .and_then(|slot| slot.loaded_page_mut())
-    else {
+    let Some(page) = conn.loaded_page_mut_for_owner(owner) else {
         return NavigateCommandStart::CompletePlan(CommandOutputPlan::error(
             -32000,
             "NoDocumentLoaded",
@@ -1513,11 +1509,7 @@ fn start_child_frame_navigate_command(
             "NoDocumentLoaded",
         ));
     };
-    let Some(page) = conn
-        .runtime_session_owner_slot_mut_for_owner(owner)
-        .ok()
-        .and_then(|slot| slot.loaded_page_mut())
-    else {
+    let Some(page) = conn.loaded_page_mut_for_owner(owner) else {
         return NavigateCommandStart::CompletePlan(CommandOutputPlan::error(
             -32000,
             "NoDocumentLoaded",
@@ -1764,7 +1756,6 @@ fn start_same_document_history_traversal_command(
 ) -> PageCommandTaskStep {
     let page = conn
         .runtime_session_owner_slot_mut_for_owner(&fallback.owner)
-        .ok()
         .and_then(|slot| slot.loaded_page())
         .ok_or_else(|| anyhow::anyhow!("TargetNotLoaded"));
     let page = match page {
@@ -1810,9 +1801,7 @@ pub(super) fn complete_pending_same_document_history_traversal_command(
         }
     };
     let result = conn
-        .runtime_session_owner_slot_mut_for_owner(&fallback.owner)
-        .ok()
-        .and_then(|slot| slot.loaded_page_mut())
+        .loaded_page_mut_for_owner(&fallback.owner)
         .ok_or_else(|| anyhow::anyhow!("TargetNotLoaded"))
         .and_then(|page| page.finish_top_level_history_traversal_by_delta(completion));
     match result {
@@ -2502,11 +2491,7 @@ pub(super) fn try_start_reset_navigation_history_command(
         }
     }
     let pending = {
-        let Some(page) = conn
-            .runtime_session_owner_slot_mut(cmd.session_id)
-            .ok()
-            .and_then(|slot| slot.loaded_page_mut())
-        else {
+        let Some(page) = conn.loaded_page_mut_for_session_owner(cmd.session_id) else {
             return PageCommandTaskStep::Complete(CommandOutputPlan::error(
                 -32000,
                 "NoDocumentLoaded",
@@ -2540,11 +2525,7 @@ pub(super) fn complete_reset_navigation_history_command(
             return PageCommandTaskStep::Complete(CommandOutputPlan::error(-32000, message));
         }
     };
-    let Some(page) = conn
-        .runtime_session_owner_slot_mut_for_owner(owner)
-        .ok()
-        .and_then(|slot| slot.loaded_page_mut())
-    else {
+    let Some(page) = conn.loaded_page_mut_for_owner(owner) else {
         return PageCommandTaskStep::Complete(CommandOutputPlan::error(-32000, "NoDocumentLoaded"));
     };
     match page.finish_reset_navigation_history(completion) {
@@ -3147,11 +3128,7 @@ pub(super) async fn complete_pending_child_frame_navigate_command(
         }
     };
     let (navigated, renderer_output) = {
-        let Some(page) = conn
-            .runtime_session_owner_slot_mut_for_owner(owner)
-            .ok()
-            .and_then(|slot| slot.loaded_page_mut())
-        else {
+        let Some(page) = conn.loaded_page_mut_for_owner(owner) else {
             return PageCommandTaskStep::Complete(CommandOutputPlan::error(-31998, "NoSuchTarget"));
         };
         match page.finish_child_frame_navigation_to_url_command_turn(completion) {
@@ -3234,11 +3211,7 @@ pub(super) async fn complete_pending_same_document_navigate_command(
         }
     };
     let (navigated, output) = {
-        let Some(page) = conn
-            .runtime_session_owner_slot_mut_for_owner(owner)
-            .ok()
-            .and_then(|slot| slot.loaded_page_mut())
-        else {
+        let Some(page) = conn.loaded_page_mut_for_owner(owner) else {
             return PageCommandTaskStep::Complete(CommandOutputPlan::error(-31998, "NoSuchTarget"));
         };
         match page.finish_top_level_same_document_navigation_command_turn(completion) {

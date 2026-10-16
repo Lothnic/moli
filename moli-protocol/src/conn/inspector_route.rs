@@ -16,7 +16,6 @@ impl CdpConnection {
         attachment_id: RendererAgentAttachmentId,
     ) -> bool {
         self.runtime_session_owner_slot(session_id)
-            .ok()
             .and_then(|slot| slot.current_renderer_attachment())
             .is_some_and(|attachment| attachment.id() == attachment_id)
     }
@@ -26,7 +25,6 @@ impl CdpConnection {
         owner: &CommandOwnerScope,
     ) -> Option<RendererAgentAttachmentId> {
         self.runtime_session_owner_slot_for_owner(owner)
-            .ok()
             .and_then(|slot| slot.current_renderer_attachment())
             .map(RendererAgentAttachment::id)
     }
@@ -53,7 +51,8 @@ impl CdpConnection {
         agent_token: RendererDevToolsAgentToken,
     ) -> Result<PreparedRendererAgentAttachment, String> {
         self.validate_navigation_target_owner_for_scope(owner, token)?;
-        self.runtime_session_owner_slot_mut_for_owner(owner)?
+        self.runtime_session_owner_slot_mut_for_owner(owner)
+            .ok_or_else(|| "NoDocumentLoaded".to_owned())?
             .prepare_renderer_agent_candidate_token(token, agent_token)
             .map_err(|error| error.to_string())
     }
@@ -70,7 +69,6 @@ impl CdpConnection {
         }
         let current_attachment = self
             .runtime_session_owner_slot_for_owner(owner)
-            .ok()
             .and_then(|slot| slot.current_renderer_attachment());
         if let Some(current_attachment) = current_attachment {
             // Page-creation facts are frozen before protocol installs the new
@@ -115,12 +113,10 @@ impl CdpConnection {
                     .map(|state| (batch.session.clone(), state))
             })
             .collect::<Vec<_>>();
-        match self
-            .runtime_session_owner_slot_mut_for_owner(owner)
-            .and_then(|slot| {
-                slot.route_current_renderer_inspector_output(attachment_id, batches)
-                    .map_err(|error| error.to_string())
-            }) {
+        let Some(slot) = self.runtime_session_owner_slot_mut_for_owner(owner) else {
+            return Vec::new();
+        };
+        match slot.route_current_renderer_inspector_output(attachment_id, batches) {
             Ok(batches) => {
                 let primary_session_id =
                     self.runtime_session_owner_primary_session_id_for_owner(owner);
@@ -155,7 +151,8 @@ impl CdpConnection {
     ) -> Result<CommittedRendererAgentAttachment, String> {
         self.validate_navigation_target_owner_for_scope(owner, candidate.navigation())?;
         let transaction = self
-            .runtime_session_owner_slot_mut_for_owner(owner)?
+            .runtime_session_owner_slot_mut_for_owner(owner)
+            .ok_or_else(|| "NoDocumentLoaded".to_owned())?
             .commit_renderer_agent_candidate_transaction(candidate, renderer_page)
             .map_err(|error| error.to_string())?;
         let page_owner = self
@@ -180,7 +177,8 @@ impl CdpConnection {
             return Err("NavigationTargetPageChanged".into());
         }
         if !self
-            .runtime_session_owner_slot_mut_for_owner(owner)?
+            .runtime_session_owner_slot_mut_for_owner(owner)
+            .ok_or_else(|| "NoDocumentLoaded".to_owned())?
             .page_slot_mut()
             .bind_existing_page_document_navigation(
                 candidate.navigation(),
@@ -199,7 +197,8 @@ impl CdpConnection {
         transaction: CommittedRendererAgentAttachment,
     ) -> Result<(), String> {
         self.validate_navigation_target_owner_for_scope(owner, transaction.navigation())?;
-        self.runtime_session_owner_slot_mut_for_owner(owner)?
+        self.runtime_session_owner_slot_mut_for_owner(owner)
+            .ok_or_else(|| "NoDocumentLoaded".to_owned())?
             .rollback_committed_renderer_agent_candidate(transaction)
             .map_err(|error| error.to_string())
     }
@@ -215,12 +214,8 @@ impl CdpConnection {
         {
             return None;
         }
-        match self
-            .runtime_session_owner_slot_mut_for_owner(owner)
-            .and_then(|slot| {
-                slot.finish_renderer_document_navigation(token)
-                    .map_err(|error| error.to_string())
-            }) {
+        let slot = self.runtime_session_owner_slot_mut_for_owner(owner)?;
+        match slot.finish_renderer_document_navigation(token) {
             Ok(finish) => Some(finish),
             Err(error) => {
                 tracing::debug!(

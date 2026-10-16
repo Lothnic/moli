@@ -413,7 +413,7 @@ impl CdpConnection {
             return target.network_enabled(session_id);
         }
         self.runtime_session_owner_slot(session_id)
-            .is_ok_and(|runtime_slot| runtime_slot.has_network_event_listeners())
+            .is_some_and(|runtime_slot| runtime_slot.has_network_event_listeners())
     }
 
     pub(crate) fn network_backlog_prepared_delivery_for_owner(
@@ -427,7 +427,6 @@ impl CdpConnection {
             std::mem::take(&mut self.network_request_id_allocator);
         let result = self
             .runtime_session_owner_slot_mut_for_owner(owner)
-            .ok()
             .map(|runtime_slot| {
                 runtime_slot.network_backlog_prepared_delivery(
                     trigger_session_id,
@@ -449,7 +448,6 @@ impl CdpConnection {
             std::mem::take(&mut self.network_request_id_allocator);
         let result = self
             .runtime_session_owner_slot_mut(session_id)
-            .ok()
             .map(|runtime_slot| {
                 runtime_slot.network_request_id_for_subresource_handle(
                     handle,
@@ -471,7 +469,6 @@ impl CdpConnection {
             std::mem::take(&mut self.network_request_id_allocator);
         let result = self
             .runtime_session_owner_slot_mut_for_owner(owner)
-            .ok()
             .and_then(|runtime_slot| {
                 runtime_slot.pending_network_backlog_delivery_snapshot(
                     trigger_session_id,
@@ -496,7 +493,7 @@ impl CdpConnection {
         &self,
         owner: &crate::conn::CommandOwnerScope,
     ) -> Vec<Option<String>> {
-        let Ok(runtime_slot) = self.runtime_session_owner_slot_for_owner(owner) else {
+        let Some(runtime_slot) = self.runtime_session_owner_slot_for_owner(owner) else {
             return vec![owner.session_id().map(str::to_owned)];
         };
         let primary_session_id = self.runtime_session_owner_primary_session_id_for_owner(owner);

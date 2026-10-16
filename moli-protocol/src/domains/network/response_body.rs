@@ -39,7 +39,7 @@ pub(super) fn get_response_body_command_output_plan(
     }
     let response_body_materialize_limit = conn.response_body_materialize_limit();
     let primary_session_id = conn.runtime_session_owner_primary_session_id(cmd.session_id);
-    let Ok(slot) = conn.runtime_session_owner_slot(cmd.session_id) else {
+    let Some(slot) = conn.runtime_session_owner_slot(cmd.session_id) else {
         return CommandOutputPlan::error(-32000, "No resource with given identifier found");
     };
     if !network_events_enabled_for_session(slot, cmd.session_id, primary_session_id.as_deref()) {
@@ -80,7 +80,7 @@ pub(super) fn get_request_post_data_command_output_plan(
     }
     let body_materialize_limit = conn.response_body_materialize_limit();
     let primary_session_id = conn.runtime_session_owner_primary_session_id(cmd.session_id);
-    let Ok(slot) = conn.runtime_session_owner_slot(cmd.session_id) else {
+    let Some(slot) = conn.runtime_session_owner_slot(cmd.session_id) else {
         return CommandOutputPlan::error(-32000, "No resource with given id was found");
     };
     if !network_events_enabled_for_session(slot, cmd.session_id, primary_session_id.as_deref()) {

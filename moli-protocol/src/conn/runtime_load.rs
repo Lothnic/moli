@@ -1635,8 +1635,10 @@ impl CdpConnection {
         }
         let slot = self
             .runtime_session_owner_slot_mut_for_owner(owner)
-            .map_err(|error| {
-                RendererPageReplacementError::document_preserved(anyhow::anyhow!(error))
+            .ok_or_else(|| {
+                RendererPageReplacementError::document_preserved(anyhow::anyhow!(
+                    "NoDocumentLoaded"
+                ))
             })?;
         let page = slot.loaded_page_mut().ok_or_else(|| {
             RendererPageReplacementError::document_preserved(anyhow::anyhow!(
@@ -1706,7 +1708,6 @@ impl CdpConnection {
         let mut inputs = self.navigation_request_load_inputs(navigation);
         inputs.document_replacement = self
             .runtime_session_owner_slot_for_owner(&navigation.owner)
-            .ok()
             .and_then(|slot| {
                 let page_slot = slot.page_slot();
                 let cancellation = page_slot.document_navigation_cancellation_handle(token)?;
@@ -1808,8 +1809,7 @@ impl CdpConnection {
         // navigation can retain that frame-host state; a cross-site renderer
         // replacement must start with the actual idle state.
         let page = self
-            .runtime_session_owner_slot_for_owner(owner)
-            .ok()?
+            .runtime_session_owner_slot_for_owner(owner)?
             .loaded_page()?;
         moli_site::same_site_urls(page.final_url(), final_url, true)
             .then(|| page.idle_override())
@@ -1820,9 +1820,8 @@ impl CdpConnection {
         &mut self,
         owner: &CommandOwnerScope,
     ) -> Result<Option<PendingInitialDocumentPageBuild>, String> {
-        let runtime_slot = match self.runtime_session_owner_slot_for_owner(owner) {
-            Ok(slot) => slot,
-            Err(_) => return Ok(None),
+        let Some(runtime_slot) = self.runtime_session_owner_slot_for_owner(owner) else {
+            return Ok(None);
         };
         if runtime_slot.has_loaded_page() {
             return Ok(None);
@@ -1944,9 +1943,8 @@ impl CdpConnection {
         &mut self,
         owner: &CommandOwnerScope,
     ) -> Result<Option<PendingInitialDocumentPageBuild>, String> {
-        let runtime_slot = match self.runtime_session_owner_slot_for_owner(owner) {
-            Ok(slot) => slot,
-            Err(_) => return Ok(None),
+        let Some(runtime_slot) = self.runtime_session_owner_slot_for_owner(owner) else {
+            return Ok(None);
         };
         if runtime_slot.has_loaded_page() {
             return Ok(None);
@@ -1973,10 +1971,12 @@ impl CdpConnection {
         let page_storage = load_inputs.page_storage_handles();
         let top_level_storage_key =
             self.runtime_session_owner_initial_empty_document_storage_key_for_owner(owner);
-        self.runtime_session_owner_slot_mut_for_owner(owner)?
+        self.runtime_session_owner_slot_mut_for_owner(owner)
+            .ok_or_else(|| "NoDocumentLoaded".to_owned())?
             .start_initial_document_page_build();
         let pending_auxiliary_page = self
-            .runtime_session_owner_slot_mut_for_owner(owner)?
+            .runtime_session_owner_slot_mut_for_owner(owner)
+            .ok_or_else(|| "NoDocumentLoaded".to_owned())?
             .take_auxiliary_page();
         let page_reservation = pending_auxiliary_page
             .as_ref()
@@ -1987,7 +1987,8 @@ impl CdpConnection {
             page_reservation.page_id(),
         );
         if !self
-            .runtime_session_owner_slot_mut_for_owner(owner)?
+            .runtime_session_owner_slot_mut_for_owner(owner)
+            .ok_or_else(|| "NoDocumentLoaded".to_owned())?
             .bind_initial_document_page_build_renderer_page(renderer_page)
         {
             let message =

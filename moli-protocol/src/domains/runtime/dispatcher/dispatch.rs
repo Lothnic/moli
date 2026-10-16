@@ -536,14 +536,14 @@ pub(super) fn start_runtime_enable_command_for_owner(
     owner_scope: CommandOwnerScope,
 ) -> RuntimeCommandTaskStep {
     let has_loaded_page = match conn.runtime_session_owner_slot_for_owner(&owner_scope) {
-        Ok(slot) => slot.has_loaded_page(),
-        Err(_) if owner_scope.session_id().is_some() => {
+        Some(slot) => slot.has_loaded_page(),
+        None if owner_scope.session_id().is_some() => {
             return RuntimeCommandTaskStep::Complete(CommandOutputPlan::error(
                 -32001,
                 "Unknown sessionId",
             ));
         }
-        Err(_) => {
+        None => {
             match conn.set_runtime_frontend_enabled_for_owner(&owner_scope, true) {
                 SessionOwnerRuntimeFrontendEnableResult::Handled => {}
                 SessionOwnerRuntimeFrontendEnableResult::UnknownSession => {
@@ -681,11 +681,11 @@ pub(super) fn try_start_pending_runtime_binding_command(
     };
     let live_page_update_unavailable = conn
         .runtime_session_owner_slot_for_owner(&owner_scope)
-        .is_ok_and(|slot| !slot.has_loaded_page())
+        .is_some_and(|slot| !slot.has_loaded_page())
         || should_persist
             && conn
                 .runtime_session_owner_slot_for_owner(&owner_scope)
-                .is_ok_and(|slot| slot.renderer_document_navigation_is_suspended());
+                .is_some_and(|slot| slot.renderer_document_navigation_is_suspended());
     if live_page_update_unavailable {
         task.command_response = Some(RuntimeBindingCommandResponse::empty_success());
         let meta = RuntimeCommandCompletionMeta {

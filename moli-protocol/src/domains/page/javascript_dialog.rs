@@ -5,9 +5,7 @@ pub(super) fn start_set_javascript_dialog_handler_enabled(
     session_id: Option<&str>,
     enabled: bool,
 ) -> Result<(), String> {
-    if let Ok(slot) = conn.runtime_session_owner_slot_mut(session_id)
-        && let Some(page) = slot.loaded_page_mut()
-    {
+    if let Some(page) = conn.loaded_page_mut_for_session_owner(session_id) {
         return page
             .start_set_javascript_dialog_handler_enabled(enabled)
             .map(|_| ())
@@ -313,7 +311,7 @@ fn source_is_current(conn: &CdpConnection, dialog: &PreparedJavaScriptDialog) ->
     conn.target_page_protocol_attachment_identity_is_current(dialog.source_attachment())
         && conn
             .runtime_session_owner_slot(dialog.source_attachment().session_id())
-            .is_ok_and(|slot| slot.observes_javascript_dialog_scope(dialog.source_dialog_scope()))
+            .is_some_and(|slot| slot.observes_javascript_dialog_scope(dialog.source_dialog_scope()))
 }
 
 fn trace_stale_source(dialog: &PreparedJavaScriptDialog) {

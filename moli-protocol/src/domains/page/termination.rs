@@ -396,8 +396,7 @@ pub(super) async fn complete_stop_loading_command_dispatch(
     owner: &CommandOwnerScope,
 ) -> PageCommandTaskStep {
     let mut out = Vec::new();
-    if let Ok(slot) = conn.runtime_session_owner_slot_mut_for_owner(owner)
-        && let Some(page) = slot.loaded_page_mut()
+    if let Some(page) = conn.loaded_page_mut_for_owner(owner)
         && let Err(error) = page.stop_document_lifecycle_async().await
     {
         tracing::debug!(%error, "failed to stop renderer document lifecycle");
@@ -489,7 +488,7 @@ pub(super) async fn complete_crash_command_dispatch(
     // it never enters a V8InspectorSession or the ordinary target IO task FIFO.
     // Seal both DevTools receivers and interrupt active V8 synchronously so
     // target retirement cannot wait behind earlier JavaScript or IO work.
-    if let Ok(page) = conn.loaded_page_mut_for_interruptible_protocol_access_for_owner(owner) {
+    if let Some(page) = conn.loaded_page_mut_for_owner(owner) {
         page.crash_devtools_target_from_io();
     }
 

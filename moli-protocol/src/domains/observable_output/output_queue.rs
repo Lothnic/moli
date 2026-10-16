@@ -324,7 +324,7 @@ impl ObservableSessionAuditsPreparedRange {
         conn: &CdpConnection,
     ) -> Option<Self> {
         let session_id = self.session_id();
-        let runtime_slot = conn.runtime_session_owner_slot(session_id).ok()?;
+        let runtime_slot = conn.runtime_session_owner_slot(session_id)?;
         let document_binding = runtime_slot.committed_renderer_document_binding()?;
         let owner_state = conn.target_owner_state_for_session(session_id)?;
         let session_state = conn.target_page_session_state_for_session(session_id)?;
@@ -372,9 +372,7 @@ impl ObservableSessionRuntimePreparedItems {
         }
         let session_id = self.attachment.session_id().map(str::to_owned);
         let url = conn.runtime_session_owner_target_url(session_id.as_deref())?;
-        let runtime_slot = conn
-            .runtime_session_owner_slot(session_id.as_deref())
-            .ok()?;
+        let runtime_slot = conn.runtime_session_owner_slot(session_id.as_deref())?;
         runtime_slot
             .page_attachment_id()
             .is_some_and(|attachment_id| self.items.matches_source_identity(&url, attachment_id))
@@ -512,7 +510,7 @@ impl ObservableConsoleLogPreparedRange {
         conn: &mut CdpConnection,
         session_id: Option<&str>,
     ) -> Option<Self> {
-        let runtime_slot = conn.runtime_session_owner_slot(session_id).ok()?;
+        let runtime_slot = conn.runtime_session_owner_slot(session_id)?;
         let url = conn.runtime_session_owner_target_url(session_id)?;
         if !self.domain.enabled_for_session(conn, session_id)?
             || url != self.url()

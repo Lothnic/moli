@@ -229,7 +229,7 @@ async fn project_renderer_output_records_for_owner(
                         event.kind,
                         moli_core::page::RendererDocumentLifecycleEventKind::Started { .. }
                     )
-                    && let Ok(slot) = conn.runtime_session_owner_slot_mut_for_owner(owner)
+                    && let Some(slot) = conn.runtime_session_owner_slot_mut_for_owner(owner)
                 {
                     slot.observe_renderer_output_document_start(event.document);
                 }
@@ -271,7 +271,7 @@ async fn project_renderer_output_records_for_owner(
             }
         }
     }
-    if let Ok(slot) = conn.runtime_session_owner_slot_mut_for_owner(owner) {
+    if let Some(slot) = conn.runtime_session_owner_slot_mut_for_owner(owner) {
         // Do not release predecessor correlations halfway through a batch:
         // prepared Network deliveries from that batch still need projection.
         slot.finish_retiring_document_output_projection();

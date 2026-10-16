@@ -252,7 +252,7 @@ async fn flush_prepared_subresource_continue_action_background_events_async(
                 );
                 let mut remaining_sessions = Vec::new();
                 for session in response_stage_sessions.into_iter().skip(1) {
-                    let Ok((next_request_id, _)) = conn
+                    let Some((next_request_id, _)) = conn
                         .allocate_pending_subresource_fetch_request_ids_for_owner(command_owner)
                     else {
                         return;
@@ -367,7 +367,7 @@ async fn flush_prepared_subresource_continue_action_background_events_async(
                 );
                 let mut remaining_sessions = Vec::new();
                 for session in auth_sessions.into_iter().skip(1) {
-                    let Ok((next_request_id, _)) = conn
+                    let Some((next_request_id, _)) = conn
                         .allocate_pending_subresource_fetch_request_ids_for_owner(command_owner)
                     else {
                         return;
@@ -651,7 +651,7 @@ fn clear_fetch_pause_network_announcement(
     owner: &CommandOwnerScope,
     request_id: &str,
 ) {
-    if let Ok(runtime_slot) = conn.runtime_session_owner_slot_mut_for_owner(owner) {
+    if let Some(runtime_slot) = conn.runtime_session_owner_slot_mut_for_owner(owner) {
         runtime_slot.clear_fetch_pause_announced_request_id(request_id);
     }
 }
@@ -665,7 +665,7 @@ fn record_subresource_network_request_handle(
     let Some(request_handle) = request_handle else {
         return;
     };
-    if let Ok(runtime_slot) = conn.runtime_session_owner_slot_mut_for_owner(owner) {
+    if let Some(runtime_slot) = conn.runtime_session_owner_slot_mut_for_owner(owner) {
         runtime_slot.record_subresource_request_id_for_handle_if_absent(
             request_handle,
             request_id.to_owned(),

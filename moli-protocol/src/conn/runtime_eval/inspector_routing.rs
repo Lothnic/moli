@@ -799,7 +799,7 @@ impl CdpConnection {
         let inspector_session_id =
             self.target_renderer_runtime_inspector_session_id_for_owner(owner);
         let pending = {
-            let page = self.runtime_session_owner_page_mut_for_owner(owner)?;
+            let page = self.loaded_page_mut_for_protocol_access_for_owner(owner)?;
             page.start_document_node_snapshot_for_object_id_in_inspector_session(
                 inspector_session_id,
                 include_whitespace,
@@ -813,7 +813,7 @@ impl CdpConnection {
             .wait()
             .await
             .map_err(|error| format!("resolve runtime node snapshot failed: {error}"))?;
-        let page = self.runtime_session_owner_page_mut_for_owner(owner)?;
+        let page = self.loaded_page_mut_for_protocol_access_for_owner(owner)?;
         page.finish_document_node_snapshot_for_object_id(completion)
             .map_err(|error| format!("resolve runtime node snapshot failed: {error}"))
     }
@@ -826,7 +826,7 @@ impl CdpConnection {
         pierce: bool,
     ) -> Result<Option<DocumentNodeObjectSnapshot>, String> {
         let pending = {
-            let page = self.runtime_session_owner_page_mut_for_owner(owner)?;
+            let page = self.loaded_page_mut_for_protocol_access_for_owner(owner)?;
             page.start_document_node_snapshot_for_backend_node_id(backend_node_id, depth, pierce)
                 .map_err(|error| format!("resolve backend node snapshot failed: {error}"))?
         };
@@ -834,7 +834,7 @@ impl CdpConnection {
             .wait()
             .await
             .map_err(|error| format!("resolve backend node snapshot failed: {error}"))?;
-        let page = self.runtime_session_owner_page_mut_for_owner(owner)?;
+        let page = self.loaded_page_mut_for_protocol_access_for_owner(owner)?;
         page.finish_document_node_snapshot_for_backend_node_id(completion)
             .map_err(|error| format!("resolve backend node snapshot failed: {error}"))
     }
@@ -848,7 +848,7 @@ impl CdpConnection {
         let inspector_session_id =
             self.target_renderer_runtime_inspector_session_id_for_owner(owner);
         let pending = {
-            let page = self.runtime_session_owner_page_mut_for_owner(owner)?;
+            let page = self.loaded_page_mut_for_protocol_access_for_owner(owner)?;
             page.start_register_document_bidi_node_binding(
                 inspector_session_id,
                 shared_id.to_owned(),
@@ -860,7 +860,7 @@ impl CdpConnection {
             .wait()
             .await
             .map_err(|error| format!("register BiDi node binding failed: {error}"))?;
-        let page = self.runtime_session_owner_page_mut_for_owner(owner)?;
+        let page = self.loaded_page_mut_for_protocol_access_for_owner(owner)?;
         page.finish_register_document_bidi_node_binding(completion)
             .map_err(|error| format!("register BiDi node binding failed: {error}"))
     }
@@ -873,7 +873,7 @@ impl CdpConnection {
         let inspector_session_id =
             self.target_renderer_runtime_inspector_session_id_for_owner(owner);
         let pending = {
-            let page = self.runtime_session_owner_page_mut_for_owner(owner)?;
+            let page = self.loaded_page_mut_for_protocol_access_for_owner(owner)?;
             page.start_document_bidi_node_binding(inspector_session_id, shared_id.to_owned())
                 .map_err(|error| format!("resolve BiDi node binding failed: {error}"))?
         };
@@ -881,7 +881,7 @@ impl CdpConnection {
             .wait()
             .await
             .map_err(|error| format!("resolve BiDi node binding failed: {error}"))?;
-        let page = self.runtime_session_owner_page_mut_for_owner(owner)?;
+        let page = self.loaded_page_mut_for_protocol_access_for_owner(owner)?;
         page.finish_document_bidi_node_binding(completion)
             .map_err(|error| format!("resolve BiDi node binding failed: {error}"))
     }
@@ -894,7 +894,7 @@ impl CdpConnection {
         let inspector_session_id =
             self.target_renderer_runtime_inspector_session_id_for_owner(owner);
         let pending = {
-            let page = self.runtime_session_owner_page_mut_for_owner(owner)?;
+            let page = self.loaded_page_mut_for_protocol_access_for_owner(owner)?;
             page.start_document_bidi_node_shared_id_for_backend_node_id(
                 inspector_session_id,
                 backend_node_id,
@@ -905,7 +905,7 @@ impl CdpConnection {
             .wait()
             .await
             .map_err(|error| format!("resolve BiDi node shared id failed: {error}"))?;
-        let page = self.runtime_session_owner_page_mut_for_owner(owner)?;
+        let page = self.loaded_page_mut_for_protocol_access_for_owner(owner)?;
         page.finish_document_bidi_node_shared_id_for_backend_node_id(completion)
             .map_err(|error| format!("resolve BiDi node shared id failed: {error}"))
     }
@@ -920,7 +920,7 @@ impl CdpConnection {
         let inspector_session_id =
             self.target_renderer_runtime_inspector_session_id_for_owner(owner);
         let pending = {
-            let page = self.runtime_session_owner_page_mut_for_owner(owner)?;
+            let page = self.loaded_page_mut_for_protocol_access_for_owner(owner)?;
             page.start_resolve_runtime_object_for_backend_node_id_in_inspector_session(
                 inspector_session_id,
                 backend_node_id,
@@ -933,7 +933,7 @@ impl CdpConnection {
             .wait()
             .await
             .map_err(|error| format!("resolve runtime object for backend node failed: {error}"))?;
-        let page = self.runtime_session_owner_page_mut_for_owner(owner)?;
+        let page = self.loaded_page_mut_for_protocol_access_for_owner(owner)?;
         let result = page
             .finish_resolve_runtime_object_for_backend_node_id(completion)
             .map_err(|error| format!("resolve runtime object for backend node failed: {error}"))?;

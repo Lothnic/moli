@@ -1759,8 +1759,7 @@ impl CdpConnection {
         handle_auth_requests: bool,
     ) -> Result<PendingSubresourceContinueOutcome, String> {
         let page = self
-            .runtime_session_owner_slot_mut_for_owner(owner)?
-            .loaded_page_mut()
+            .loaded_page_mut_for_owner(owner)
             .ok_or_else(|| "NoDocumentLoaded".to_owned())?;
         page.continue_pending_subresource_fetch_async(
             internal_id,
@@ -1802,8 +1801,7 @@ impl CdpConnection {
         auth: SubresourceAuthCredentials,
     ) -> Result<PendingSubresourceContinueOutcome, String> {
         let page = self
-            .runtime_session_owner_slot_mut_for_owner(owner)?
-            .loaded_page_mut()
+            .loaded_page_mut_for_owner(owner)
             .ok_or_else(|| "NoDocumentLoaded".to_owned())?;
         page.continue_pending_subresource_auth_async(internal_id, auth)
             .await
@@ -1837,8 +1835,7 @@ impl CdpConnection {
         error_text: String,
     ) -> Result<Option<moli_core::RendererOutputFence>, String> {
         let page = self
-            .runtime_session_owner_slot_mut_for_owner(owner)?
-            .loaded_page_mut()
+            .loaded_page_mut_for_owner(owner)
             .ok_or_else(|| "NoDocumentLoaded".to_owned())?;
         page.fail_pending_subresource_auth_async(internal_id, error_text)
             .await
@@ -1872,8 +1869,7 @@ impl CdpConnection {
         error_text: String,
     ) -> Result<Option<moli_core::RendererOutputFence>, String> {
         let page = self
-            .runtime_session_owner_slot_mut_for_owner(owner)?
-            .loaded_page_mut()
+            .loaded_page_mut_for_owner(owner)
             .ok_or_else(|| "NoDocumentLoaded".to_owned())?;
         page.fail_pending_subresource_fetch_async(internal_id, error_text)
             .await
@@ -1906,8 +1902,7 @@ impl CdpConnection {
         response_body: moli_core::page::RendererSyntheticResponseBody,
     ) -> Result<(), String> {
         let page = self
-            .runtime_session_owner_slot_mut(session_id)?
-            .loaded_page_mut()
+            .loaded_page_mut_for_session_owner(session_id)
             .ok_or_else(|| "NoDocumentLoaded".to_owned())?;
         page.fulfill_pending_subresource_fetch_async(
             internal_id,
@@ -1959,8 +1954,7 @@ impl CdpConnection {
         response_headers: Option<Vec<(String, Vec<u8>)>>,
     ) -> Result<(), String> {
         let page = self
-            .runtime_session_owner_slot_mut_for_owner(owner)?
-            .loaded_page_mut()
+            .loaded_page_mut_for_owner(owner)
             .ok_or_else(|| "NoDocumentLoaded".to_owned())?;
         page.continue_pending_subresource_response_async(
             internal_id,
@@ -2002,8 +1996,7 @@ impl CdpConnection {
         error_text: String,
     ) -> Result<Option<moli_core::RendererOutputFence>, String> {
         let page = self
-            .runtime_session_owner_slot_mut_for_owner(owner)?
-            .loaded_page_mut()
+            .loaded_page_mut_for_owner(owner)
             .ok_or_else(|| "NoDocumentLoaded".to_owned())?;
         page.fail_pending_subresource_response_async(internal_id, error_text)
             .await
@@ -2036,8 +2029,7 @@ impl CdpConnection {
         response_body: moli_core::page::RendererSyntheticResponseBody,
     ) -> Result<(), String> {
         let page = self
-            .runtime_session_owner_slot_mut(session_id)?
-            .loaded_page_mut()
+            .loaded_page_mut_for_session_owner(session_id)
             .ok_or_else(|| "NoDocumentLoaded".to_owned())?;
         page.fulfill_pending_subresource_response_async(
             internal_id,
@@ -2065,8 +2057,7 @@ impl CdpConnection {
         data: String,
     ) -> Result<(), String> {
         let page = self
-            .runtime_session_owner_slot_mut(session_id)?
-            .loaded_page_mut()
+            .loaded_page_mut_for_session_owner(session_id)
             .ok_or_else(|| "NoDocumentLoaded".to_owned())?;
         page.receive_synthetic_websocket_text_async(socket_id, data)
             .await
@@ -2089,8 +2080,7 @@ impl CdpConnection {
         data: Vec<u8>,
     ) -> Result<(), String> {
         let page = self
-            .runtime_session_owner_slot_mut(session_id)?
-            .loaded_page_mut()
+            .loaded_page_mut_for_session_owner(session_id)
             .ok_or_else(|| "NoDocumentLoaded".to_owned())?;
         page.receive_synthetic_websocket_binary_async(socket_id, data)
             .await
@@ -2117,8 +2107,7 @@ impl CdpConnection {
         reason: String,
     ) -> Result<(), String> {
         let page = self
-            .runtime_session_owner_slot_mut(session_id)?
-            .loaded_page_mut()
+            .loaded_page_mut_for_session_owner(session_id)
             .ok_or_else(|| "NoDocumentLoaded".to_owned())?;
         page.close_synthetic_websocket_from_server_async(socket_id, code, reason)
             .await

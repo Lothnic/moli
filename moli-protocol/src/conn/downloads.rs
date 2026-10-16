@@ -672,7 +672,6 @@ impl CdpConnection {
             .unwrap_or_else(|| browser_context.effective_extra_headers());
         let initiator_url = self
             .runtime_session_owner_slot_for_owner(owner)
-            .ok()
             .and_then(|slot| slot.loaded_page().map(|page| page.final_url().clone()));
         Some(PendingDownloadOwnerContext {
             browser_context_id,

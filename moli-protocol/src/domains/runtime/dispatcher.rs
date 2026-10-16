@@ -1002,7 +1002,7 @@ pub(crate) fn start_heap_profiler_inspector_command_dispatch(
 
     if !conn
         .runtime_session_owner_slot(cmd.session_id)
-        .is_ok_and(|slot| slot.has_loaded_page())
+        .is_some_and(|slot| slot.has_loaded_page())
     {
         return RuntimeCommandTaskStep::Complete(match action {
             HeapProfilerAction::Enable | HeapProfilerAction::Disable => {

@@ -111,11 +111,7 @@ pub(super) fn try_start_search_in_resource_command(
         main_document,
     };
     let owner = CommandOwnerScope::capture(conn, cmd.session_id);
-    let Some(page) = conn
-        .runtime_session_owner_slot_mut_for_owner(&owner)
-        .ok()
-        .and_then(|slot| slot.loaded_page_mut())
-    else {
+    let Some(page) = conn.loaded_page_mut_for_owner(&owner) else {
         return complete_error(CONTENT_UNAVAILABLE);
     };
     match page.start_resource_search_by_lines(request) {
@@ -136,11 +132,7 @@ pub(super) fn complete_search_in_resource_command(
     owner: &CommandOwnerScope,
     completed: CompletedSearchInResourceCommand,
 ) -> PageCommandTaskStep {
-    let Some(page) = conn
-        .runtime_session_owner_slot_mut_for_owner(owner)
-        .ok()
-        .and_then(|slot| slot.loaded_page_mut())
-    else {
+    let Some(page) = conn.loaded_page_mut_for_owner(owner) else {
         return complete_error(CONTENT_UNAVAILABLE);
     };
     let completion = match completed.completed {

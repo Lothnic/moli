@@ -533,7 +533,6 @@ impl CdpConnection {
             .unwrap_or_default();
         let has_loaded_page = self
             .runtime_session_owner_slot_mut(Some(session_id))
-            .ok()
             .is_some_and(|slot| slot.loaded_page().is_some());
         if !has_loaded_page {
             let _ = self.with_target_owner_state_for_session_mut(Some(session_id), |owner_state| {
@@ -546,9 +545,7 @@ impl CdpConnection {
         for registry_key in registry_keys {
             let result: anyhow::Result<()> = async {
                 let pending = self
-                    .runtime_session_owner_slot_mut(Some(session_id))
-                    .ok()
-                    .and_then(|slot| slot.loaded_page_mut())
+                    .loaded_page_mut_for_session_owner(Some(session_id))
                     .ok_or_else(|| {
                         anyhow::anyhow!(
                             "page disappeared while removing detached-session document-start scripts"
@@ -566,9 +563,7 @@ impl CdpConnection {
                     )
                 })?;
                 let page = self
-                    .runtime_session_owner_slot_mut(Some(session_id))
-                    .ok()
-                    .and_then(|slot| slot.loaded_page_mut())
+                    .loaded_page_mut_for_session_owner(Some(session_id))
                     .ok_or_else(|| {
                         anyhow::anyhow!(
                             "page disappeared while finishing detached-session document-start script cleanup"

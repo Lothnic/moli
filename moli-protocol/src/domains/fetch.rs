@@ -884,12 +884,8 @@ fn complete_fetch_config_update_command(
     };
     // Fetch policy belongs to the target and may finish updating while a
     // navigation is replacing its document.
-    let page = match conn.loaded_page_mut_for_target_configuration_for_owner(&owner_scope) {
-        Ok(page) => page,
-        Err(message) if message == "NoDocumentLoaded" => {
-            return CommandOutputPlan::from_devtools_result(result);
-        }
-        Err(message) => return CommandOutputPlan::error(-32000, message),
+    let Some(page) = conn.loaded_page_mut_for_owner(&owner_scope) else {
+        return CommandOutputPlan::from_devtools_result(result);
     };
     match page.finish_set_fetch_subresource_interception(completion) {
         Ok(()) => CommandOutputPlan::from_devtools_result(result),

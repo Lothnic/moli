@@ -47,7 +47,7 @@ impl CdpConnection {
         await_promise: bool,
     ) -> Result<Value, String> {
         let payload = {
-            let page = self.runtime_session_owner_page_mut(session_id)?;
+            let page = self.loaded_page_mut_for_protocol_access(session_id)?;
             page.evaluate_runtime_expression_without_navigation_follow_with_await_async(
                 expression,
                 await_promise,
@@ -72,10 +72,12 @@ impl CdpConnection {
         &mut self,
         owner: &CommandOwnerScope,
     ) -> Result<PendingRuntimeEnableEventsDispatch, String> {
-        let route = self.runtime_protocol_message_page_route_for_owner(owner)?;
+        let route = self
+            .runtime_protocol_message_page_route_for_owner(owner)
+            .ok_or_else(|| "NoDocumentLoaded".to_owned())?;
         let inspector_session_id =
             self.target_renderer_runtime_inspector_session_id_for_owner(owner);
-        let page = self.runtime_session_owner_page_mut_for_owner(owner)?;
+        let page = self.loaded_page_mut_for_protocol_access_for_owner(owner)?;
         let pending = page
             .start_runtime_enable_events_for_inspector_session(inspector_session_id.as_deref())
             .map_err(|error| format!("runtime enable event replay failed: {error}"))?;
@@ -142,59 +144,14 @@ impl CdpConnection {
         Ok(replay)
     }
 
-    pub(super) fn runtime_session_owner_page_mut(
-        &mut self,
-        session_id: Option<&str>,
-    ) -> Result<&mut Page, String> {
-        self.loaded_page_mut_for_protocol_access(session_id)
-    }
-
-    pub(super) fn runtime_session_owner_page_mut_for_owner(
-        &mut self,
-        owner: &CommandOwnerScope,
-    ) -> Result<&mut Page, String> {
-        self.loaded_page_mut_for_protocol_access_for_owner(owner)
-    }
-
-    pub(super) fn runtime_session_owner_page_mut_for_interruptible_control_for_owner(
-        &mut self,
-        owner: &CommandOwnerScope,
-    ) -> Result<&mut Page, String> {
-        self.loaded_page_mut_for_interruptible_protocol_access_for_owner(owner)
-    }
-
-    pub(super) fn runtime_protocol_message_page_route_for_session_owner(
-        &self,
-        session_id: Option<&str>,
-    ) -> Result<RuntimeProtocolMessagePageRoute, String> {
-        let (browser_context_id, target_id) = self
-            .target_owner_identity_for_session(session_id)
-            .ok_or_else(|| "NoDocumentLoaded".to_owned())?;
-        let slot = self.runtime_session_owner_slot(session_id)?;
-        let renderer_agent_attachment_id = slot
-            .current_renderer_attachment()
-            .ok_or_else(|| "NoDocumentLoaded".to_owned())?
-            .id();
-        Ok(RuntimeProtocolMessagePageRoute {
-            browser_context_id,
-            target_id,
-            renderer_agent_attachment_id,
-        })
-    }
-
     pub(super) fn runtime_protocol_message_page_route_for_owner(
         &self,
         owner: &CommandOwnerScope,
-    ) -> Result<RuntimeProtocolMessagePageRoute, String> {
-        let (browser_context_id, target_id) = self
-            .target_owner_identity_for_owner(owner)
-            .ok_or_else(|| "NoDocumentLoaded".to_owned())?;
+    ) -> Option<RuntimeProtocolMessagePageRoute> {
+        let (browser_context_id, target_id) = self.target_owner_identity_for_owner(owner)?;
         let slot = self.runtime_session_owner_slot_for_owner(owner)?;
-        let renderer_agent_attachment_id = slot
-            .current_renderer_attachment()
-            .ok_or_else(|| "NoDocumentLoaded".to_owned())?
-            .id();
-        Ok(RuntimeProtocolMessagePageRoute {
+        let renderer_agent_attachment_id = slot.current_renderer_attachment()?.id();
+        Some(RuntimeProtocolMessagePageRoute {
             browser_context_id,
             target_id,
             renderer_agent_attachment_id,

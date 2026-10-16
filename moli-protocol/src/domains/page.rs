@@ -1772,7 +1772,7 @@ fn try_start_page_enable_command(
         )));
     }
     match conn.runtime_session_owner_slot(cmd.session_id) {
-        Ok(slot)
+        Some(slot)
             if slot.has_loaded_page()
                 && conn.runtime_session_owner_can_start_initial_document_navigation(
                     cmd.session_id,
@@ -1796,10 +1796,10 @@ fn try_start_page_enable_command(
                 &[],
             ))
         }
-        Ok(slot) if slot.has_loaded_page() => {
+        Some(slot) if slot.has_loaded_page() => {
             Some(PageCommandTaskStep::Complete(CommandOutputPlan::success()))
         }
-        Ok(_) if !conn.runtime_session_owner_target_is_initial_about_blank(cmd.session_id) => {
+        Some(_) if !conn.runtime_session_owner_target_is_initial_about_blank(cmd.session_id) => {
             let owner = CommandOwnerScope::capture(conn, cmd.session_id);
             let start = match navigation::start_initial_document_navigation_for_session_owner(
                 conn,
@@ -1818,11 +1818,11 @@ fn try_start_page_enable_command(
                 &[],
             ))
         }
-        Ok(_) => Some(PageCommandTaskStep::Complete(CommandOutputPlan::success())),
-        Err(_) if cmd.session_id.is_some() => Some(PageCommandTaskStep::Complete(
+        Some(_) => Some(PageCommandTaskStep::Complete(CommandOutputPlan::success())),
+        None if cmd.session_id.is_some() => Some(PageCommandTaskStep::Complete(
             CommandOutputPlan::error(-31998, "TargetNotLoaded"),
         )),
-        Err(_) => Some(PageCommandTaskStep::Complete(CommandOutputPlan::success())),
+        None => Some(PageCommandTaskStep::Complete(CommandOutputPlan::success())),
     }
 }
 
@@ -1843,11 +1843,7 @@ fn try_start_page_set_document_content_command(
     if let Err(message) = conn.ensure_document_accessible_for_session_owner(session_id) {
         return PageCommandTaskStep::Complete(CommandOutputPlan::error(-32000, message));
     }
-    let Some(page) = conn
-        .runtime_session_owner_slot_mut(session_id)
-        .ok()
-        .and_then(|slot| slot.loaded_page_mut())
-    else {
+    let Some(page) = conn.loaded_page_mut_for_session_owner(session_id) else {
         return PageCommandTaskStep::Complete(CommandOutputPlan::error(
             -32000,
             "No Document instance to set HTML for",
@@ -1965,11 +1961,7 @@ pub(crate) async fn complete_pending_page_command(
                 }
             };
             let completed_script = {
-                let Some(page) = conn
-                    .runtime_session_owner_slot_mut_for_owner(&owner_scope)
-                    .ok()
-                    .and_then(|slot| slot.loaded_page_mut())
-                else {
+                let Some(page) = conn.loaded_page_mut_for_owner(&owner_scope) else {
                     return PageCommandTaskStep::Complete(CommandOutputPlan::error(
                         -32000,
                         "NoDocumentLoaded",
@@ -1998,11 +1990,7 @@ pub(crate) async fn complete_pending_page_command(
                     ));
                 }
             };
-            let Some(page) = conn
-                .runtime_session_owner_slot_mut_for_owner(&owner_scope)
-                .ok()
-                .and_then(|slot| slot.loaded_page_mut())
-            else {
+            let Some(page) = conn.loaded_page_mut_for_owner(&owner_scope) else {
                 return PageCommandTaskStep::Complete(CommandOutputPlan::error(
                     -32000,
                     "NoDocumentLoaded",
@@ -2060,11 +2048,7 @@ pub(crate) async fn complete_pending_page_command(
                     ));
                 }
             };
-            let Some(page) = conn
-                .runtime_session_owner_slot_mut_for_owner(&owner_scope)
-                .ok()
-                .and_then(|slot| slot.loaded_page_mut())
-            else {
+            let Some(page) = conn.loaded_page_mut_for_owner(&owner_scope) else {
                 return PageCommandTaskStep::Complete(CommandOutputPlan::error(
                     -32000,
                     "NoDocumentLoaded",
@@ -2088,11 +2072,7 @@ pub(crate) async fn complete_pending_page_command(
                 }
             };
             let (result, output) = {
-                let Some(page) = conn
-                    .runtime_session_owner_slot_mut_for_owner(&owner_scope)
-                    .ok()
-                    .and_then(|slot| slot.loaded_page_mut())
-                else {
+                let Some(page) = conn.loaded_page_mut_for_owner(&owner_scope) else {
                     return PageCommandTaskStep::Complete(CommandOutputPlan::error(
                         -32000,
                         "No Document instance to set HTML for",
@@ -2158,11 +2138,7 @@ pub(crate) async fn complete_pending_page_command(
                     &[],
                 ));
             }
-            let Some(page) = conn
-                .runtime_session_owner_slot_mut_for_owner(&owner_scope)
-                .ok()
-                .and_then(|slot| slot.loaded_page_mut())
-            else {
+            let Some(page) = conn.loaded_page_mut_for_owner(&owner_scope) else {
                 return PageCommandTaskStep::Complete(get_frame_tree_command_output_plan(
                     output_kind,
                     target_id,
@@ -2216,11 +2192,7 @@ pub(crate) async fn complete_pending_page_command(
                     ));
                 }
             };
-            let Some(page) = conn
-                .runtime_session_owner_slot_mut_for_owner(&owner_scope)
-                .ok()
-                .and_then(|slot| slot.loaded_page_mut())
-            else {
+            let Some(page) = conn.loaded_page_mut_for_owner(&owner_scope) else {
                 return PageCommandTaskStep::Complete(CommandOutputPlan::error(
                     -32000,
                     "NoDocumentLoaded",

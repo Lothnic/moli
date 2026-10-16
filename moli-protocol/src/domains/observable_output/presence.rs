@@ -136,7 +136,6 @@ pub(in crate::domains) fn inspector_issue_prepared_outputs(
     // belonged to its replacement.
     let Some(document_binding) = conn
         .runtime_session_owner_slot_for_owner(owner)
-        .ok()
         .and_then(|slot| slot.committed_renderer_document_binding())
     else {
         return prepared;
@@ -332,7 +331,7 @@ fn renderer_agent_owns_page_console_api_events(
     }) {
         return false;
     }
-    let Ok(runtime_slot) = conn.runtime_session_owner_slot_for_owner(owner) else {
+    let Some(runtime_slot) = conn.runtime_session_owner_slot_for_owner(owner) else {
         return false;
     };
     if !runtime_slot.has_loaded_page() {
@@ -356,7 +355,7 @@ fn renderer_runtime_agent_owns_page_console_api_events(
     }) {
         return false;
     }
-    let Ok(runtime_slot) = conn.runtime_session_owner_slot_for_owner(owner) else {
+    let Some(runtime_slot) = conn.runtime_session_owner_slot_for_owner(owner) else {
         return false;
     };
     if !runtime_slot.has_loaded_page() {
@@ -377,7 +376,7 @@ fn runtime_observable_source_tail_for_session_owner(
     session_id: Option<&str>,
 ) -> Option<super::TargetRuntimeObservableSourceOutput> {
     let url = conn.runtime_session_owner_target_url(session_id)?;
-    let runtime_slot = conn.runtime_session_owner_slot_mut(session_id).ok()?;
+    let runtime_slot = conn.runtime_session_owner_slot_mut(session_id)?;
     runtime_slot.sync_observable_output_source_from_renderer_runtime_source(url, source)
 }
 
@@ -387,7 +386,7 @@ fn runtime_console_source_tail_for_owner(
     owner: &CommandOwnerScope,
 ) -> Option<super::TargetRuntimeObservableSourceOutput> {
     let url = conn.runtime_session_owner_target_url_for_owner(owner)?;
-    let runtime_slot = conn.runtime_session_owner_slot_mut_for_owner(owner).ok()?;
+    let runtime_slot = conn.runtime_session_owner_slot_mut_for_owner(owner)?;
     runtime_slot.append_renderer_runtime_console_message(url, message)
 }
 
@@ -398,7 +397,7 @@ fn runtime_lifecycle_error_source_tail_for_owner(
     owner: &CommandOwnerScope,
 ) -> Option<super::TargetRuntimeObservableSourceOutput> {
     let url = conn.runtime_session_owner_target_url_for_owner(owner)?;
-    let runtime_slot = conn.runtime_session_owner_slot_mut_for_owner(owner).ok()?;
+    let runtime_slot = conn.runtime_session_owner_slot_mut_for_owner(owner)?;
     runtime_slot.append_renderer_runtime_lifecycle_error(url, text, execution_context_id)
 }
 
@@ -432,7 +431,7 @@ pub(in crate::domains) fn live_log_prepared_outputs_for_renderer_network_fact(
         .target_owner_state_for_owner(owner)
         .cloned()
         .unwrap_or_default();
-    let Some(runtime_slot) = conn.runtime_session_owner_slot_for_owner(owner).ok() else {
+    let Some(runtime_slot) = conn.runtime_session_owner_slot_for_owner(owner) else {
         return ObservablePreparedOutputs::default();
     };
     let Some(url) = conn.runtime_session_owner_target_url_for_owner(owner) else {
@@ -468,7 +467,7 @@ fn observable_console_log_prepared_outputs_for_session_owner(
         .target_owner_state_for_session(session_id)
         .cloned()
         .unwrap_or_default();
-    let runtime_slot = conn.runtime_session_owner_slot(session_id).ok()?;
+    let runtime_slot = conn.runtime_session_owner_slot(session_id)?;
     let url = conn.runtime_session_owner_target_url(session_id)?;
     let queue = super::output_queue::TargetObservableOutputQueue::from_runtime_slot(runtime_slot)?;
     let page_attachment_id = runtime_slot.page_attachment_id()?;

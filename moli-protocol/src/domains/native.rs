@@ -217,7 +217,7 @@ pub(crate) fn project_terminal_for_owner(
     });
     let owner = owner.filter(|owner| {
         conn.runtime_session_owner_slot_for_owner(owner)
-            .is_ok_and(|slot| {
+            .is_some_and(|slot| {
                 slot.has_loaded_page()
                     && slot
                         .current_renderer_attachment()

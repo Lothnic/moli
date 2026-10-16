@@ -120,9 +120,9 @@ fn loaded_page_mut_for_renderer_access<'a>(
         CdpRendererCommandAccess::MainThread => {
             conn.loaded_page_mut_for_protocol_access_for_owner(owner)
         }
-        CdpRendererCommandAccess::Io => {
-            conn.loaded_page_mut_for_interruptible_protocol_access_for_owner(owner)
-        }
+        CdpRendererCommandAccess::Io => conn
+            .loaded_page_mut_for_owner(owner)
+            .ok_or_else(|| "NoDocumentLoaded".to_owned()),
         CdpRendererCommandAccess::OwnerIndependent => {
             Err("Performance.getMetrics requires a renderer Page".to_owned())
         }
@@ -227,7 +227,6 @@ pub(crate) fn try_start_performance_command_dispatch(
     }
     if !conn
         .runtime_session_owner_slot(cmd.session_id)
-        .ok()
         .is_some_and(|slot| slot.has_loaded_page())
     {
         return PerformanceCommandTaskStep::Complete(default_metrics_command_output_plan());

@@ -365,11 +365,7 @@ pub(super) async fn execute_devtools_get_layout_metrics_for_current_owner(
     conn: &mut CdpConnection,
     owner: &CommandOwnerScope,
 ) -> Result<DevToolsLayoutMetricsResult, DevToolsError> {
-    let Some(page) = conn
-        .runtime_session_owner_slot_mut_for_owner(owner)
-        .ok()
-        .and_then(|slot| slot.loaded_page_mut())
-    else {
+    let Some(page) = conn.loaded_page_mut_for_owner(owner) else {
         return Err(devtools_layout_metrics_error("NoDocumentLoaded"));
     };
     let pending = page.start_layout_metrics().map_err(|error| {
@@ -378,11 +374,7 @@ pub(super) async fn execute_devtools_get_layout_metrics_for_current_owner(
     let completed = pending.wait().await.map_err(|error| {
         devtools_layout_metrics_error(format!("Failed to produce layout metrics: {error}"))
     })?;
-    let Some(page) = conn
-        .runtime_session_owner_slot_mut_for_owner(owner)
-        .ok()
-        .and_then(|slot| slot.loaded_page_mut())
-    else {
+    let Some(page) = conn.loaded_page_mut_for_owner(owner) else {
         return Err(devtools_layout_metrics_error("NoDocumentLoaded"));
     };
     page.finish_layout_metrics(completed)
@@ -676,11 +668,7 @@ pub(super) fn start_devtools_get_layout_metrics_command(
 ) -> PageCommandTaskStep {
     let command_session_id = command.context.session_id.as_ref().map(|id| id.as_str());
     let owner_scope = CommandOwnerScope::capture(conn, command_session_id);
-    let Some(page) = conn
-        .runtime_session_owner_slot_mut(command_session_id)
-        .ok()
-        .and_then(|slot| slot.loaded_page_mut())
-    else {
+    let Some(page) = conn.loaded_page_mut_for_session_owner(command_session_id) else {
         return PageCommandTaskStep::Complete(CommandOutputPlan::from_devtools_error(
             devtools_layout_metrics_error("NoDocumentLoaded"),
         ));

@@ -267,7 +267,7 @@ fn complete_read_blob_command(
     let Some(bytes) = bytes else {
         return CommandOutputPlan::error(-32000, "Read failed");
     };
-    let Ok(slot) = conn.runtime_session_owner_slot_mut(session_id) else {
+    let Some(slot) = conn.runtime_session_owner_slot_mut(session_id) else {
         return CommandOutputPlan::error(-32000, "Read failed");
     };
     slot.insert_io_stream_body_source(handle.clone(), CapturedBody::from_shared_bytes(bytes), 0);

@@ -10,7 +10,7 @@ impl CdpConnection {
         &mut self,
         owner: &CommandOwnerScope,
     ) {
-        if let Ok(slot) = self.runtime_session_owner_slot_mut_for_owner(owner) {
+        if let Some(slot) = self.runtime_session_owner_slot_mut_for_owner(owner) {
             let _ = slot.ingest_owner_page_observable_output_updates();
         }
     }
@@ -66,7 +66,7 @@ impl CdpConnection {
         let inspector_session_id =
             self.target_renderer_runtime_inspector_session_id_for_session(session_id);
         let messages = {
-            let page = self.runtime_session_owner_page_mut(session_id)?;
+            let page = self.loaded_page_mut_for_protocol_access(session_id)?;
             page.dispatch_runtime_protocol_message_for_inspector_session_async(
                 inspector_session_id,
                 raw_json,
@@ -172,17 +172,19 @@ impl CdpConnection {
         raw_json: String,
         inspector_route: RendererInspectorCommandRoute,
     ) -> Result<PendingRuntimeProtocolMessageDispatch, String> {
-        let route = self.runtime_protocol_message_page_route_for_owner(owner)?;
+        let route = self
+            .runtime_protocol_message_page_route_for_owner(owner)
+            .ok_or_else(|| "NoDocumentLoaded".to_owned())?;
         let raw_json = self.rewrite_runtime_inspector_command_for_owner(owner, &raw_json, None)?;
         let inspector_session_id =
             self.target_renderer_runtime_inspector_session_id_for_owner(owner);
         let page = match inspector_route {
             RendererInspectorCommandRoute::MainThread => {
-                self.runtime_session_owner_page_mut_for_owner(owner)?
+                self.loaded_page_mut_for_protocol_access_for_owner(owner)?
             }
-            RendererInspectorCommandRoute::Io => {
-                self.runtime_session_owner_page_mut_for_interruptible_control_for_owner(owner)?
-            }
+            RendererInspectorCommandRoute::Io => self
+                .loaded_page_mut_for_owner(owner)
+                .ok_or_else(|| "NoDocumentLoaded".to_owned())?,
         };
         let pending = match inspector_route {
             RendererInspectorCommandRoute::MainThread => page
@@ -239,7 +241,9 @@ impl CdpConnection {
         command_id: u64,
         inspector_route: RendererInspectorCommandRoute,
     ) -> Result<PendingRuntimeProtocolMessageDispatch, String> {
-        let route = self.runtime_protocol_message_page_route_for_owner(owner)?;
+        let route = self
+            .runtime_protocol_message_page_route_for_owner(owner)
+            .ok_or_else(|| "NoDocumentLoaded".to_owned())?;
         let (correlation, raw_json, response_sender, response_route) = self
             .prepare_renderer_call_for_owner(
                 owner,
@@ -251,11 +255,11 @@ impl CdpConnection {
             self.target_renderer_runtime_inspector_session_id_for_owner(owner);
         let page_result = match inspector_route {
             RendererInspectorCommandRoute::MainThread => {
-                self.runtime_session_owner_page_mut_for_owner(owner)
+                self.loaded_page_mut_for_protocol_access_for_owner(owner)
             }
-            RendererInspectorCommandRoute::Io => {
-                self.runtime_session_owner_page_mut_for_interruptible_control_for_owner(owner)
-            }
+            RendererInspectorCommandRoute::Io => self
+                .loaded_page_mut_for_owner(owner)
+                .ok_or_else(|| "NoDocumentLoaded".to_owned()),
         };
         let page = match page_result {
             Ok(page) => page,
@@ -293,11 +297,13 @@ impl CdpConnection {
         action: &str,
         raw_json: String,
     ) -> Result<PendingRuntimeProtocolMessageDispatch, String> {
-        let route = self.runtime_protocol_message_page_route_for_owner(owner)?;
+        let route = self
+            .runtime_protocol_message_page_route_for_owner(owner)
+            .ok_or_else(|| "NoDocumentLoaded".to_owned())?;
         let raw_json = self.rewrite_runtime_inspector_command_for_owner(owner, &raw_json, None)?;
         let inspector_session_id =
             self.target_renderer_runtime_inspector_session_id_for_owner(owner);
-        let page = self.runtime_session_owner_page_mut_for_owner(owner)?;
+        let page = self.loaded_page_mut_for_protocol_access_for_owner(owner)?;
         let pending = page
             .start_runtime_protocol_message_for_inspector_session_with_context_resolution(
                 inspector_session_id,
@@ -320,7 +326,9 @@ impl CdpConnection {
         descriptor: RendererCommandDescriptor,
         command_id: u64,
     ) -> Result<PendingRuntimeProtocolMessageDispatch, String> {
-        let route = self.runtime_protocol_message_page_route_for_owner(owner)?;
+        let route = self
+            .runtime_protocol_message_page_route_for_owner(owner)
+            .ok_or_else(|| "NoDocumentLoaded".to_owned())?;
         let (correlation, raw_json, response_sender, response_route) = self
             .prepare_renderer_call_for_owner(
                 owner,
@@ -330,7 +338,7 @@ impl CdpConnection {
             )?;
         let inspector_session_id =
             self.target_renderer_runtime_inspector_session_id_for_owner(owner);
-        let page = match self.runtime_session_owner_page_mut_for_owner(owner) {
+        let page = match self.loaded_page_mut_for_protocol_access_for_owner(owner) {
             Ok(page) => page,
             Err(error) => {
                 let removed = self.take_renderer_call_for_frontend_for_owner(owner, command_id);
@@ -441,18 +449,16 @@ impl CdpConnection {
                 replay.renderer_inspector_session_id().map(str::to_owned);
             let (correlation, replay, response_delivery, frontend_payload, response_sender) =
                 replay.into_replay().into_parts();
-            let route = match self.runtime_protocol_message_page_route_for_session_owner(
-                frontend_session_id.as_deref(),
-            ) {
-                Ok(route) => route,
-                Err(error) => {
+            let route = match self.runtime_protocol_message_page_route_for_owner(&owner) {
+                Some(route) => route,
+                None => {
                     self.settle_renderer_replacement_error(
                         &mut events,
                         frontend_session_id.as_deref(),
                         response_delivery,
                         &response_sender,
                         correlation,
-                        &error,
+                        "NoDocumentLoaded",
                     );
                     continue;
                 }
@@ -476,8 +482,7 @@ impl CdpConnection {
                         RendererInspectorResponseDelivery::SessionSink
                     );
                     let pending = self
-                        .runtime_session_owner_page_mut(frontend_session_id.as_deref())
-                        .map_err(|error| error.to_string())
+                        .loaded_page_mut_for_protocol_access(frontend_session_id.as_deref())
                         .and_then(|page| {
                             let result = crate::domains::performance::performance_metrics_result(
                                 &page.cached_performance_metric_snapshot(),
@@ -519,8 +524,7 @@ impl CdpConnection {
                         RendererInspectorResponseDelivery::SessionSink
                     );
                     let pending = self
-                        .runtime_session_owner_page_mut(frontend_session_id.as_deref())
-                        .map_err(|error| error.to_string())
+                        .loaded_page_mut_for_protocol_access(frontend_session_id.as_deref())
                         .and_then(|page| {
                             page.start_set_script_execution_disabled_from_io_with_response(
                                 renderer_inspector_session_id.clone(),
@@ -576,7 +580,8 @@ impl CdpConnection {
                 }
             };
             let pending = {
-                let page = match self.runtime_session_owner_page_mut(frontend_session_id.as_deref())
+                let page = match self
+                    .loaded_page_mut_for_protocol_access(frontend_session_id.as_deref())
                 {
                     Ok(page) => page,
                     Err(error) => {

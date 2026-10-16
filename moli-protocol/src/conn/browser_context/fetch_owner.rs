@@ -317,7 +317,7 @@ impl CdpConnection {
     pub(crate) fn allocate_pending_subresource_fetch_request_ids_for_owner(
         &mut self,
         owner: &CommandOwnerScope,
-    ) -> Result<(String, String), String> {
+    ) -> Option<(String, String)> {
         let mut network_request_id_allocator =
             std::mem::take(&mut self.network_request_id_allocator);
         let result = self
@@ -336,7 +336,7 @@ impl CdpConnection {
     pub(crate) fn allocate_fetch_navigation_request_id_for_owner(
         &mut self,
         owner: &CommandOwnerScope,
-    ) -> Result<String, String> {
+    ) -> Option<String> {
         self.runtime_session_owner_slot_mut_for_owner(owner)
             .map(|runtime_slot| {
                 runtime_slot
@@ -387,7 +387,6 @@ impl CdpConnection {
         let Some(owner) = target_scoped_stream_owner_from_handle(handle) else {
             return self
                 .runtime_session_owner_slot_mut(session_id)
-                .ok()
                 .and_then(|runtime_slot| runtime_slot.read_io_stream(handle, offset, size));
         };
         if !target_scoped_stream_owner_matches_session(self, session_id, &owner) {
@@ -405,7 +404,7 @@ impl CdpConnection {
         network_request_id: String,
         socket_id: u64,
     ) -> bool {
-        let Ok(runtime_slot) = self.runtime_session_owner_slot_mut_for_owner(owner) else {
+        let Some(runtime_slot) = self.runtime_session_owner_slot_mut_for_owner(owner) else {
             return false;
         };
         runtime_slot.register_synthetic_websocket_request(
@@ -431,7 +430,6 @@ impl CdpConnection {
         request_id: &str,
     ) -> Option<u64> {
         self.runtime_session_owner_slot_for_owner(owner)
-            .ok()
             .and_then(|runtime_slot| {
                 runtime_slot.synthetic_websocket_socket_id_for_request(request_id)
             })
@@ -755,7 +753,7 @@ impl CdpConnection {
         let Some(stream_owner) = target_scoped_stream_owner_from_handle(handle) else {
             return self
                 .runtime_session_owner_slot_mut(session_id)
-                .is_ok_and(|runtime_slot| runtime_slot.close_io_stream(handle));
+                .is_some_and(|runtime_slot| runtime_slot.close_io_stream(handle));
         };
         if !target_scoped_stream_owner_matches_session(self, session_id, &stream_owner) {
             return false;
@@ -993,7 +991,7 @@ impl CdpConnection {
         let Some(handle) = pending.network_request_handle else {
             return;
         };
-        if let Ok(runtime_slot) = self.runtime_session_owner_slot_mut_for_owner(owner) {
+        if let Some(runtime_slot) = self.runtime_session_owner_slot_mut_for_owner(owner) {
             runtime_slot.record_subresource_request_id_for_handle_if_absent(
                 handle,
                 pending.network_request_id.clone(),
@@ -1009,7 +1007,7 @@ impl CdpConnection {
         let Some(handle) = pending.network_request_handle else {
             return;
         };
-        if let Ok(runtime_slot) = self.runtime_session_owner_slot_mut_for_owner(owner) {
+        if let Some(runtime_slot) = self.runtime_session_owner_slot_mut_for_owner(owner) {
             runtime_slot.record_subresource_request_id_for_handle_if_absent(
                 handle,
                 pending.network_request_id.clone(),
@@ -1025,7 +1023,7 @@ impl CdpConnection {
         let Some(handle) = pending.network_request_handle else {
             return;
         };
-        if let Ok(runtime_slot) = self.runtime_session_owner_slot_mut_for_owner(owner) {
+        if let Some(runtime_slot) = self.runtime_session_owner_slot_mut_for_owner(owner) {
             runtime_slot.record_subresource_request_id_for_handle_if_absent(
                 handle,
                 pending.network_request_id.clone(),

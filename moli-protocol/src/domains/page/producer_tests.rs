@@ -145,7 +145,7 @@ fn javascript_dialog_scope_for_test(
 ) -> crate::conn::TargetJavaScriptDialogScopeObserver {
     conn.runtime_session_owner_slot(Some(session_id))
         .map(|slot| slot.javascript_dialog_scope_observer())
-        .unwrap_or_else(|_| {
+        .unwrap_or_else(|| {
             crate::conn::TargetJavaScriptDialogScopeObserver::stale_for_absent_owner_test()
         })
 }

@@ -208,7 +208,6 @@ mod tests {
     fn loaded_lifecycle_error_contains(ctx: &TestContext, needle: &str) -> bool {
         ctx.conn
             .runtime_session_owner_slot(Some("SID-1"))
-            .ok()
             .and_then(|slot| slot.observable_output_latest_source_tail())
             .is_some_and(|source| {
                 source.observable_output_items().iter().any(|item| {

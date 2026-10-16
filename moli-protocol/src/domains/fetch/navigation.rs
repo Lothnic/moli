@@ -887,7 +887,7 @@ fn register_navigation_auth_required_event(
         );
         let mut remaining_sessions = Vec::new();
         for session in auth_sessions.into_iter().skip(1) {
-            let Ok(next_request_id) =
+            let Some(next_request_id) =
                 conn.allocate_fetch_navigation_request_id_for_owner(&pending.navigation.owner)
             else {
                 break;

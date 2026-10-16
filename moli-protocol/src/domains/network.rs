@@ -739,8 +739,7 @@ fn complete_network_policy_refresh(
         }
     };
     if let Err(error) = finish_network_page_operation_on_current_attachment(
-        conn.loaded_page_mut_for_target_configuration_for_owner(&owner_scope)
-            .ok(),
+        conn.loaded_page_mut_for_owner(&owner_scope),
         NetworkPageCommandFinish::RequestPolicy,
         completion,
     ) {
@@ -778,8 +777,7 @@ fn complete_unit_page_network_command(
         }
     };
     match finish_network_page_operation_on_current_attachment(
-        conn.loaded_page_mut_for_target_configuration_for_owner(&owner_scope)
-            .ok(),
+        conn.loaded_page_mut_for_owner(&owner_scope),
         finish,
         completion,
     ) {
@@ -865,8 +863,7 @@ fn network_page_configuration_will_be_replayed(
     };
     let owner_still_exists = conn.target_owner_identity_for_owner(owner_scope).is_some();
     let current_attachment = conn
-        .loaded_page_mut_for_target_configuration_for_owner(owner_scope)
-        .ok()
+        .loaded_page_mut_for_owner(owner_scope)
         .and_then(|page| page.renderer_agent_attachment_id());
     owner_still_exists && current_attachment != Some(dispatched_attachment)
 }

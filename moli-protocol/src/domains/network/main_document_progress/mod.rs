@@ -523,7 +523,6 @@ fn completed_document_body_progress_queue(
             }
             let _ = conn
                 .runtime_session_owner_slot_mut(owner_session_id)
-                .ok()
                 .and_then(|runtime_slot| {
                     record_main_document_response_body_for_network(
                         runtime_slot,
@@ -1531,7 +1530,7 @@ fn record_child_document_response_body(
             collection_was_gated,
         );
     }
-    let Ok(runtime_slot) = conn.runtime_session_owner_slot_mut(owner_session_id) else {
+    let Some(runtime_slot) = conn.runtime_session_owner_slot_mut(owner_session_id) else {
         return;
     };
     if let Some(captured_body) = captured_body {
@@ -2322,7 +2321,7 @@ fn record_pending_main_document_response_body(
     let collection_was_gated = conn.network_data_collection_is_gated_for_body(
         crate::automation::DevToolsNetworkDataType::Response,
     );
-    if let Ok(runtime_slot) = conn.runtime_session_owner_slot_mut(state.session_id.as_deref()) {
+    if let Some(runtime_slot) = conn.runtime_session_owner_slot_mut(state.session_id.as_deref()) {
         runtime_slot.record_pending_response_body_with_collector_scope(
             request_id,
             session_ids.iter().cloned(),
@@ -2362,7 +2361,7 @@ pub(crate) fn record_main_document_request_body(
         collector_ids.iter().cloned(),
         collection_was_gated,
     );
-    if let Ok(runtime_slot) = conn.runtime_session_owner_slot_mut(state.session_id.as_deref()) {
+    if let Some(runtime_slot) = conn.runtime_session_owner_slot_mut(state.session_id.as_deref()) {
         // CDP getRequestPostData uses the text projection that request events
         // and Fetch interception expose, which omits multipart file contents.
         // Never surface raw transport bytes through the CDP captured store.
@@ -2400,7 +2399,7 @@ pub(crate) fn record_failed_main_document_response_body(
     let collection_was_gated = conn.network_data_collection_is_gated_for_body(
         crate::automation::DevToolsNetworkDataType::Response,
     );
-    if let Ok(runtime_slot) = conn.runtime_session_owner_slot_mut(state.session_id.as_deref()) {
+    if let Some(runtime_slot) = conn.runtime_session_owner_slot_mut(state.session_id.as_deref()) {
         runtime_slot.record_failed_response_body_with_collector_scope(
             request_id,
             error_text,
@@ -2439,7 +2438,7 @@ pub(crate) fn record_completed_main_document_response_body(
             collection_was_gated,
         );
     }
-    if let Ok(runtime_slot) = conn.runtime_session_owner_slot_mut(state.session_id.as_deref()) {
+    if let Some(runtime_slot) = conn.runtime_session_owner_slot_mut(state.session_id.as_deref()) {
         let _ = record_main_document_response_body_for_network(
             runtime_slot,
             network_enabled,

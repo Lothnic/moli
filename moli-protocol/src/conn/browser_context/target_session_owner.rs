@@ -1843,8 +1843,7 @@ impl CdpConnection {
                 .map(str::to_owned)
         });
         let page_attachment_id = self
-            .runtime_session_owner_slot_for_owner(owner)
-            .ok()?
+            .runtime_session_owner_slot_for_owner(owner)?
             .page_attachment_id()?;
         Some(TargetPageResidenceIdentity::new(
             browser_context_id,
@@ -1871,8 +1870,7 @@ impl CdpConnection {
                 .map(str::to_owned)
         });
         let page_attachment_id = self
-            .runtime_session_owner_slot_for_owner(owner)
-            .ok()?
+            .runtime_session_owner_slot_for_owner(owner)?
             .pending_page_attachment_id()?;
         Some(TargetPageResidenceIdentity::new(
             browser_context_id,
@@ -1893,8 +1891,7 @@ impl CdpConnection {
                 .map(str::to_owned)
         });
         let page_attachment_id = self
-            .runtime_session_owner_slot_mut_for_owner(owner)
-            .ok()?
+            .runtime_session_owner_slot_mut_for_owner(owner)?
             .reserve_renderer_page_attachment(renderer_page);
         Some(TargetPageResidenceIdentity::new(
             browser_context_id,
@@ -1919,8 +1916,7 @@ impl CdpConnection {
         &mut self,
         owner: &CommandOwnerScope,
     ) -> Option<crate::conn::TargetPageResidenceToken> {
-        self.runtime_session_owner_slot_mut_for_owner(owner)
-            .ok()?
+        self.runtime_session_owner_slot_mut_for_owner(owner)?
             .page_slot_mut()
             .page_residence_token()
     }
@@ -1962,8 +1958,7 @@ impl CdpConnection {
         &self,
         owner: &CommandOwnerScope,
     ) -> Option<crate::conn::RendererPageResidenceIdentity> {
-        self.runtime_session_owner_slot_for_owner(owner)
-            .ok()?
+        self.runtime_session_owner_slot_for_owner(owner)?
             .loaded_page()
             .map(crate::conn::RendererPageResidenceIdentity::from_page)
     }
@@ -2068,7 +2063,6 @@ impl CdpConnection {
             },
         };
         self.runtime_session_owner_slot_for_owner(&CommandOwnerScope::for_route(route))
-            .ok()
             .and_then(|slot| slot.page_slot().renderer_document_lifecycle_binding())
             .map(crate::conn::CommittedRendererDocumentBinding::renderer_document_identity)
             == Some(expected.root_document())
@@ -2078,8 +2072,7 @@ impl CdpConnection {
         &self,
         owner: &CommandOwnerScope,
     ) -> Option<moli_core::RendererDocumentLifecycleIdentity> {
-        self.runtime_session_owner_slot_for_owner(owner)
-            .ok()?
+        self.runtime_session_owner_slot_for_owner(owner)?
             .page_slot()
             .renderer_document_lifecycle_binding()
             .map(crate::conn::CommittedRendererDocumentBinding::renderer_document_identity)
@@ -2163,7 +2156,7 @@ impl CdpConnection {
     pub(crate) fn runtime_session_owner_slot_mut(
         &mut self,
         session_id: Option<&str>,
-    ) -> Result<&mut TargetRuntimeSlot, String> {
+    ) -> Option<&mut TargetRuntimeSlot> {
         let owner = CommandOwnerScope::capture(self, session_id);
         self.runtime_session_owner_slot_mut_for_owner(&owner)
     }
@@ -2171,23 +2164,22 @@ impl CdpConnection {
     pub(crate) fn runtime_session_owner_slot_mut_for_owner(
         &mut self,
         owner: &CommandOwnerScope,
-    ) -> Result<&mut TargetRuntimeSlot, String> {
+    ) -> Option<&mut TargetRuntimeSlot> {
         let renderer_inspector_session_id =
             self.target_renderer_runtime_inspector_session_id_for_owner(owner);
         let slot = self
-            .target_session_owner_mut_for_owner(owner)
-            .map(TargetSessionOwnerMut::into_runtime_slot_mut)
-            .ok_or_else(|| "NoDocumentLoaded".to_owned())?;
+            .target_session_owner_mut_for_owner(owner)?
+            .into_runtime_slot_mut();
         if let Some(page) = slot.loaded_page_mut() {
             page.set_renderer_devtools_command_session_id(renderer_inspector_session_id);
         }
-        Ok(slot)
+        Some(slot)
     }
 
     pub(crate) fn runtime_session_owner_slot(
         &self,
         session_id: Option<&str>,
-    ) -> Result<&TargetRuntimeSlot, String> {
+    ) -> Option<&TargetRuntimeSlot> {
         let owner = CommandOwnerScope::capture(self, session_id);
         self.runtime_session_owner_slot_for_owner(&owner)
     }
@@ -2195,10 +2187,9 @@ impl CdpConnection {
     pub(crate) fn runtime_session_owner_slot_for_owner(
         &self,
         owner: &CommandOwnerScope,
-    ) -> Result<&TargetRuntimeSlot, String> {
+    ) -> Option<&TargetRuntimeSlot> {
         self.target_session_owner_ref_for_owner(owner)
             .map(|owner| owner.runtime_slot())
-            .ok_or_else(|| "NoDocumentLoaded".to_owned())
     }
 
     pub(crate) fn runtime_session_owner_primary_session_id(
@@ -4065,7 +4056,7 @@ mod tests {
         );
         assert!(
             conn.runtime_session_owner_slot(Some("SID-missing"))
-                .is_err()
+                .is_none()
         );
     }
 

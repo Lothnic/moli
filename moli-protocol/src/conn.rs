@@ -1758,7 +1758,7 @@ impl CdpConnection {
         session_id: Option<&str>,
     ) -> bool {
         self.runtime_session_owner_slot(session_id)
-            .is_ok_and(TargetRuntimeSlot::renderer_document_navigation_is_suspended)
+            .is_some_and(TargetRuntimeSlot::renderer_document_navigation_is_suspended)
     }
 
     pub(crate) fn accepts_pending_document_navigation_for_owner(
@@ -1810,7 +1810,6 @@ impl CdpConnection {
         owner: &CommandOwnerScope,
     ) -> Option<String> {
         self.runtime_session_owner_slot_for_owner(owner)
-            .ok()
             .and_then(|slot| slot.current_document_loader_id().map(str::to_owned))
     }
 
@@ -1841,7 +1840,6 @@ impl CdpConnection {
         let mut request_id_allocator = std::mem::take(&mut self.network_request_id_allocator);
         let delivery = self
             .runtime_session_owner_slot_mut_for_owner(owner)
-            .ok()
             .and_then(|slot| {
                 slot.ingest_renderer_network_output_item_and_prepare_live_delivery(
                     source_renderer_page,
@@ -1870,50 +1868,31 @@ impl CdpConnection {
         owner: &CommandOwnerScope,
     ) -> Result<&mut Page, String> {
         self.ensure_document_accessible_for_owner(owner)?;
-        self.loaded_page_mut_for_interruptible_protocol_access_for_owner(owner)
+        self.loaded_page_mut_for_owner(owner)
+            .ok_or_else(|| "NoDocumentLoaded".to_owned())
     }
 
-    /// Returns the Page that currently carries target-scoped configuration.
-    ///
-    /// A cross-Document navigation keeps its outgoing Page attached until the
-    /// replacement commits. Network and Emulation settings belong to the
-    /// stable target/session, so they must remain writable during that window:
-    /// the outgoing Page needs the update if navigation fails, while commit
-    /// configuration replays the same target state into the replacement Page.
-    /// Document-reading commands must continue to use
-    /// [`Self::loaded_page_mut_for_protocol_access`] and observe the navigation
-    /// gate instead.
-    pub(crate) fn loaded_page_mut_for_target_configuration(
+    pub(crate) fn loaded_page_mut_for_session_owner(
         &mut self,
         session_id: Option<&str>,
-    ) -> Result<&mut Page, String> {
+    ) -> Option<&mut Page> {
         let owner = CommandOwnerScope::capture(self, session_id);
-        self.loaded_page_mut_for_target_configuration_for_owner(&owner)
+        self.loaded_page_mut_for_owner(&owner)
     }
 
-    pub(crate) fn loaded_page_mut_for_target_configuration_for_owner(
-        &mut self,
-        owner: &CommandOwnerScope,
-    ) -> Result<&mut Page, String> {
-        self.runtime_session_owner_slot_mut_for_owner(owner)?
-            .loaded_page_mut()
-            .ok_or_else(|| "NoDocumentLoaded".to_owned())
-    }
-
-    /// Returns the exact Page that remains attached while a cross-Document
-    /// navigation is suspended.
+    /// Returns the owner's currently attached Page without a navigation gate.
     ///
-    /// Only commands classified as renderer-interruptible at the parsed CDP
-    /// boundary may use this access path. Ordinary protocol commands must use
-    /// [`Self::loaded_page_mut_for_protocol_access`] so they wait for the
-    /// replacement attachment instead of entering the old renderer.
-    pub(crate) fn loaded_page_mut_for_interruptible_protocol_access_for_owner(
+    /// During cross-Document navigation this may still be the outgoing Page.
+    /// Target-scoped configuration, renderer-interruptible commands and
+    /// completion handling may access it; configuration is replayed into the
+    /// replacement at commit. Ordinary document commands must use
+    /// [`Self::loaded_page_mut_for_protocol_access`] instead.
+    pub(crate) fn loaded_page_mut_for_owner(
         &mut self,
         owner: &CommandOwnerScope,
-    ) -> Result<&mut Page, String> {
+    ) -> Option<&mut Page> {
         self.runtime_session_owner_slot_mut_for_owner(owner)?
             .loaded_page_mut()
-            .ok_or_else(|| "NoDocumentLoaded".to_owned())
     }
 
     pub(crate) fn start_document_navigation_for_owner(
@@ -1956,7 +1935,7 @@ impl CdpConnection {
         Vec<moli_core::page::RendererDocumentLifecycleEvent>,
     ) {
         let (binding, events, document_scope_changed) = {
-            let Ok(slot) = self.runtime_session_owner_slot_mut_for_owner(owner) else {
+            let Some(slot) = self.runtime_session_owner_slot_mut_for_owner(owner) else {
                 return (None, Vec::new());
             };
             let previous_document_scope = slot
@@ -1994,7 +1973,7 @@ impl CdpConnection {
         Vec<moli_core::page::RendererDocumentLifecycleEvent>,
     ) {
         let (binding, events, document_scope_changed, document_input_stream_opened) = {
-            let Ok(slot) = self.runtime_session_owner_slot_mut_for_owner(owner) else {
+            let Some(slot) = self.runtime_session_owner_slot_mut_for_owner(owner) else {
                 return (None, Vec::new());
             };
             let previous_document_scope = slot
@@ -2039,7 +2018,7 @@ impl CdpConnection {
 
     fn retire_javascript_dialogs_for_owner(&mut self, owner: &CommandOwnerScope) {
         let event_session_ids = self.page_event_session_ids_for_owner(owner);
-        if let Ok(slot) = self.runtime_session_owner_slot_mut_for_owner(owner) {
+        if let Some(slot) = self.runtime_session_owner_slot_mut_for_owner(owner) {
             slot.retire_javascript_dialog_scope();
         }
         for event_session_id in event_session_ids {
@@ -2059,7 +2038,7 @@ impl CdpConnection {
         loader_id: &str,
     ) -> bool {
         self.runtime_session_owner_slot_mut_for_owner(owner)
-            .is_ok_and(|slot| {
+            .is_some_and(|slot| {
                 slot.page_slot_mut()
                     .begin_renderer_document_load_visibility_barrier(loader_id)
             })
@@ -2070,8 +2049,7 @@ impl CdpConnection {
         owner: &CommandOwnerScope,
         loader_id: &str,
     ) -> Option<Vec<moli_core::page::RendererDocumentLifecycleEvent>> {
-        self.runtime_session_owner_slot_mut_for_owner(owner)
-            .ok()?
+        self.runtime_session_owner_slot_mut_for_owner(owner)?
             .page_slot_mut()
             .release_renderer_document_load_visibility_barrier(loader_id)
     }
@@ -2082,7 +2060,7 @@ impl CdpConnection {
         loader_id: &str,
     ) -> bool {
         self.runtime_session_owner_slot_mut_for_owner(owner)
-            .is_ok_and(|slot| {
+            .is_some_and(|slot| {
                 slot.page_slot_mut()
                     .cancel_renderer_document_load_visibility_barrier(loader_id)
             })
@@ -2096,10 +2074,7 @@ impl CdpConnection {
         CommittedRendererDocumentBinding,
         moli_core::page::RendererDocumentLifecycleSnapshot,
     )> {
-        let page_slot = self
-            .runtime_session_owner_slot(session_id)
-            .ok()?
-            .page_slot();
+        let page_slot = self.runtime_session_owner_slot(session_id)?.page_slot();
         Some((
             page_slot.renderer_document_lifecycle_binding()?.clone(),
             page_slot.renderer_document_lifecycle_authoritative_snapshot()?,
@@ -2117,7 +2092,7 @@ impl CdpConnection {
                 RendererDocumentLifecycleObservation::Unavailable,
             );
         };
-        let Ok(slot) = self.runtime_session_owner_slot_mut_for_owner(owner) else {
+        let Some(slot) = self.runtime_session_owner_slot_mut_for_owner(owner) else {
             return RendererDocumentLifecycleObserver::resolved(
                 RendererDocumentLifecycleObservation::Unavailable,
             );
@@ -2133,10 +2108,7 @@ impl CdpConnection {
         CommittedRendererDocumentBinding,
         moli_core::page::RendererDocumentLifecycleSnapshot,
     )> {
-        let page_slot = self
-            .runtime_session_owner_slot(session_id)
-            .ok()?
-            .page_slot();
+        let page_slot = self.runtime_session_owner_slot(session_id)?.page_slot();
         Some((
             page_slot.renderer_document_lifecycle_binding()?.clone(),
             page_slot.renderer_document_lifecycle_visible_snapshot()?,
@@ -2149,7 +2121,7 @@ impl CdpConnection {
         loader_id: &str,
     ) -> bool {
         self.runtime_session_owner_slot_mut_for_owner(owner)
-            .is_ok_and(|slot| {
+            .is_some_and(|slot| {
                 slot.page_slot_mut()
                     .arm_root_post_load_observation(loader_id)
             })
@@ -2176,7 +2148,6 @@ impl CdpConnection {
 
         let binding = self
             .runtime_session_owner_slot_mut_for_owner(owner)
-            .ok()
             .and_then(|slot| {
                 slot.page_slot_mut()
                     .take_root_frame_stopped_loading_binding()
@@ -2217,13 +2188,12 @@ impl CdpConnection {
     ) -> bool {
         if !self
             .runtime_session_owner_slot_for_owner(owner)
-            .is_ok_and(|slot| slot.renderer_subresources_are_idle())
+            .is_some_and(|slot| slot.renderer_subresources_are_idle())
         {
             return false;
         }
         let binding = self
             .runtime_session_owner_slot_mut_for_owner(owner)
-            .ok()
             .and_then(|slot| slot.page_slot_mut().take_root_network_idle_binding());
         let Some(binding) = binding else {
             return false;
@@ -2301,8 +2271,7 @@ impl CdpConnection {
         let owner = self.command_owner_scope_for_devtools_context(context)?;
         let page = self.target_page_residence_identity_for_owner(&owner)?;
         let document = self
-            .runtime_session_owner_slot_for_owner(&owner)
-            .ok()?
+            .runtime_session_owner_slot_for_owner(&owner)?
             .page_slot()
             .renderer_document_lifecycle_binding()?
             .renderer_document_identity();
@@ -2317,8 +2286,7 @@ impl CdpConnection {
     ) -> Option<DevToolsDocumentLifecycleWaitKey> {
         let owner_scope = self.command_owner_scope_for_devtools_context(context)?;
         let registration = self
-            .runtime_session_owner_slot_mut_for_owner(&owner_scope)
-            .ok()?
+            .runtime_session_owner_slot_mut_for_owner(&owner_scope)?
             .page_slot_mut()
             .register_renderer_document_lifecycle_waiter(milestone, expected_loader_id);
         let (registration_id, binding) = registration?;
@@ -2341,7 +2309,6 @@ impl CdpConnection {
             return DevToolsDocumentLifecycleWaitState::Unavailable;
         };
         self.runtime_session_owner_slot_for_owner(&owner_scope)
-            .ok()
             .map_or(DevToolsDocumentLifecycleWaitState::Unavailable, |slot| {
                 devtools_document_lifecycle_wait_state_for_slot(slot, key)
             })
@@ -2356,7 +2323,7 @@ impl CdpConnection {
             return false;
         };
         self.runtime_session_owner_slot_mut_for_owner(&owner_scope)
-            .is_ok_and(|slot| {
+            .is_some_and(|slot| {
                 slot.page_slot_mut()
                     .release_renderer_document_lifecycle_waiter(
                         key.registration_id,

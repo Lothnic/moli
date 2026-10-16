@@ -98,7 +98,6 @@ async fn recover_failed_page_session_disposal_async(
     });
     let has_live_page = conn
         .runtime_session_owner_slot_for_owner(&owner)
-        .ok()
         .is_some_and(|slot| slot.loaded_page().is_some());
 
     if has_live_page {

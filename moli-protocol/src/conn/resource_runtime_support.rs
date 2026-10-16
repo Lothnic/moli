@@ -304,8 +304,7 @@ impl CdpConnection {
                 .as_mut()
                 .and_then(|bc| bc.active_page_target_mut().runtime_slot.loaded_page_mut());
         }
-        self.loaded_page_mut_for_target_configuration(session_id)
-            .ok()
+        self.loaded_page_mut_for_session_owner(session_id)
     }
 
     fn resource_runtime_apply_page_for_owner(
@@ -321,8 +320,7 @@ impl CdpConnection {
                 .as_mut()
                 .and_then(|bc| bc.active_page_target_mut().runtime_slot.loaded_page_mut());
         }
-        self.loaded_page_mut_for_target_configuration_for_owner(owner)
-            .ok()
+        self.loaded_page_mut_for_owner(owner)
     }
 }
 

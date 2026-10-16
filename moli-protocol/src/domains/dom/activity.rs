@@ -71,7 +71,6 @@ impl DomPreparedOutputs {
     ) -> Self {
         let current_attachment = conn
             .runtime_session_owner_slot_for_owner(source_owner)
-            .ok()
             .and_then(|slot| slot.current_renderer_attachment());
         Self {
             batches: batches

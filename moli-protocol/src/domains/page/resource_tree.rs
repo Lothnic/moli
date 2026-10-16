@@ -292,11 +292,7 @@ pub(super) async fn devtools_frame_tree_for_current_owner_async(
             Vec::new(),
         ));
     }
-    let Some(page) = conn
-        .runtime_session_owner_slot_mut_for_owner(owner)
-        .ok()
-        .and_then(|slot| slot.loaded_page_mut())
-    else {
+    let Some(page) = conn.loaded_page_mut_for_owner(owner) else {
         return Ok(frame_tree_payload(
             target_id,
             target_loader_id,
@@ -327,11 +323,7 @@ pub(super) async fn devtools_frame_tree_for_current_owner_async(
             Vec::new(),
         ));
     }
-    let Some(page) = conn
-        .runtime_session_owner_slot_mut_for_owner(owner)
-        .ok()
-        .and_then(|slot| slot.loaded_page_mut())
-    else {
+    let Some(page) = conn.loaded_page_mut_for_owner(owner) else {
         return Ok(frame_tree_payload(
             target_id,
             target_loader_id,
@@ -490,11 +482,7 @@ pub(super) fn start_devtools_get_frame_tree_command(
             &[],
         ));
     }
-    let Some(page) = conn
-        .runtime_session_owner_slot_mut_for_owner(&owner)
-        .ok()
-        .and_then(|slot| slot.loaded_page_mut())
-    else {
+    let Some(page) = conn.loaded_page_mut_for_owner(&owner) else {
         return PageCommandTaskStep::Complete(get_frame_tree_command_output_plan(
             output_kind,
             target_id,

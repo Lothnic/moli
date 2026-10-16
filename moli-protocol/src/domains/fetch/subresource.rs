@@ -134,7 +134,7 @@ async fn prepare_subresource_fetch_pause_sources_async(
             info,
             detached_parser_script_fetch_continuation,
         } = source;
-        let Ok((request_id, network_request_id)) =
+        let Some((request_id, network_request_id)) =
             conn.allocate_pending_subresource_fetch_request_ids_for_owner(owner)
         else {
             return outputs;
@@ -298,7 +298,7 @@ async fn prepare_subresource_fetch_pause_sources_async(
         );
         let mut remaining_sessions = Vec::new();
         for session in request_stage_pause_sessions.into_iter().skip(1) {
-            let Ok((next_request_id, _)) =
+            let Some((next_request_id, _)) =
                 conn.allocate_pending_subresource_fetch_request_ids_for_owner(owner)
             else {
                 return outputs;
@@ -396,7 +396,7 @@ pub(crate) fn emit_subresource_fetch_pause_outputs(
         ) {
             return;
         }
-        if let Ok(runtime_slot) = conn.runtime_session_owner_slot_mut_for_owner(&pending_owner) {
+        if let Some(runtime_slot) = conn.runtime_session_owner_slot_mut_for_owner(&pending_owner) {
             // Chromium publishes Network.requestWillBeSent before the Fetch pause.
             // The renderer's later transport start belongs to the same lifecycle
             // and must not publish a second initial Network event.

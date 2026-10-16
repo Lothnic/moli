@@ -77,7 +77,7 @@ impl PagePreparedOutputs {
             let _ = dialog.finish(false, String::new());
             return Self::default();
         };
-        let Ok(runtime_slot) = conn.runtime_session_owner_slot_for_owner(owner) else {
+        let Some(runtime_slot) = conn.runtime_session_owner_slot_for_owner(owner) else {
             let _ = dialog.finish(false, String::new());
             return Self::default();
         };

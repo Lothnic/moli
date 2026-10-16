@@ -1059,11 +1059,11 @@ fn start_page_input_command_with_access(
         None
     };
     let page = if targets_outgoing_document {
-        conn.loaded_page_mut_for_interruptible_protocol_access_for_owner(command_owner)
+        conn.loaded_page_mut_for_owner(command_owner)
     } else {
         conn.loaded_page_mut_for_protocol_access_for_owner(command_owner)
+            .ok()
     }
-    .ok()
     .ok_or_else(PendingInputCommandStartError::no_document_loaded)?;
     let pending = start(page).map_err(PendingInputCommandStartError::renderer_error)?;
     Ok(Some(PendingInputCommandDispatch {

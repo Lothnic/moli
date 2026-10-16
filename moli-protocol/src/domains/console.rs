@@ -39,7 +39,7 @@ fn console_command_has_renderer_agent(conn: &CdpConnection, cmd: &Cmd<'_>) -> bo
         return true;
     }
     conn.runtime_session_owner_slot(cmd.session_id)
-        .is_ok_and(|slot| slot.has_loaded_page())
+        .is_some_and(|slot| slot.has_loaded_page())
 }
 
 pub(crate) fn apply_console_output_state_for_session(

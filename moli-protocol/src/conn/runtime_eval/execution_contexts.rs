@@ -8,7 +8,7 @@ impl CdpConnection {
         let target_id = self
             .target_owner_identity_for_owner(owner)
             .and_then(|(_, target_id)| target_id);
-        let page = self.runtime_session_owner_page_mut_for_owner(owner)?;
+        let page = self.loaded_page_mut_for_protocol_access_for_owner(owner)?;
         let target_id = target_id.as_deref();
         let devtools_target_id = target_id.map(DevToolsTargetId::from);
         let realms = page
@@ -38,7 +38,7 @@ impl CdpConnection {
         &mut self,
         session_id: Option<&str>,
     ) -> Result<Option<i64>, String> {
-        let page = self.runtime_session_owner_page_mut(session_id)?;
+        let page = self.loaded_page_mut_for_protocol_access(session_id)?;
         page.default_execution_context_id_async()
             .await
             .map_err(|error| format!("runtime default execution context lookup failed: {error}"))
@@ -49,8 +49,7 @@ impl CdpConnection {
         owner: &CommandOwnerScope,
     ) -> Result<Option<i64>, String> {
         let page = self
-            .runtime_session_owner_slot_mut_for_owner(owner)?
-            .loaded_page_mut()
+            .loaded_page_mut_for_owner(owner)
             .ok_or_else(|| "NoDocumentLoaded".to_owned())?;
         page.default_or_initial_execution_context_id_async()
             .await
@@ -66,7 +65,7 @@ impl CdpConnection {
         let owner_target_id = self
             .target_owner_identity_for_owner(owner)
             .and_then(|(_, target_id)| target_id);
-        let page = self.runtime_session_owner_page_mut_for_owner(owner)?;
+        let page = self.loaded_page_mut_for_protocol_access_for_owner(owner)?;
         let result = if let Some(frame_id) = frame_id
             && owner_target_id.as_deref() != Some(frame_id)
         {
@@ -91,7 +90,7 @@ impl CdpConnection {
         session_id: Option<&str>,
         execution_context_id: i64,
     ) -> Result<bool, String> {
-        let page = self.runtime_session_owner_page_mut(session_id)?;
+        let page = self.loaded_page_mut_for_protocol_access(session_id)?;
         page.has_isolated_execution_context_id_async(execution_context_id)
             .await
             .map_err(|error| format!("runtime isolated context lookup failed: {error}"))
@@ -102,7 +101,7 @@ impl CdpConnection {
         session_id: Option<&str>,
         execution_context_id: i64,
     ) -> Result<bool, String> {
-        let page = self.runtime_session_owner_page_mut(session_id)?;
+        let page = self.loaded_page_mut_for_protocol_access(session_id)?;
         page.child_frame_id_for_default_execution_context_id_async(execution_context_id)
             .await
             .map(|frame_id| frame_id.is_some())
@@ -124,7 +123,7 @@ impl CdpConnection {
         owner: &CommandOwnerScope,
         frame_id: &str,
     ) -> Result<Option<i64>, String> {
-        let page = self.runtime_session_owner_page_mut_for_owner(owner)?;
+        let page = self.loaded_page_mut_for_protocol_access_for_owner(owner)?;
         page.child_default_execution_context_id_for_frame_id_async(frame_id)
             .await
             .map_err(|error| format!("runtime child default context lookup failed: {error}"))
@@ -135,7 +134,7 @@ impl CdpConnection {
         owner: &CommandOwnerScope,
         execution_context_id: i64,
     ) -> Result<PendingRuntimeChildDefaultContextLookupDispatch, String> {
-        let page = self.runtime_session_owner_page_mut_for_owner(owner)?;
+        let page = self.loaded_page_mut_for_protocol_access_for_owner(owner)?;
         let pending = page
             .start_child_frame_id_for_default_execution_context_id(execution_context_id)
             .map_err(|error| format!("runtime child default context lookup failed: {error}"))?;
@@ -149,7 +148,7 @@ impl CdpConnection {
         &mut self,
         completed: CompletedRuntimeChildDefaultContextLookupDispatch,
     ) -> Result<bool, String> {
-        let page = self.runtime_session_owner_page_mut_for_owner(&completed.owner)?;
+        let page = self.loaded_page_mut_for_protocol_access_for_owner(&completed.owner)?;
         page.finish_child_frame_id_for_default_execution_context_id(completed.completion)
             .map(|frame_id| frame_id.is_some())
             .map_err(|error| format!("runtime child default context lookup failed: {error}"))
@@ -171,7 +170,7 @@ impl CdpConnection {
         session_id: Option<&str>,
         execution_context_id: i64,
     ) -> Result<Option<i64>, String> {
-        let page = self.runtime_session_owner_page_mut(session_id)?;
+        let page = self.loaded_page_mut_for_protocol_access(session_id)?;
         page.ensure_isolated_worlds_attached_to_inspector_async()
             .await
             .map_err(|error| {
@@ -198,7 +197,7 @@ impl CdpConnection {
         session_id: Option<&str>,
         execution_context_id: i64,
     ) -> Result<Option<i64>, String> {
-        let page = self.runtime_session_owner_page_mut(session_id)?;
+        let page = self.loaded_page_mut_for_protocol_access(session_id)?;
         page.ensure_isolated_worlds_attached_to_inspector_async()
             .await
             .map_err(|error| {
@@ -250,7 +249,7 @@ impl CdpConnection {
         await_promise: bool,
     ) -> Result<Value, String> {
         let payload = {
-            let page = self.runtime_session_owner_page_mut(session_id)?;
+            let page = self.loaded_page_mut_for_protocol_access(session_id)?;
             page.evaluate_runtime_expression_in_execution_context_without_navigation_follow_with_await_async(
                 execution_context_id,
                 expression,
@@ -285,7 +284,7 @@ impl CdpConnection {
         execution_context_name: Option<&str>,
         execution_context_id: Option<i64>,
     ) -> Result<(), String> {
-        let page = self.runtime_session_owner_page_mut(session_id)?;
+        let page = self.loaded_page_mut_for_protocol_access(session_id)?;
         page.install_runtime_binding_async(name, execution_context_name, execution_context_id)
             .await
             .map_err(|error| format!("runtime binding install failed: {error}"))
@@ -298,7 +297,7 @@ impl CdpConnection {
         execution_context_name: Option<&str>,
         execution_context_id: Option<i64>,
     ) -> Result<PendingRuntimeBindingPageCommandDispatch, String> {
-        let page = self.runtime_session_owner_page_mut_for_owner(owner)?;
+        let page = self.loaded_page_mut_for_protocol_access_for_owner(owner)?;
         let pending = page
             .start_install_runtime_binding(name, execution_context_name, execution_context_id)
             .map_err(|error| format!("runtime binding install failed: {error}"))?;
@@ -318,7 +317,7 @@ impl CdpConnection {
             self.target_runtime_bindings_for_current_inspector_owner(owner);
         let inspector_session_id =
             self.target_renderer_runtime_inspector_session_id_for_owner(owner);
-        let page = self.runtime_session_owner_page_mut_for_owner(owner)?;
+        let page = self.loaded_page_mut_for_protocol_access_for_owner(owner)?;
         let pending = page
             .start_set_runtime_binding_state(
                 inspector_session_id,
@@ -342,7 +341,7 @@ impl CdpConnection {
             self.target_runtime_bindings_for_current_inspector_owner(owner);
         let inspector_session_id =
             self.target_renderer_runtime_inspector_session_id_for_owner(owner);
-        let page = self.runtime_session_owner_page_mut_for_owner(owner)?;
+        let page = self.loaded_page_mut_for_protocol_access_for_owner(owner)?;
         page.set_runtime_binding_state_async(
             inspector_session_id,
             &stored_runtime_bindings,
@@ -362,7 +361,7 @@ impl CdpConnection {
         session_id: Option<&str>,
         name: &str,
     ) -> Result<(), String> {
-        let page = self.runtime_session_owner_page_mut(session_id)?;
+        let page = self.loaded_page_mut_for_protocol_access(session_id)?;
         page.remove_runtime_binding_async(name)
             .await
             .map_err(|error| format!("runtime binding removal failed: {error}"))
@@ -373,7 +372,7 @@ impl CdpConnection {
         owner: &CommandOwnerScope,
         name: &str,
     ) -> Result<PendingRuntimeBindingPageCommandDispatch, String> {
-        let page = self.runtime_session_owner_page_mut_for_owner(owner)?;
+        let page = self.loaded_page_mut_for_protocol_access_for_owner(owner)?;
         let pending = page
             .start_remove_runtime_binding(name)
             .map_err(|error| format!("runtime binding removal failed: {error}"))?;
@@ -388,7 +387,7 @@ impl CdpConnection {
         &mut self,
         completed: CompletedRuntimeBindingPageCommandDispatch,
     ) -> Result<(), String> {
-        let page = self.runtime_session_owner_page_mut_for_owner(&completed.owner)?;
+        let page = self.loaded_page_mut_for_protocol_access_for_owner(&completed.owner)?;
         page.finish_unit_runtime_page_command(completed.completion, completed.operation)
             .map_err(|error| format!("{} failed: {error}", completed.operation))
     }
@@ -403,7 +402,7 @@ impl CdpConnection {
         session_id: Option<&str>,
         name: &str,
     ) -> Result<(), String> {
-        let page = self.runtime_session_owner_page_mut(session_id)?;
+        let page = self.loaded_page_mut_for_protocol_access(session_id)?;
         page.remove_default_runtime_binding_async(name)
             .await
             .map_err(|error| format!("runtime default binding removal failed: {error}"))
@@ -415,7 +414,7 @@ impl CdpConnection {
     ) -> Result<bool, String> {
         let inspector_session_id =
             self.target_renderer_runtime_inspector_session_id_for_session(session_id);
-        let page = self.runtime_session_owner_page_mut(session_id)?;
+        let page = self.loaded_page_mut_for_protocol_access(session_id)?;
         page.detach_runtime_inspector_session_async(inspector_session_id.as_deref())
             .await
             .map_err(|error| format!("runtime inspector session detach failed: {error}"))
