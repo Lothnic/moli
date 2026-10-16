@@ -1,6 +1,5 @@
 use super::helpers::{
-    window_child_context_handle, window_current_dispatch_scope, window_hidden_value,
-    window_host_ptr, window_is_closed, window_receiver,
+    window_child_context_handle, window_hidden_value, window_host_ptr, window_receiver,
 };
 use super::*;
 
@@ -12,25 +11,9 @@ pub(crate) fn window_length_getter<'s>(
     let Some(receiver) = window_receiver(scope, &args) else {
         return;
     };
-    if window_is_closed(scope, receiver) {
-        rv.set_uint32(0);
-        return;
+    if let Some(value) = super::values::window_length_value(scope, receiver) {
+        rv.set(value);
     }
-    let Some(host_ptr) = window_host_ptr(scope, receiver) else {
-        rv.set(v8::Number::new(scope, 0.0).into());
-        return;
-    };
-    let runtime = unsafe { &mut *host_ptr };
-    let Some(owner) = window_current_dispatch_scope(scope, receiver, runtime) else {
-        rv.set(v8::Number::new(scope, 0.0).into());
-        return;
-    };
-    let count = if let Some(handle) = owner.child_window() {
-        runtime.child_browsing_context_child_frame_count(handle)
-    } else {
-        runtime.child_browsing_context_count()
-    };
-    rv.set(v8::Number::new(scope, count as f64).into());
 }
 
 pub(in crate::context_bootstrap) fn window_frame_element_getter<'s>(

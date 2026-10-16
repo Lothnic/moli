@@ -208,8 +208,8 @@ mod webrtc;
 mod websocket;
 mod window_accessors;
 pub(crate) use window_accessors::{
-    cached_cross_origin_window_surface, window_closed_getter, window_length_getter,
-    window_opener_getter, window_parent_getter, window_top_getter,
+    window_closed_value, window_frames_value, window_length_value, window_opener_value,
+    window_parent_value, window_self_value, window_top_value,
 };
 mod window_events;
 mod window_lazy_surface;

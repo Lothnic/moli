@@ -2859,6 +2859,11 @@ for (const tag of ['iframe', 'embed', 'object']) {
 }
 
 async fn commit_opaque_child_for_test(vm: &mut StandaloneScriptVmHarness, element_id: &str) -> i64 {
+    let previous: std::collections::HashSet<_> = vm
+        .live_child_default_runtime_realm_inventory()
+        .into_iter()
+        .map(|realm| realm.context_id)
+        .collect();
     let created = vm
         .eval(&format!(
             r#"
@@ -2881,7 +2886,7 @@ async fn commit_opaque_child_for_test(vm: &mut StandaloneScriptVmHarness, elemen
     vm.live_child_default_runtime_realm_inventory()
         .into_iter()
         .map(|realm| realm.context_id)
-        .next()
+        .find(|id| !previous.contains(id))
         .unwrap_or_else(|| panic!("{element_id}: opaque child realm should exist"))
 }
 
@@ -2984,7 +2989,7 @@ async fn borrowed_cross_origin_window_accessors_follow_the_receiver() {
 }
 
 #[tokio::test]
-async fn cross_origin_surface_cache_releases_removed_accessor_realm() {
+async fn native_cross_origin_bindings_release_removed_accessor_realm() {
     let mut vm = new_storage_test_vm("https://cross-origin-surface-cache.test/");
 
     let control_id = commit_opaque_child_for_test(&mut vm, "control-frame").await;
@@ -3012,8 +3017,16 @@ document.getElementById("control-frame").remove();
     let accessor_id = commit_opaque_child_for_test(&mut vm, "accessor-frame").await;
     expose_real_top_window_for_test(&mut vm, accessor_id);
     assert_eq!(
-        vm.eval_in_child_default_context(accessor_id, "String(__realTopWindow.closed)")
-            .expect("cross-origin closed read should evaluate"),
+        vm.eval_in_child_default_context(
+            accessor_id,
+            r#"
+            void __realTopWindow.postMessage;
+            void Object.getOwnPropertyDescriptor(__realTopWindow, 'parent').get;
+            void __realTopWindow.location;
+            String(__realTopWindow.closed)
+        "#
+        )
+        .expect("cross-origin closed read should evaluate"),
         "false"
     );
     let accessor_weak = child_context_weak_for_test(&mut vm, accessor_id);
@@ -3039,7 +3052,7 @@ document.getElementById("accessor-frame").remove();
 }
 
 #[tokio::test]
-async fn cross_origin_window_cache_ignores_author_weak_map_overrides() {
+async fn native_cross_origin_bindings_ignore_author_weak_map_overrides() {
     let mut vm = new_storage_test_vm("https://cross-origin-cache-intrinsics.test/");
     let child_id = commit_opaque_child_for_test(&mut vm, "observer").await;
     expose_real_top_window_for_test(&mut vm, child_id);
@@ -3168,6 +3181,73 @@ async fn cross_origin_ancestor_search_reaches_the_actual_top_window() {
         })()
     "#).expect("bounded cross-origin ancestor search");
     assert_eq!(result, "[true,2,true,true]");
+}
+
+#[tokio::test]
+async fn cross_origin_functions_share_the_observer_realm_and_follow_borrowed_receivers() {
+    let mut vm = new_storage_test_vm("https://cross-origin-native-members.test/");
+    let observer = commit_opaque_child_for_test(&mut vm, "observer").await;
+    commit_opaque_child_for_test(&mut vm, "target").await;
+    let result = vm.eval_in_child_default_context(observer, r#"
+        (() => {
+          const a = top, b = top[1];
+          const descriptor = Object.getOwnPropertyDescriptor(a, 'parent');
+          const locationA = a.location, locationB = b.location;
+          const href = Object.getOwnPropertyDescriptor(locationA, 'href');
+          const names = ['window', 'self', 'location', 'close', 'closed', 'focus', 'blur', 'frames', 'length', 'top', 'opener', 'parent', 'postMessage'];
+          function throwsTypeError(callback) { try { callback(); } catch (e) { return e instanceof TypeError; } return false; }
+          return JSON.stringify({
+            methodIdentity: a.postMessage === b.postMessage && a.postMessage === a.postMessage,
+            getterIdentity: descriptor.get === Object.getOwnPropertyDescriptor(b, 'parent').get,
+            locationIdentity: locationA === a.location && locationB === b.location && locationA !== locationB,
+            replaceIdentity: locationA.replace === locationB.replace,
+            realm: [a.postMessage, descriptor.get, href.set, locationA.replace].every(fn => Object.getPrototypeOf(fn) === Function.prototype),
+            borrowed: descriptor.get.call(window) === parent,
+            invalidReceiver: throwsTypeError(() => descriptor.get.call({})) && throwsTypeError(() => a.postMessage.call({})) && throwsTypeError(() => href.set.call({}, '#bad')),
+            metadata: descriptor.get.name === 'get parent' && descriptor.get.length === 0 && href.set.name === 'set href' && href.set.length === 1 && a.postMessage.length === 1 && !Object.hasOwn(a.postMessage, 'prototype'),
+            descriptors: names.every(name => { const d = Object.getOwnPropertyDescriptor(a, name); return d.configurable && !d.enumerable; }) && href.get === undefined && href.configurable && !href.enumerable,
+            keys: Object.getOwnPropertyNames(locationA).join(',') === 'href,replace,then',
+            fallbacks: a.then === undefined && a[Symbol.hasInstance] === undefined && locationA.then === undefined
+          });
+        })()
+    "#).expect("native cross-origin member projection");
+    assert_eq!(
+        result,
+        r#"{"methodIdentity":true,"getterIdentity":true,"locationIdentity":true,"replaceIdentity":true,"realm":true,"borrowed":true,"invalidReceiver":true,"metadata":true,"descriptors":true,"keys":true,"fallbacks":true}"#
+    );
+}
+
+#[tokio::test]
+async fn cross_origin_named_children_precede_fallbacks_and_refresh_after_removal() {
+    let mut vm = new_storage_test_vm("https://cross-origin-named-fallback.test/");
+    let observer = commit_opaque_child_for_test(&mut vm, "observer").await;
+    vm.eval(
+        r#"
+        const named = document.createElement('iframe');
+        named.id = 'named-then';
+        named.name = 'then';
+        document.body.appendChild(named);
+        void named.contentWindow;
+    "#,
+    )
+    .unwrap();
+    let result = vm.eval_in_child_default_context(observer, r#"
+        (() => {
+          const descriptor = Object.getOwnPropertyDescriptor(top, 'then');
+          const errors = ['unknownProperty', '4294967294'].map(name => {
+            try { Object.getOwnPropertyDescriptor(top, name); return 'accepted'; }
+            catch (error) { return error.name + ':' + (error instanceof DOMException); }
+          });
+          return JSON.stringify([top.then === top[1], descriptor.value === top[1], !descriptor.writable && !descriptor.enumerable && descriptor.configurable, errors]);
+        })()
+    "#).unwrap();
+    assert_eq!(
+        result,
+        r#"[true,true,true,["SecurityError:true","SecurityError:true"]]"#
+    );
+    vm.eval("document.getElementById('named-then').remove()")
+        .unwrap();
+    assert_eq!(vm.eval_in_child_default_context(observer, "top.then === undefined && Object.getOwnPropertyDescriptor(top, 'then').value === undefined").unwrap(), "true");
 }
 
 #[test]
