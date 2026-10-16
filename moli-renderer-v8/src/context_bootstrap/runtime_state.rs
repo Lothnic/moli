@@ -1849,6 +1849,7 @@ pub(crate) fn finish_context_bootstrap(
         ("TextTrackCueList", "TextTrackCueList"),
         ("TrackEvent", "TrackEvent"),
         ("VTTCue", "VTTCue"),
+        ("VTTRegion", "VTTRegion"),
         ("Crypto", "Crypto"),
         ("SubtleCrypto", "SubtleCrypto"),
         ("CryptoKey", "CryptoKey"),

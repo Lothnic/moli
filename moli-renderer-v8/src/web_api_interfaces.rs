@@ -680,6 +680,7 @@ interfaces! {
     VideoDecoder: EventTarget;
     VideoEncoder: EventTarget;
     VTTCue: TextTrackCue;
+    VTTRegion;
     ValidityState;
     ViewTransition;
     ViewTransitionTypeSet;
