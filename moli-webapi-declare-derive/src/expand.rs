@@ -15,6 +15,9 @@ struct DeclaredField {
     attrs: FieldAttrs,
 }
 
+mod cross_origin;
+pub(crate) use cross_origin::expand_webapi_cross_origin;
+
 fn declared_fields(
     data: &Data,
     rename_all: RenameRule,
