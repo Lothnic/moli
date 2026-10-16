@@ -41,7 +41,7 @@ mod taffy_tree;
 mod text;
 mod world;
 
-pub use anonymous_style::{LayoutAnonymousStyleContext, LayoutStyleOrigin};
+pub use anonymous_style::LayoutAnonymousStyleContext;
 pub use builder::build_layout_world;
 pub use capture::{
     FULL_DOCUMENT_CAPTURE_CSS_DIMENSION_LIMIT, PaintCaptureRegion, PaintCaptureRequest,

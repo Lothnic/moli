@@ -666,7 +666,7 @@ where
         display: crate::LayoutDisplay,
     ) -> Result<ResolvedLayoutStyle, LayoutError> {
         Ok(ResolvedLayoutStyle::anonymous_from(
-            context.parent_style,
+            context.parent_style(),
             display,
         ))
     }

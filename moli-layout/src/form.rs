@@ -53,7 +53,8 @@ where
             None
         };
         let editor_style = styles.anonymous_style(
-            LayoutAnonymousStyleContext::new(owner, &world.boxes[control.index()].style),
+            LayoutAnonymousStyleContext::from_parent(&world.boxes[control.index()])
+                .expect("form control has a source owner"),
             LayoutDisplay::Block,
         )?;
         let selection = world.boxes[control.index()].text_selection;
