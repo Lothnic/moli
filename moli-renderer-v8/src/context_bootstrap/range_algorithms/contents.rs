@@ -148,7 +148,18 @@ fn process_contents_from_snapshot<'s>(
         return finish_fragment(scope, range, fragment);
     }
 
-    if snapshot.start_container == snapshot.end_container {
+    // Only CharacterData extraction bypasses the common-ancestor algorithm.
+    // Other nodes must validate the contained list before collapsing.
+    if snapshot.start_container == snapshot.end_container
+        && (!matches!(action, RangeContentsAction::Extract)
+            || matches!(
+                node_type_for_handle(scope, snapshot.start_container)?,
+                NodeType::Text
+                    | NodeType::CDataSection
+                    | NodeType::ProcessingInstruction
+                    | NodeType::Comment
+            ))
+    {
         process_contents_between_offsets(
             scope,
             action,
@@ -175,6 +186,45 @@ fn process_contents_from_snapshot<'s>(
         highest_ancestor_under_common_root(scope, snapshot.start_container, common_root);
     let partial_end =
         highest_ancestor_under_common_root(scope, snapshot.end_container, common_root);
+
+    // Capture the contained children before moving any partial contents. An
+    // iframe unload handler can remove or move either boundary or insert new
+    // siblings, without changing which children the original range contains.
+    let mut process_start = child_of_common_root_before_offset(
+        scope,
+        snapshot.start_container,
+        snapshot.start_offset,
+        common_root,
+    )?;
+    if snapshot.start_container != common_root {
+        process_start = process_start.and_then(|node| next_sibling_handle(scope, node));
+    }
+    let process_end = child_of_common_root_before_offset(
+        scope,
+        snapshot.end_container,
+        snapshot.end_offset,
+        common_root,
+    )?;
+    let contained_children = match process_start {
+        Some(start) => collect_following_siblings_until(scope, start, process_end),
+        None => Vec::new(),
+    };
+    if action.produces_fragment() && contains_document_type(scope, &contained_children) {
+        throw_contents_hierarchy_request_error(scope);
+        return None;
+    }
+    let left_ancestors = partial_contents_ancestor_path(
+        scope,
+        snapshot.start_container,
+        ContentsProcessDirection::Forward,
+        common_root,
+    );
+    let right_ancestors = partial_contents_ancestor_path(
+        scope,
+        snapshot.end_container,
+        ContentsProcessDirection::Backward,
+        common_root,
+    );
     let mutation_collapse_target = if action.mutates_range_contents() {
         Some(contents_mutation_collapse_target(
             scope,
@@ -185,6 +235,13 @@ fn process_contents_from_snapshot<'s>(
     } else {
         None
     };
+    // Extraction collapses the live range before any removals. Subsequent
+    // mutations, including reentrant ones, update that boundary normally.
+    if matches!(action, RangeContentsAction::Extract)
+        && let Some((container, offset)) = mutation_collapse_target
+    {
+        collapse_range_to_handle(scope, range, container, offset, Some(&snapshot))?;
+    }
 
     let left_contents = if snapshot.start_container == common_root {
         None
@@ -201,10 +258,9 @@ fn process_contents_from_snapshot<'s>(
         process_ancestors_and_their_siblings(
             scope,
             action,
-            snapshot.start_container,
+            left_ancestors,
             ContentsProcessDirection::Forward,
             contents,
-            common_root,
         )?
     };
 
@@ -222,30 +278,13 @@ fn process_contents_from_snapshot<'s>(
         process_ancestors_and_their_siblings(
             scope,
             action,
-            snapshot.end_container,
+            right_ancestors,
             ContentsProcessDirection::Backward,
             contents,
-            common_root,
         )?
     };
 
-    let mut process_start = child_of_common_root_before_offset(
-        scope,
-        snapshot.start_container,
-        snapshot.start_offset,
-        common_root,
-    )?;
-    if snapshot.start_container != common_root {
-        process_start = process_start.and_then(|node| next_sibling_handle(scope, node));
-    }
-    let process_end = child_of_common_root_before_offset(
-        scope,
-        snapshot.end_container,
-        snapshot.end_offset,
-        common_root,
-    )?;
-
-    if action.mutates_range_contents() {
+    if matches!(action, RangeContentsAction::Delete) {
         collapse_range_after_contents_mutation(
             scope,
             range,
@@ -260,16 +299,15 @@ fn process_contents_from_snapshot<'s>(
         let _ = append_child_internal_handle(scope, fragment, left_contents);
     }
 
-    if let Some(process_start) = process_start {
-        let nodes = collect_following_siblings_until(scope, process_start, process_end);
-        process_nodes(scope, action, nodes, common_root, fragment)?;
-    }
+    process_nodes(scope, action, contained_children, common_root, fragment)?;
 
     if let (Some(fragment), Some(right_contents)) = (fragment, right_contents) {
         let _ = append_child_internal_handle(scope, fragment, right_contents);
     }
 
-    if let Some((container, offset)) = mutation_collapse_target {
+    if matches!(action, RangeContentsAction::Delete)
+        && let Some((container, offset)) = mutation_collapse_target
+    {
         collapse_range_to_handle(scope, range, container, offset, Some(&snapshot))?;
     }
 
@@ -371,11 +409,6 @@ fn process_nodes(
     old_container: DomHandle,
     new_container: Option<DomHandle>,
 ) -> Option<()> {
-    if action.produces_fragment() && contains_document_type(scope, &nodes) {
-        throw_contents_hierarchy_request_error(scope);
-        return None;
-    }
-
     match action {
         RangeContentsAction::Clone => {
             let new_container = new_container?;
@@ -407,27 +440,25 @@ enum ContentsProcessDirection {
     Backward,
 }
 
+struct PartialContentsAncestor {
+    ancestor: DomHandle,
+    siblings: Vec<DomHandle>,
+}
+
 fn process_ancestors_and_their_siblings(
     scope: &mut v8::PinScope<'_, '_>,
     action: RangeContentsAction,
-    container: DomHandle,
+    ancestors: Vec<PartialContentsAncestor>,
     direction: ContentsProcessDirection,
     mut cloned_container: Option<DomHandle>,
-    common_root: DomHandle,
 ) -> Option<Option<DomHandle>> {
-    let ancestors = ancestor_chain_below_common_root(scope, container, common_root)?;
     let mut cloned_ancestors = Vec::with_capacity(ancestors.len());
     if action.produces_fragment() {
         for ancestor in ancestors.iter().rev() {
-            cloned_ancestors.push(clone_node_internal_handle(scope, *ancestor, false)?);
+            cloned_ancestors.push(clone_node_internal_handle(scope, ancestor.ancestor, false)?);
         }
         cloned_ancestors.reverse();
     }
-
-    let mut first_sibling_to_process = match direction {
-        ContentsProcessDirection::Forward => next_sibling_handle(scope, container),
-        ContentsProcessDirection::Backward => previous_sibling_handle(scope, container),
-    };
 
     for (index, ancestor) in ancestors.into_iter().enumerate() {
         if action.produces_fragment() {
@@ -441,15 +472,10 @@ fn process_ancestors_and_their_siblings(
             scope,
             action,
             cloned_container,
-            ancestor,
-            first_sibling_to_process,
+            ancestor.ancestor,
+            ancestor.siblings,
             direction,
         )?;
-
-        first_sibling_to_process = match direction {
-            ContentsProcessDirection::Forward => next_sibling_handle(scope, ancestor),
-            ContentsProcessDirection::Backward => previous_sibling_handle(scope, ancestor),
-        };
     }
 
     Some(cloned_container)
@@ -460,15 +486,10 @@ fn process_siblings(
     action: RangeContentsAction,
     container: Option<DomHandle>,
     old_container: DomHandle,
-    first_sibling: Option<DomHandle>,
+    siblings: Vec<DomHandle>,
     direction: ContentsProcessDirection,
 ) -> Option<()> {
-    let mut cursor = first_sibling;
-    while let Some(sibling) = cursor {
-        cursor = match direction {
-            ContentsProcessDirection::Forward => next_sibling_handle(scope, sibling),
-            ContentsProcessDirection::Backward => previous_sibling_handle(scope, sibling),
-        };
+    for sibling in siblings {
         match action {
             RangeContentsAction::Clone => {
                 let container = container?;
@@ -536,21 +557,40 @@ fn throw_surround_invalid_node_type_error(scope: &mut v8::PinScope<'_, '_>) {
     );
 }
 
-fn ancestor_chain_below_common_root(
+fn partial_contents_ancestor_path(
     scope: &mut v8::PinScope<'_, '_>,
     container: DomHandle,
+    direction: ContentsProcessDirection,
     common_root: DomHandle,
-) -> Option<Vec<DomHandle>> {
+) -> Vec<PartialContentsAncestor> {
     let mut ancestors = Vec::new();
+    if container == common_root {
+        return ancestors;
+    }
     let mut current = container;
     while let Some(parent) = parent_handle(scope, current) {
         if parent == common_root {
             break;
         }
-        ancestors.push(parent);
+        let mut siblings = Vec::new();
+        let mut sibling = match direction {
+            ContentsProcessDirection::Forward => next_sibling_handle(scope, current),
+            ContentsProcessDirection::Backward => previous_sibling_handle(scope, current),
+        };
+        while let Some(node) = sibling {
+            siblings.push(node);
+            sibling = match direction {
+                ContentsProcessDirection::Forward => next_sibling_handle(scope, node),
+                ContentsProcessDirection::Backward => previous_sibling_handle(scope, node),
+            };
+        }
+        ancestors.push(PartialContentsAncestor {
+            ancestor: parent,
+            siblings,
+        });
         current = parent;
     }
-    Some(ancestors)
+    ancestors
 }
 
 fn child_of_common_root_before_offset(
