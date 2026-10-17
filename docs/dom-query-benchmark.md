@@ -70,6 +70,12 @@ concurrent builds or benchmark runs. The harness validates match counts, stable
 checksums, and finite nonempty rectangles. It does not assert cross-engine pixel
 equivalence or enforce machine-dependent timing thresholds.
 
+Build different checkouts with separate `CARGO_TARGET_DIR` directories. When
+sharing a target directory, clean the workspace's release artifacts before
+switching sources. Record the executable SHA-256 and verify that CDP
+`Browser.getVersion.revision` matches the expected Git commit before timing;
+a revision label alone does not verify which executable actually ran.
+
 For follow-up optimization, retain separate measurements for first scans and
 repeated reads. Rect memoization can improve the latter without reducing the
 source lookup work of the former. Any retained geometry lookup must follow
@@ -92,3 +98,10 @@ The index is admitted only when its conservative allocation estimate fits beside
 the canonical tree in the retention budget. It is replaced with the snapshot;
 live DOM/style mutations do not refresh frozen geometry. Budget fallback keeps
 the original scan/batch behavior. No subtree text strings are cached.
+
+A [source-verified release comparison](benchmarks/dom-queries-2026-10-17/README.md)
+records all samples at 100, 500, and 2,000 rows. At 4,000 matches, repeated
+geometry improved from 78.9 to 9.8 ms and repeated combined observation from
+169.0 to 21.4 ms. The first single-element read after a screenshot increased
+from 0.3 to 3.2 ms because it initializes the source index; cold layout and
+protocol overhead remain separate limits.
