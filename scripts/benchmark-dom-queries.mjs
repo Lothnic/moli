@@ -70,12 +70,15 @@ const fixture = '<!doctype html><html><head><meta charset="utf-8">' +
 function measureReads({ name, rows }) {
   const elements = Array.from(document.querySelectorAll('.c, button'));
   if (elements.length !== rows * 2) throw new Error('Unexpected fixture size');
+  // Separate initial layout from the first full scan of distinct elements.
+  if (name === 'rects-warm-layout') elements[0].getBoundingClientRect();
   function read() {
     if (name === 'inner-text') return document.body.innerText.length;
     if (name === 'element-inner-text')
       return elements.slice(0, 160).reduce((sum, el) => sum + el.innerText.length, 0);
     let checksum = name === 'observe' ? document.body.innerText.length : 0;
-    for (const element of elements) {
+    const targets = name === 'single-rect-after-screenshot' ? elements.slice(0, 1) : elements;
+    for (const element of targets) {
       const rect = element.getBoundingClientRect();
       if (![rect.x, rect.y, rect.width, rect.height].every(Number.isFinite) ||
           rect.width <= 0 || rect.height <= 0)
@@ -103,7 +106,8 @@ function summarizeElements(elements) {
   return { workMs: performance.now() - started, checksum, elements: elements.length };
 }
 
-const cases = ['rects', 'inner-text', 'element-inner-text', 'observe',
+const cases = ['rects', 'rects-warm-layout', 'rects-after-screenshot',
+  'single-rect-after-screenshot', 'inner-text', 'element-inner-text', 'observe',
   'evaluate', 'evaluate-all'];
 const samples = [];
 const server = createServer((request, response) => {
@@ -151,6 +155,8 @@ try {
         const navigationStart = performance.now();
         await page.goto(url, { waitUntil: 'domcontentloaded' });
         const navigationMs = performance.now() - navigationStart;
+        // Refresh layout through an observable paint, outside the query timer.
+        if (name.endsWith('-after-screenshot')) await page.screenshot();
         let result;
         if (name === 'evaluate' || name === 'evaluate-all') {
           result = {};

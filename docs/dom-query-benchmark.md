@@ -37,6 +37,13 @@ The cases cover:
 
 - `rects`: one `getBoundingClientRect()` per selected element, then the same loop
   again without mutations. This distinguishes first scans from repeated reads.
+- `rects-warm-layout`: the same loops after one untimed geometry read initializes
+  layout and any query index. The first loop still reads the remaining selected
+  elements for the first time.
+- `rects-after-screenshot`: the full loops after an untimed screenshot refreshes
+  layout. This includes any source-index setup needed by the first geometry read.
+- `single-rect-after-screenshot`: one selected element read twice after the same
+  screenshot refresh, to expose lookup setup cost for a one-element workload.
 - `inner-text`: two reads of `document.body.innerText`.
 - `element-inner-text`: two text scans of the first 160 selected elements.
 - `observe`: body text plus geometry and rendered text for each selected element.
@@ -68,3 +75,20 @@ repeated reads. Rect memoization can improve the latter without reducing the
 source lookup work of the former. Any retained geometry lookup must follow
 published snapshot ownership, including nested documents and snapshot replacement.
 Text caches must additionally track the live DOM/style inputs used by `innerText`.
+
+In a local CDP trace with Playwright 1.64.1, `locator.evaluateAll` used one
+temporary array handle for both 40 and 4,000 matches. After utility initialization,
+each repeated call sent two `Runtime.callFunctionOn` commands and one
+`Runtime.releaseObject`; direct `evaluate` sent one `Runtime.callFunctionOn`.
+The first locator call also initialized the injected and utility scripts.
+This rules out one CDP handle round trip per match in that workload. Selector
+work, local DOM wrapper creation, and utility-script overhead still require
+separate profiling; this patch does not change the protocol path.
+
+The geometry optimization retains a lazy provenance index with the single
+published snapshot, including its member documents. It accelerates individual
+rect/quad/range and element-metric reads, and rendered-text fragment membership.
+The index is admitted only when its conservative allocation estimate fits beside
+the canonical tree in the retention budget. It is replaced with the snapshot;
+live DOM/style mutations do not refresh frozen geometry. Budget fallback keeps
+the original scan/batch behavior. No subtree text strings are cached.
