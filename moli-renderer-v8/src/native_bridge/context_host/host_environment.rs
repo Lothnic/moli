@@ -2131,6 +2131,21 @@ impl JsContextHost {
         changed
     }
 
+    pub(crate) fn set_input_files(
+        &mut self,
+        handle: DomHandle,
+        files: Vec<crate::dom::native::SelectedFile>,
+    ) -> bool {
+        let old_state = self.retained_current_element_state(handle);
+        let container_old_states = self.retained_old_states_for_validity_container_change(handle);
+        let changed =
+            unsafe { DocumentRuntime::set_input_files(&mut *self.runtime, handle, files) };
+        if changed {
+            self.note_input_value_state_style_activity(handle, old_state, &container_old_states);
+        }
+        changed
+    }
+
     pub(crate) fn set_input_value(&mut self, handle: DomHandle, value: &str) -> bool {
         self.clear_text_control_change_pending(handle);
         let old_state = self.retained_current_element_state(handle);
@@ -2337,6 +2352,15 @@ impl JsContextHost {
         if style_mutation_effects_affect_layout_metric(effects) {
             self.clear_layout_rect_cache();
         }
+        let changed_iframe_attributes = effects.iter().filter_map(|effect| {
+            let StyleMutationEffect::Attribute { element, name, .. } = effect else {
+                return None;
+            };
+            (StyleAttributeImpact::for_attribute_name(name).affects_layout_metric()
+                && self.dom_host().is_html_element_named(*element, "iframe"))
+            .then_some(*element)
+        });
+        self.invalidate_published_frame_viewports(changed_iframe_attributes);
         let validity_containers = self.validity_containers_for_child_list_mutations(effects);
         let dom_host = self.dom_host() as *const _;
         let emulated_media = self.emulated_media().clone();

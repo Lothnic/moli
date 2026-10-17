@@ -101,6 +101,7 @@ where
     }
 
     fn build(mut self) -> Result<LayoutWorld<S::NodeId>, LayoutError> {
+        let profile_started = moli_trace::cpu_profile_enabled().then(std::time::Instant::now);
         let source_root = self.source.root();
         let source_label = self.source.label(source_root);
         if let Some(parent) = self.source.flat_parent(source_root) {
@@ -185,9 +186,28 @@ where
             )?;
         }
 
+        let construction_finished = profile_started.map(|_| std::time::Instant::now());
+        let allocated_box_count = world.boxes.len();
         world.compact_reachable();
         self.finalize_viewport_scroll_policy(&mut world);
+        let finalization_finished = profile_started.map(|_| std::time::Instant::now());
         world.validate_invariants()?;
+        if let (Some(started), Some(constructed), Some(finalized)) = (
+            profile_started,
+            construction_finished,
+            finalization_finished,
+        ) {
+            tracing::info!(
+                target: "moli_cpu_profile",
+                stage = "layout_box_construction",
+                root = ?source_root,
+                construction_us = constructed.duration_since(started).as_micros(),
+                finalization_us = finalized.duration_since(constructed).as_micros(),
+                validation_us = finalized.elapsed().as_micros(),
+                allocated_box_count,
+                compacted_box_count = world.boxes.len(),
+            );
+        }
         world.css_image_references = self.css_image_references;
         Ok(world)
     }

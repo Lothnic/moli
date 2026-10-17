@@ -2411,10 +2411,10 @@ pub(in crate::worker) fn worker_fetch_callback<'s>(
     rv.set(promise.into());
 }
 
-pub(in crate::worker) fn reject_worker_fetches_for_signal(
-    scope: &mut v8::PinScope<'_, '_>,
+pub(in crate::worker) fn reject_worker_fetches_for_signal<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
     signal_id: u32,
-    reason: v8::Local<'_, v8::Value>,
+    reason: v8::Local<'s, v8::Value>,
 ) {
     let Some(state) = get_worker_state(scope) else {
         return;
@@ -2487,12 +2487,11 @@ pub(in crate::worker) fn reject_worker_fetches_for_signal(
             );
         }
         if let Some(body_source_id) = body_source_id {
-            let abort_reason = worker_abort_error_value(scope);
             error_pending_network_body_stream_with_reason(
                 scope,
                 body_source_id,
                 ABORTED_ERROR_TEXT.to_owned(),
-                abort_reason,
+                reason,
             );
         } else {
             let resolver = v8::Local::new(scope, &resolver);

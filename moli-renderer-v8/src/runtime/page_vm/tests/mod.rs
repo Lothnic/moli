@@ -98,6 +98,7 @@ use crate::native_bridge::PendingWindowMessageEndpoint;
 
 mod accessibility;
 mod async_subresource_completion;
+mod blob_slice;
 mod broadcast_channel_delivery;
 mod child_classic_source_load_completion;
 mod child_document_completion;
@@ -2258,3 +2259,6 @@ pub(super) async fn drain_page_work_until_no_pending_subresources(
     )
 }
 mod extracted;
+
+mod blob_constructor;
+mod blob_text;

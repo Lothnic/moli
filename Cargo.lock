@@ -2993,12 +2993,14 @@ dependencies = [
  "kurbo",
  "moli-image",
  "moli-system-fonts",
+ "moli-trace",
  "parley",
  "read-fonts",
  "stylo",
  "stylo_taffy",
  "taffy",
  "thiserror",
+ "tracing",
  "wuff",
 ]
 

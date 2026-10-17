@@ -59,10 +59,11 @@ pub fn clamp_blob_long_long(value: f64) -> i64 {
 }
 
 pub fn blob_slice_relative_index(index: i64, size: usize) -> usize {
+    let magnitude = usize::try_from(index.unsigned_abs()).unwrap_or(usize::MAX);
     if index < 0 {
-        size.saturating_sub((-index) as usize)
+        size.saturating_sub(magnitude)
     } else {
-        (index as usize).min(size)
+        magnitude.min(size)
     }
 }
 
@@ -206,6 +207,35 @@ mod tests {
         assert_eq!(blob_slice_relative_index(20, 10), 10);
         assert_eq!(blob_slice_relative_index(-3, 10), 7);
         assert_eq!(blob_slice_relative_index(-20, 10), 0);
+    }
+
+    #[test]
+    fn blob_slice_relative_index_handles_signed_extremes_for_all_sizes() {
+        for size in [0, 1, 4, usize::MAX / 2 + 1, usize::MAX] {
+            for index in [
+                i64::MIN,
+                i64::MIN + 1,
+                -4,
+                -1,
+                0,
+                1,
+                4,
+                i64::MAX - 1,
+                i64::MAX,
+            ] {
+                let relative = if index < 0 {
+                    size as i128 + i128::from(index)
+                } else {
+                    i128::from(index)
+                };
+                let expected = relative.clamp(0, size as i128) as usize;
+                assert_eq!(
+                    blob_slice_relative_index(index, size),
+                    expected,
+                    "index={index}, size={size}"
+                );
+            }
+        }
     }
 
     #[test]
